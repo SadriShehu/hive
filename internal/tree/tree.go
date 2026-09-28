@@ -64,7 +64,7 @@ func reaches(nodes map[string]*Node, n *Node, id string) bool {
 }
 
 func summarize(n *Node) {
-	n.Last = max(n.UpdatedAt, n.StatusAt)
+	n.Last = n.UpdatedAt
 	n.Live = n.Session.Live()
 	for _, c := range n.Children {
 		summarize(c)

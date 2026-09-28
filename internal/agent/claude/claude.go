@@ -15,17 +15,15 @@ import (
 
 const name = "claude"
 
-// Adapter is the Claude Code adapter.
+// Adapter is the Claude Code adapter. The zero value uses the user's
+// Claude Code files; the fields point it elsewhere.
 type Adapter struct {
-	settings string // settings.json path; empty means the user's
+	SettingsPath string // settings.json that install edits
+	ProjectsDir  string // where transcripts live
 }
 
 // New returns the adapter for the user's Claude Code configuration.
 func New() *Adapter { return &Adapter{} }
-
-// NewWithSettings returns an adapter that installs into the given
-// settings.json instead of the user's.
-func NewWithSettings(path string) *Adapter { return &Adapter{settings: path} }
 
 // Spec describes Claude Code.
 func (a *Adapter) Spec() agent.Spec {
@@ -36,22 +34,32 @@ func (a *Adapter) Spec() agent.Spec {
 		Process:   []string{"claude"},
 		Headless:  []string{"-p", "--print"},
 		ParentEnv: "CLAUDE_CODE_SESSION_ID",
+
+		TitleFlags:   []string{"-n", "--name"},
+		SessionFlags: []string{"-r", "--resume", "--session-id"},
 	}
 }
 
-// SettingsPath is the user's Claude Code settings file.
-func SettingsPath() string {
+// configDir is the user's Claude Code directory.
+func configDir() string {
 	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return filepath.Join(d, "settings.json")
+		return d
 	}
-	return filepath.Join(paths.Home(), ".claude", "settings.json")
+	return filepath.Join(paths.Home(), ".claude")
 }
 
 func (a *Adapter) settingsPath() string {
-	if a.settings != "" {
-		return a.settings
+	if a.SettingsPath != "" {
+		return a.SettingsPath
 	}
-	return SettingsPath()
+	return filepath.Join(configDir(), "settings.json")
+}
+
+func (a *Adapter) projectsDir() string {
+	if a.ProjectsDir != "" {
+		return a.ProjectsDir
+	}
+	return filepath.Join(configDir(), "projects")
 }
 
 // hookInput is the JSON Claude Code pipes to every hook command.
@@ -77,11 +85,14 @@ func (a *Adapter) ParseHook(stdin []byte, _ []string, getenv func(string) string
 	if in.SessionID == "" {
 		return nil, errors.New("claude hook payload has no session_id")
 	}
-	ev := agent.Event{Tool: name, SessionID: in.SessionID, Cwd: in.Cwd, Transcript: in.TranscriptPath}
+	ev := agent.Event{Tool: name, SessionID: in.SessionID, Transcript: in.TranscriptPath}
 	switch in.HookEventName {
 	case "SessionStart":
 		ev.Type = agent.Start
 		ev.EnvFile = getenv("CLAUDE_ENV_FILE")
+		// Later events report where the shell tool has cd'ed to; the folder
+		// the session started in is its project, and resuming needs it.
+		ev.Cwd = in.Cwd
 	case "UserPromptSubmit":
 		ev.Type = agent.Prompt
 		ev.Prompt = in.Prompt
@@ -94,6 +105,9 @@ func (a *Adapter) ParseHook(stdin []byte, _ []string, getenv func(string) string
 	case "SessionEnd":
 		ev.Type = agent.End
 	case "SubagentStart", "SubagentStop":
+		if in.HookEventName == "SubagentStart" && in.AgentType == "" {
+			return nil, nil // Claude's own helpers, with no task and no transcript
+		}
 		return subagentEvents(in), nil
 	default:
 		ev.Type = agent.Update

@@ -16,7 +16,7 @@ func Execute() {
 			"agents it spawns, and shows them as one tree.",
 		SilenceUsage: true,
 	}
-	root.AddCommand(newHookCmd(), newInstallCmd(), newUninstallCmd(), newLsCmd())
+	root.AddCommand(newHookCmd(), newInstallCmd(), newUninstallCmd(), newLsCmd(), newSyncCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

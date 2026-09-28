@@ -9,8 +9,8 @@ Design doc: https://claude.ai/code/artifact/5df7a9f0-da62-4b84-a527-eec21528bf63
 
 ## Status
 
-Phase 1 of 5 (tracking) is done: live sessions and spawn links show in `hive ls`.
-History import, the TUI and the agent-facing commands come next.
+Phases 1–2 of 5 are done: live tracking, and every past session imported and linked
+to the session that spawned it. The TUI and the agent-facing commands come next.
 
 ## Install
 
@@ -32,6 +32,7 @@ hive ls           # trees with anything running or active in the last 24h
 hive ls --all     # every session ever recorded
 hive ls --live    # only running sessions and their ancestors
 hive ls --json    # flat list in tree order, for scripts and agents
+hive sync         # import history now (hive ls does this on its own); --full re-reads all
 ```
 
 ```
@@ -54,6 +55,22 @@ the adapters. When a session first reports in, its parent is the first of:
 3. the nearest ancestor process that is a live session;
 4. `HIVE_PARENT`, which every connected agent exports to the commands it runs;
 5. an adapter's own variable, such as `CLAUDE_CODE_SESSION_ID`.
+
+### Sessions from before hive
+
+`hive sync` (run by `hive ls`) imports each tool's own history: Claude transcripts
+(`~/.claude/projects`, titles included) and opencode's database, read-only. Only what
+changed since the last sync is read, so it takes milliseconds after the first run.
+
+Past spawns are found in the shell commands every session ran, in any direction:
+`opencode run --title X` inside Claude, `claude -p` inside opencode, and so on. A
+command is matched to the session it started by title first (loop titles like
+`review-p$i` match every run), then by start time and folder; a command continuing a
+session by ID (`opencode run -s ses_…`) only links sessions nothing else claims.
+
+A running agent that never reported in (started before `hive install`) is matched to
+its transcript when that is unambiguous: it is the only such process of its tool in
+its folder, and exactly one session there was active since it started.
 
 ## Any tool can report
 

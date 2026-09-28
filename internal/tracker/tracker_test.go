@@ -229,6 +229,14 @@ func TestLaunchRecordNamesTheParent(t *testing.T) {
 	}
 }
 
+func TestEndOfUnknownSessionIsIgnored(t *testing.T) {
+	tr, _ := newWorld(t)
+	ingest(t, tr, agent.Event{Tool: "claude", SessionID: "A/helper", Type: agent.End, Internal: true, ParentID: "claude:A"})
+	if _, ok, _ := tr.Store.Get("claude:A/helper"); ok {
+		t.Fatal("an end event created a session")
+	}
+}
+
 func TestParentCyclesAreRejected(t *testing.T) {
 	tr, _ := newWorld(t)
 	ingest(t, tr, agent.Event{Tool: "opencode", SessionID: "X", Type: agent.Update, ParentID: "opencode:Y", Internal: true})
@@ -266,6 +274,55 @@ func TestRefreshFindsUntrackedAgents(t *testing.T) {
 	// ...but agents running inside a tracked agent are found, with their parent.
 	if b := got["opencode:pid-201"]; b.ParentID != "claude:A" || b.Kind != store.KindHeadless {
 		t.Fatalf("untracked opencode run = %+v, want headless child of claude:A", b)
+	}
+}
+
+func TestRefreshClaimsOrphansFromHistory(t *testing.T) {
+	tr, w := newWorld(t)
+	// Claude A (pid 100, cwd /work) started at 500, before hive was installed;
+	// its transcript was imported and it has been active since.
+	p := w.procs[100]
+	p.Started = 500
+	w.procs[100] = p
+	for _, s := range []store.Session{
+		{ID: "claude:A", Tool: "claude", NativeID: "A", Cwd: "/work", CreatedAt: 400, UpdatedAt: 900},
+		{ID: "claude:old", Tool: "claude", NativeID: "old", Cwd: "/work", CreatedAt: 100, UpdatedAt: 200},
+		{ID: "claude:elsewhere", Tool: "claude", NativeID: "elsewhere", Cwd: "/other", CreatedAt: 600, UpdatedAt: 950},
+	} {
+		s.Status = store.StatusExited
+		if err := tr.Store.Upsert(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessions, err := tr.Refresh()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := get(t, tr, "claude:A")
+	if a.PID != 100 || a.Pane != "%1" || !a.Live() {
+		t.Fatalf("A = %+v, want claimed by pid 100 in %%1", a)
+	}
+	for _, s := range sessions {
+		if s.ID == "claude:pid-100" {
+			t.Fatal("claimed process still reported as untracked")
+		}
+	}
+
+	// Two sessions active since the process started: ambiguous, no claim.
+	tr2, w2 := newWorld(t)
+	p = w2.procs[100]
+	p.Started = 500
+	w2.procs[100] = p
+	for _, id := range []string{"x", "y"} {
+		tr2.Store.Upsert(store.Session{ID: "claude:" + id, Tool: "claude", NativeID: id, Cwd: "/work", CreatedAt: 600, UpdatedAt: 900})
+	}
+	if _, err := tr2.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"claude:x", "claude:y"} {
+		if s := get(t, tr2, id); s.PID != 0 {
+			t.Errorf("%s claimed despite ambiguity: %+v", id, s)
+		}
 	}
 }
 

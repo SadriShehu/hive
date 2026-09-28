@@ -22,7 +22,7 @@ import (
 const recentWindow = 24 * time.Hour
 
 func newLsCmd() *cobra.Command {
-	var all, live, asJSON bool
+	var all, live, asJSON, noSync bool
 	cmd := &cobra.Command{
 		Use:   "ls",
 		Short: "Print the session tree",
@@ -35,7 +35,11 @@ func newLsCmd() *cobra.Command {
 				return err
 			}
 			defer st.Close()
-			sessions, err := tracker.New(st, adapters.All(), &tracker.System{}).Refresh()
+			tr := tracker.New(st, adapters.All(), &tracker.System{})
+			if !noSync {
+				syncQuietly(cmd.Context(), tr)
+			}
+			sessions, err := tr.Refresh()
 			if err != nil {
 				return err
 			}
@@ -64,6 +68,7 @@ func newLsCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "every session ever recorded")
 	cmd.Flags().BoolVarP(&live, "live", "l", false, "only running sessions and their ancestors")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: a flat list in tree order, with depth")
+	cmd.Flags().BoolVar(&noSync, "no-sync", false, "skip importing history first; show only what hive already has")
 	return cmd
 }
 
@@ -114,7 +119,7 @@ func printTree(roots []*tree.Node, total int) {
 			{truncate(title(s), 48), dim},
 			{kindTag(s), "2"},
 			{statusWord(s), glyphStyle},
-			{age(now, max(s.UpdatedAt, s.StatusAt)), "2"},
+			{age(now, s.UpdatedAt), "2"},
 			{shortPath(s.Cwd), "2"},
 			{shortID(s), "2"},
 		})

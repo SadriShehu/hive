@@ -103,7 +103,7 @@ func (a *Adapter) Install(hiveBin string) (string, error) {
 	if updated > 0 {
 		msg = fmt.Sprintf("added %d and updated %d hooks in %s", added, updated, path)
 	}
-	return msg + " (running sessions pick them up after a restart)", nil
+	return msg + " (new sessions report right away; running ones once Claude reloads its settings)", nil
 }
 
 // Uninstall removes hive's hook commands, and any hook entry or event list

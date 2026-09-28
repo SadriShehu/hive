@@ -74,6 +74,8 @@ type Tracker struct {
 
 	// Logf, when set, receives one line per decision, for debugging links.
 	Logf func(format string, args ...any)
+
+	cwds map[string]string // process folders, by pid@start
 }
 
 // New returns a tracker.
@@ -119,6 +121,9 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 	cur, exists, err := t.Store.Get(id)
 	if err != nil {
 		return err
+	}
+	if !exists && ev.Type == agent.End {
+		return nil // never saw it start: nothing to end
 	}
 
 	s := store.Session{
@@ -425,12 +430,21 @@ func (t *Tracker) Refresh() ([]store.Session, error) {
 		}
 	}
 
+	claimed, err := t.claim(sessions)
+	if err != nil {
+		return nil, err
+	}
+	if claimed {
+		if sessions, err = t.Store.All(); err != nil {
+			return nil, err
+		}
+	}
 	return append(sessions, t.untracked(sessions)...), nil
 }
 
-// untracked finds agent processes that no session claims: agents started
+// orphans returns agent processes that no session claims: agents started
 // before hive was installed, or tools without hooks.
-func (t *Tracker) untracked(sessions []store.Session) []store.Session {
+func (t *Tracker) orphans(sessions []store.Session) []proc.Proc {
 	claimed := map[int]bool{}
 	for _, s := range sessions {
 		if s.PID > 0 {
@@ -438,7 +452,7 @@ func (t *Tracker) untracked(sessions []store.Session) []store.Session {
 		}
 	}
 	procs := t.World.Procs()
-	var out []store.Session
+	var out []proc.Proc
 	for pid, p := range procs {
 		spec, ok := t.toolOf(p)
 		if !ok || claimed[pid] {
@@ -447,14 +461,85 @@ func (t *Tracker) untracked(sessions []store.Session) []store.Session {
 		if parent, ok := procs[p.PPID]; ok && spec.Matches(parent) {
 			continue // the tool's own worker process
 		}
-		pane, nested := t.paneOf(pid)
-		kind := store.KindInteractive
-		if nested || spec.IsHeadless(p.Argv()) {
-			kind = store.KindHeadless
+		out = append(out, p)
+	}
+	return out
+}
+
+// claim matches orphan processes to the sessions they run, when the tool's
+// own history makes that unambiguous: the process is the only orphan of its
+// tool in its folder, and exactly one session of that tool in that folder
+// was active since the process started.
+func (t *Tracker) claim(sessions []store.Session) (bool, error) {
+	type place struct{ tool, cwd string }
+	groups := map[place][]proc.Proc{}
+	for _, p := range t.orphans(sessions) {
+		spec, _ := t.toolOf(p)
+		if cwd := t.cwd(p); cwd != "" && p.Started > 0 {
+			groups[place{spec.Name, cwd}] = append(groups[place{spec.Name, cwd}], p)
 		}
-		native := "pid-" + strconv.Itoa(pid)
+	}
+	claimed := false
+	for at, ps := range groups {
+		if len(ps) != 1 {
+			continue
+		}
+		p := ps[0]
+		candidates, err := t.Store.ClaimCandidates(at.tool, at.cwd, p.Started)
+		if err != nil {
+			return claimed, err
+		}
+		if len(candidates) != 1 {
+			continue
+		}
+		id := candidates[0].ID
+		pane, kind := t.placeOf(p, t.spec(at.tool))
+		if err := t.Store.Attach(id, p.PID, pane, kind); err != nil {
+			return claimed, err
+		}
+		if err := t.Store.SetStatus(id, store.StatusUnknown, t.World.Now()); err != nil {
+			return claimed, err
+		}
+		t.logf("claim %s pid=%d pane=%q", id, p.PID, pane)
+		claimed = true
+	}
+	return claimed, nil
+}
+
+// placeOf returns the pane a process runs in and whether it is interactive.
+func (t *Tracker) placeOf(p proc.Proc, spec agent.Spec) (pane, kind string) {
+	pane, nested := t.paneOf(p.PID)
+	kind = store.KindInteractive
+	if nested || spec.IsHeadless(p.Argv()) {
+		kind = store.KindHeadless
+	}
+	return pane, kind
+}
+
+// cwd returns a process's folder, remembered per process: reading it is slow.
+func (t *Tracker) cwd(p proc.Proc) string {
+	key := fmt.Sprintf("%d@%d", p.PID, p.Started)
+	if dir, ok := t.cwds[key]; ok {
+		return dir
+	}
+	if t.cwds == nil {
+		t.cwds = map[string]string{}
+	}
+	dir := t.World.Cwd(p.PID)
+	t.cwds[key] = dir
+	return dir
+}
+
+// untracked reports orphan processes as sessions without an ID.
+func (t *Tracker) untracked(sessions []store.Session) []store.Session {
+	procs := t.World.Procs()
+	var out []store.Session
+	for _, p := range t.orphans(sessions) {
+		spec, _ := t.toolOf(p)
+		pane, kind := t.placeOf(p, spec)
+		native := "pid-" + strconv.Itoa(p.PID)
 		parent := ""
-		for _, a := range procs.Ancestors(pid) {
+		for _, a := range procs.Ancestors(p.PID) {
 			if ss, err := t.Store.OnPID(a); err == nil && len(ss) > 0 {
 				parent = ss[0].ID
 				break
@@ -462,8 +547,8 @@ func (t *Tracker) untracked(sessions []store.Session) []store.Session {
 		}
 		out = append(out, store.Session{
 			ID: store.ID(spec.Name, native), Tool: spec.Name, NativeID: native, ParentID: parent,
-			Cwd: t.World.Cwd(pid), Kind: kind, Status: store.StatusUnknown,
-			PID: pid, Pane: pane, Source: "scan",
+			Cwd: t.cwd(p), Kind: kind, Status: store.StatusUnknown,
+			PID: p.PID, Pane: pane, Source: "scan", CreatedAt: p.Started, UpdatedAt: p.Started,
 		})
 	}
 	return out

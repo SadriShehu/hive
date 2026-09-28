@@ -11,7 +11,7 @@ import (
 
 func TestInstallRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	a := NewWithConfigDir(dir)
+	a := &Adapter{ConfigDir: dir}
 	if _, err := a.Install("/Users/me/go/bin/hive"); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestInstallLeavesForeignFileAlone(t *testing.T) {
 	path := filepath.Join(dir, "plugin", "hive.js")
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	os.WriteFile(path, []byte("export const Mine = async () => ({})\n"), 0o644)
-	a := NewWithConfigDir(dir)
+	a := &Adapter{ConfigDir: dir}
 	if _, err := a.Install("/bin/hive"); err == nil {
 		t.Error("overwrote a plugin hive did not write")
 	}

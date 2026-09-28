@@ -4,6 +4,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/sadrishehu/hive/internal/proc"
+	"github.com/sadrishehu/hive/internal/store"
 )
 
 // EventType is a normalized lifecycle event.
@@ -83,6 +85,12 @@ type Spec struct {
 	// ParentEnv is a variable the tool sets to its own session ID for the
 	// commands it runs, if any (CLAUDE_CODE_SESSION_ID).
 	ParentEnv string
+
+	// TitleFlags and SessionFlags name the flags that title a new session or
+	// pick the session to continue ("--title", "-s"), so commands found in
+	// history can be matched to the sessions they started.
+	TitleFlags   []string
+	SessionFlags []string
 }
 
 // Matches reports whether p is one of the tool's processes.
@@ -122,6 +130,23 @@ type Adapter interface {
 
 	// Installed reports whether the integration is in place.
 	Installed() bool
+}
+
+// ShellCommand is a shell command a session ran, found in its history.
+type ShellCommand struct {
+	SessionID string // hive ID of the session that ran it
+	At        int64  // epoch ms
+	Cwd       string // where it ran, when known
+	Command   string
+}
+
+// Importer reads a tool's own storage, so sessions from before hive was
+// installed appear, with details hooks don't carry, like titles.
+type Importer interface {
+	// Import upserts the tool's sessions into st, passes each shell command
+	// they ran to found, and returns how many sessions it read. It skips what
+	// hasn't changed since the last import.
+	Import(ctx context.Context, st *store.Store, found func(ShellCommand)) (int, error)
 }
 
 // jsonEvent is the hook contract any tool can speak: one JSON object per

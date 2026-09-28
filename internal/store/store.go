@@ -7,8 +7,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -106,6 +108,22 @@ var migrations = []string{
 		cwd        TEXT NOT NULL DEFAULT '',
 		created_at INTEGER NOT NULL
 	);`,
+	`CREATE TABLE spawn_hints (
+		parent_id TEXT NOT NULL,
+		at        INTEGER NOT NULL,
+		tool      TEXT NOT NULL,
+		title     TEXT NOT NULL DEFAULT '',
+		native_id TEXT NOT NULL DEFAULT '',
+		cwd       TEXT NOT NULL DEFAULT '',
+		headless  INTEGER NOT NULL DEFAULT 0,
+		child_id  TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (parent_id, at, tool, title, native_id)
+	);
+	CREATE INDEX spawn_hints_open ON spawn_hints(child_id);
+	CREATE TABLE import_state (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);`,
 }
 
 // Open opens (creating if needed) the database at path.
@@ -113,17 +131,45 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 	s := &Store{db: db}
-	if err := s.migrate(); err != nil {
+	// Switching a fresh database to WAL needs a moment alone with the file,
+	// and SQLite reports a clash as busy at once instead of waiting. Hooks
+	// from several agents can open a fresh database together, so retry.
+	err = retryBusy(func() error {
+		if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+			return err
+		}
+		return s.migrate()
+	})
+	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	return s, nil
+}
+
+func retryBusy(f func() error) error {
+	var err error
+	for range 100 {
+		if err = f(); err == nil || !isBusy(err) {
+			return err
+		}
+		time.Sleep(time.Duration(10+rand.IntN(40)) * time.Millisecond)
+	}
+	return err
+}
+
+func isBusy(err error) bool {
+	e, ok := errors.AsType[interface {
+		error
+		Code() int
+	}](err)
+	return ok && (e.Code()&0xff == 5 || e.Code()&0xff == 6) // SQLITE_BUSY, SQLITE_LOCKED
 }
 
 // Close closes the database.
@@ -202,13 +248,13 @@ func (s *Store) Attach(id string, pid int, pane, kind string) error {
 
 // SetStatus records status as of at, unless a newer status is already
 // recorded; events from one agent can arrive out of order. Exiting also
-// forgets the process and pane.
+// forgets the process and pane. Activity time (updated_at) is the caller's.
 func (s *Store) SetStatus(id, status string, at int64) error {
-	q := `UPDATE sessions SET status = ?, status_at = ?, updated_at = MAX(updated_at, ?)`
+	q := `UPDATE sessions SET status = ?, status_at = ?`
 	if status == StatusExited {
 		q += `, pid = 0, pane = ''`
 	}
-	_, err := s.db.Exec(q+` WHERE id = ? AND status_at <= ?`, status, at, at, id, at)
+	_, err := s.db.Exec(q+` WHERE id = ? AND status_at <= ?`, status, at, id, at)
 	return err
 }
 
@@ -281,6 +327,122 @@ func (s *Store) TakeLaunch(pane string, since int64) (Launch, bool, error) {
 		return Launch{}, false, err
 	}
 	return l, l.CreatedAt >= since, nil
+}
+
+// SetParent links id to parent, unless id already has a parent.
+func (s *Store) SetParent(id, parent string) (bool, error) {
+	res, err := s.db.Exec(`UPDATE sessions SET parent_id = ? WHERE id = ? AND parent_id = ''`, parent, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// Hint records that a session ran a command starting another agent. Sync
+// matches hints to sessions to link spawns from before hive was installed.
+type Hint struct {
+	ParentID string
+	At       int64 // when the command ran, epoch ms
+	Tool     string
+	Title    string // the title the command gave the new session
+	NativeID string // the session the command named, if it did
+	Cwd      string
+	Headless bool // the command was a non-interactive run
+	ChildID  string // the matched session; "" while open, HintGaveUp when never matched
+}
+
+// HintGaveUp marks a hint that never matched a session.
+const HintGaveUp = "-"
+
+// PutHint records a hint; recording the same one twice is a no-op.
+func (s *Store) PutHint(h Hint) error {
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO spawn_hints (parent_id, at, tool, title, native_id, cwd, headless)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, h.ParentID, h.At, h.Tool, h.Title, h.NativeID, h.Cwd, h.Headless)
+	return err
+}
+
+// OpenHints returns the hints not yet matched to a session.
+func (s *Store) OpenHints() ([]Hint, error) {
+	rows, err := s.db.Query(`SELECT parent_id, at, tool, title, native_id, cwd, headless FROM spawn_hints
+		WHERE child_id = '' ORDER BY at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Hint
+	for rows.Next() {
+		var h Hint
+		if err := rows.Scan(&h.ParentID, &h.At, &h.Tool, &h.Title, &h.NativeID, &h.Cwd, &h.Headless); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// CloseHint records the session a hint matched, or HintGaveUp.
+func (s *Store) CloseHint(h Hint, childID string) error {
+	_, err := s.db.Exec(`UPDATE spawn_hints SET child_id = ?
+		WHERE parent_id = ? AND at = ? AND tool = ? AND title = ? AND native_id = ?`,
+		childID, h.ParentID, h.At, h.Tool, h.Title, h.NativeID)
+	return err
+}
+
+// SpawnCandidates returns top-level sessions of tool created between from and
+// to, oldest first, that could be parent's child: they have no other parent
+// and no other command claimed to start them. (A command that continues a
+// session by ID doesn't claim it.)
+func (s *Store) SpawnCandidates(tool, parent string, from, to int64) ([]Session, error) {
+	rows, err := s.db.Query(`SELECT `+columns+` FROM sessions
+		WHERE tool = ? AND kind <> ? AND id <> ? AND (parent_id = '' OR parent_id = ?)
+		AND created_at BETWEEN ? AND ?
+		AND id NOT IN (SELECT child_id FROM spawn_hints WHERE native_id = '')
+		ORDER BY created_at`, tool, KindInternal, parent, parent, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return scan(rows)
+}
+
+// SetKindIfUnknown records a session's kind when nothing recorded one yet.
+func (s *Store) SetKindIfUnknown(id, kind string) error {
+	_, err := s.db.Exec(`UPDATE sessions SET kind = ? WHERE id = ? AND kind = ''`, kind, id)
+	return err
+}
+
+// ClaimCandidates returns top-level sessions of tool in cwd with no process
+// recorded that were active at or after since.
+func (s *Store) ClaimCandidates(tool, cwd string, since int64) ([]Session, error) {
+	rows, err := s.db.Query(`SELECT `+columns+` FROM sessions
+		WHERE tool = ? AND cwd = ? AND pid = 0 AND kind <> ? AND updated_at >= ?`,
+		tool, cwd, KindInternal, since)
+	if err != nil {
+		return nil, err
+	}
+	return scan(rows)
+}
+
+// ImportState returns what an importer stored under key.
+func (s *Store) ImportState(key string) (string, bool, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM import_state WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return v, err == nil, err
+}
+
+// SetImportState stores an importer's progress under key.
+func (s *Store) SetImportState(key, value string) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO import_state (key, value) VALUES (?, ?)`, key, value)
+	return err
+}
+
+// ResetImports forgets all import progress, so the next sync reads everything.
+func (s *Store) ResetImports() error {
+	_, err := s.db.Exec(`DELETE FROM import_state`)
+	return err
 }
 
 func scan(rows *sql.Rows) ([]Session, error) {

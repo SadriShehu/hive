@@ -11,14 +11,16 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Proc is one process. Args is the command line split on whitespace, as ps
 // reports it, so arguments containing spaces arrive in pieces.
 type Proc struct {
-	PID  int
-	PPID int
-	Args []string
+	PID     int
+	PPID    int
+	Started int64 // epoch ms, to the second
+	Args    []string
 }
 
 // launchers run a program given as their first argument.
@@ -57,29 +59,54 @@ type Table map[int]Proc
 
 // Snapshot reads the current process table.
 func Snapshot() (Table, error) {
-	out, err := exec.Command("ps", "-A", "-ww", "-o", "pid=,ppid=,args=").Output()
+	out, err := exec.Command("ps", "-A", "-ww", "-o", "pid=,ppid=,etime=,args=").Output()
 	if err != nil {
 		return nil, fmt.Errorf("ps: %w", err)
 	}
-	return Parse(out), nil
+	return Parse(out, time.Now()), nil
 }
 
-// Parse reads the output of `ps -o pid=,ppid=,args=`.
-func Parse(out []byte) Table {
+// Parse reads the output of `ps -o pid=,ppid=,etime=,args=` taken at now.
+func Parse(out []byte, now time.Time) Table {
 	t := Table{}
 	for line := range strings.SplitSeq(string(out), "\n") {
 		f := strings.Fields(line)
-		if len(f) < 3 {
+		if len(f) < 4 {
 			continue
 		}
 		pid, err1 := strconv.Atoi(f[0])
 		ppid, err2 := strconv.Atoi(f[1])
-		if err1 != nil || err2 != nil {
+		elapsed, err3 := parseElapsed(f[2])
+		if err1 != nil || err2 != nil || err3 != nil {
 			continue
 		}
-		t[pid] = Proc{PID: pid, PPID: ppid, Args: f[2:]}
+		t[pid] = Proc{PID: pid, PPID: ppid, Started: now.Add(-elapsed).UnixMilli(), Args: f[3:]}
 	}
 	return t
+}
+
+// parseElapsed reads ps's etime: [[dd-]hh:]mm:ss.
+func parseElapsed(s string) (time.Duration, error) {
+	days := "0"
+	if d, rest, ok := strings.Cut(s, "-"); ok {
+		days, s = d, rest
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) == 2 {
+		parts = append([]string{"0"}, parts...)
+	}
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("etime %q", s)
+	}
+	var n [4]int
+	for i, p := range append([]string{days}, parts...) {
+		v, err := strconv.Atoi(p)
+		if err != nil {
+			return 0, fmt.Errorf("etime %q", s)
+		}
+		n[i] = v
+	}
+	return time.Duration(((n[0]*24+n[1])*60+n[2])*60+n[3]) * time.Second, nil
 }
 
 // Ancestors returns the processes above pid, nearest first, stopping before

@@ -50,6 +50,12 @@ func TestParseHook(t *testing.T) {
 	if prompt[0].Prompt != "fix the tests" {
 		t.Errorf("prompt = %q", prompt[0].Prompt)
 	}
+	if evs := parse(t, `{"session_id":"s","hook_event_name":"PostToolUse","cwd":"/src/app/sub"}`, nil); evs[0].Cwd != "" {
+		t.Errorf("PostToolUse cwd = %q: only SessionStart knows the project folder", evs[0].Cwd)
+	}
+	if evs := parse(t, `{"session_id":"s","hook_event_name":"SubagentStart","agent_id":"x","agent_type":""}`, nil); len(evs) != 0 {
+		t.Errorf("typeless helper subagent reported: %+v", evs)
+	}
 	if _, err := New().ParseHook([]byte(`{"hook_event_name":"Stop"}`), nil, os.Getenv); err == nil {
 		t.Error("payload without session_id accepted")
 	}
@@ -112,7 +118,7 @@ const userSettings = `{
 func TestInstallRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	os.WriteFile(path, []byte(userSettings), 0o600)
-	a := NewWithSettings(path)
+	a := &Adapter{SettingsPath: path}
 
 	if a.Installed() {
 		t.Fatal("Installed before install")
@@ -185,7 +191,7 @@ func TestInstallRoundTrip(t *testing.T) {
 
 func TestInstallCreatesSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "claude", "settings.json")
-	a := NewWithSettings(path)
+	a := &Adapter{SettingsPath: path}
 	if _, err := a.Install("/bin/hive"); err != nil {
 		t.Fatal(err)
 	}

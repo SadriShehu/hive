@@ -22,17 +22,15 @@ var pluginSource string
 // marker is the first line of the plugin; hive only touches files that carry it.
 var marker = strings.SplitN(pluginSource, "\n", 2)[0]
 
-// Adapter is the opencode adapter.
+// Adapter is the opencode adapter. The zero value uses the user's opencode
+// files; the fields point it elsewhere.
 type Adapter struct {
-	configDir string // opencode config directory; empty means the user's
+	ConfigDir string // where install writes the plugin
+	DBPath    string // opencode's session database
 }
 
 // New returns the adapter for the user's opencode configuration.
 func New() *Adapter { return &Adapter{} }
-
-// NewWithConfigDir returns an adapter that installs into dir instead of the
-// user's opencode config directory.
-func NewWithConfigDir(dir string) *Adapter { return &Adapter{configDir: dir} }
 
 // Spec describes opencode.
 func (a *Adapter) Spec() agent.Spec {
@@ -42,11 +40,14 @@ func (a *Adapter) Spec() agent.Spec {
 		Resume:   []string{"opencode", "--session", "{id}", "--prompt", "{prompt}"},
 		Process:  []string{"opencode"},
 		Headless: []string{"run"},
+
+		TitleFlags:   []string{"--title"},
+		SessionFlags: []string{"-s", "--session"},
 	}
 }
 
-// ConfigDir is the user's opencode config directory.
-func ConfigDir() string {
+// configDir is the user's opencode config directory.
+func configDir() string {
 	if d := os.Getenv("OPENCODE_CONFIG_DIR"); d != "" {
 		return d
 	}
@@ -57,11 +58,22 @@ func ConfigDir() string {
 }
 
 func (a *Adapter) pluginPath() string {
-	dir := a.configDir
+	dir := a.ConfigDir
 	if dir == "" {
-		dir = ConfigDir()
+		dir = configDir()
 	}
 	return filepath.Join(dir, "plugin", "hive.js")
+}
+
+func (a *Adapter) dbPath() string {
+	if a.DBPath != "" {
+		return a.DBPath
+	}
+	dir := os.Getenv("XDG_DATA_HOME")
+	if dir == "" {
+		dir = filepath.Join(paths.Home(), ".local", "share")
+	}
+	return filepath.Join(dir, "opencode", "opencode.db")
 }
 
 // ParseHook reads events from the plugin, which speaks the generic contract.
