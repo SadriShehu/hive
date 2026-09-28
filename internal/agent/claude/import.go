@@ -59,7 +59,7 @@ func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.
 
 // transcript accumulates what one transcript file says about its session.
 type transcript struct {
-	id, parent              string
+	id                      string
 	created, updated        int64
 	cwd, cwdNow             string
 	entrypoint              string
