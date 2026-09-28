@@ -201,6 +201,8 @@ func toolStyle(tool string) string {
 		return "38;5;173"
 	case "opencode":
 		return "36"
+	case "copilot":
+		return "38;5;75"
 	}
 	return "35"
 }

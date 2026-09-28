@@ -1,6 +1,6 @@
 # hive
 
-Track every coding-agent session (Claude Code, opencode, and later others) as one tree:
+Track every coding-agent session (Claude Code, opencode, and GitHub Copilot CLI) as one tree:
 who spawned whom, what each agent is doing right now, and a key press to jump into
 or command any of them. Each agent runs its own real TUI in a tmux window; hive never
 wraps or reimplements an agent.
@@ -21,10 +21,12 @@ hive install                                   # connect every agent found on PA
 ```
 
 `hive install` adds hooks to `~/.claude/settings.json` (backed up to
-`settings.json.bak-hive`) and writes `~/.config/opencode/plugin/hive.js`. It is safe
-to rerun; `hive uninstall` removes exactly what it added. Sessions that were already
-running pick the hooks up after a restart; until then they show as untracked, or are
-adopted as soon as they spawn another agent.
+`settings.json.bak-hive`), writes `~/.config/opencode/plugin/hive.js`, and adds
+`~/.copilot/hooks/hive.json` for Copilot CLI (or `$COPILOT_HOME/hooks/hive.json`,
+backed up to `hive.json.bak-hive` when an existing file is changed).
+It is safe to rerun; `hive uninstall` removes exactly what it added. Hooks load when
+an agent starts, so running sessions pick them up after a restart; until then they
+show as untracked, or are adopted as soon as they spawn another agent.
 
 ## The tree
 
@@ -59,8 +61,9 @@ transcript for a headless run, a subagent or a finished session.
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
 
 New agents open in a window of the current tmux session running the tool's real TUI,
-linked under the selected session for `c`. Claude is given its session ID up front,
-so it is in the tree at once; opencode shows as a new session until its first message.
+linked under the selected session for `c`. Claude and Copilot CLI are given their
+session IDs up front, so they are in the tree at once; opencode shows as a new session
+until its first message.
 
 ## Use from the shell
 
@@ -90,14 +93,18 @@ the adapters. When a session first reports in, its parent is the first of:
 1. the parent the event names (opencode's own subagents, Claude's `SubagentStart`);
 2. the launch record hive made for the session's tmux pane;
 3. the nearest ancestor process that is a live session;
-4. `HIVE_PARENT`, which every connected agent exports to the commands it runs;
+4. `HIVE_PARENT`, exported by integrations that can pass it to their shell commands;
 5. an adapter's own variable, such as `CLAUDE_CODE_SESSION_ID`.
+
+Copilot CLI does not expose a session-ID environment file or child-shell export
+hook, so its children use process ancestry when the parent is still running.
 
 ### Sessions from before hive
 
 `hive sync` (run by `hive ls`) imports each tool's own history: Claude transcripts
-(`~/.claude/projects`, titles included) and opencode's database, read-only. Only what
-changed since the last sync is read, so it takes milliseconds after the first run.
+(`~/.claude/projects`), opencode's database, and Copilot CLI's session store
+(`~/.copilot/session-store.db`, opened read-only) plus session-state event logs. Only
+what changed since the last sync is read, so it takes milliseconds after the first run.
 
 Past spawns are found in the shell commands every session ran, in any direction:
 `opencode run --title X` inside Claude, `claude -p` inside opencode, and so on. A

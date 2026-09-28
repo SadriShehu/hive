@@ -24,6 +24,7 @@ var (
 	toolColors = map[string]lipgloss.AdaptiveColor{
 		"claude":   color("#B8572F", "#D97757"),
 		"opencode": color("#1E7E8A", "#56B6C2"),
+		"copilot":  color("#3568D4", "#7AA2F7"),
 		"codex":    color("#0F7A5C", "#10A37F"),
 	}
 

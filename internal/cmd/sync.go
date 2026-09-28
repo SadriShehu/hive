@@ -20,7 +20,7 @@ func newSyncCmd() *cobra.Command {
 		Use:   "sync",
 		Short: "Import past sessions and link past spawns",
 		Long: "Import sessions from each tool's own storage (Claude transcripts, opencode's\n" +
-			"database) and link spawns found in their shell commands, in any direction.\n" +
+			"database, Copilot CLI's session store) and link spawns found in their shell commands, in any direction.\n" +
 			"Only what changed since the last sync is read; `hive ls` syncs on its own.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
