@@ -1,0 +1,11 @@
+# binaries
+/hive
+/dist/
+*.exe
+*.test
+*.out
+
+# local tooling
+.DS_Store
+.idea/
+.vscode/
