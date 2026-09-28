@@ -91,6 +91,51 @@ type Spec struct {
 	// history can be matched to the sessions they started.
 	TitleFlags   []string
 	SessionFlags []string
+
+	// ResumeSubagents reports whether the tool can reopen one of its own
+	// subagents' sessions on its own (opencode can; Claude can't).
+	ResumeSubagents bool
+}
+
+// Expand fills an argv template: {prompt}, {session}, {id}. An argument that
+// is only a placeholder with nothing to fill is dropped, together with the
+// flag right before it: ["opencode", "--prompt", "{prompt}"] with no prompt
+// is just ["opencode"].
+func Expand(template []string, vars map[string]string) []string {
+	var pairs []string
+	for name, v := range vars {
+		pairs = append(pairs, "{"+name+"}", v)
+	}
+	fill := strings.NewReplacer(pairs...) // one pass: a prompt containing "{id}" stays as typed
+	var out []string
+	for i, arg := range template {
+		if name, ok := placeholder(arg); ok && vars[name] == "" {
+			if i > 0 && strings.HasPrefix(template[i-1], "-") && len(out) > 0 && out[len(out)-1] == template[i-1] {
+				out = out[:len(out)-1]
+			}
+			continue
+		}
+		out = append(out, fill.Replace(arg))
+	}
+	return out
+}
+
+func placeholder(arg string) (string, bool) {
+	if strings.HasPrefix(arg, "{") && strings.HasSuffix(arg, "}") && !strings.ContainsAny(arg[1:len(arg)-1], "{} ") {
+		return arg[1 : len(arg)-1], true
+	}
+	return "", false
+}
+
+// Line is one entry of a session's transcript, for the preview.
+type Line struct {
+	Role string // "user", "assistant" or "tool"
+	Text string
+}
+
+// Tailer reads the end of a session's transcript.
+type Tailer interface {
+	Tail(s store.Session, n int) ([]Line, error)
 }
 
 // Matches reports whether p is one of the tool's processes.

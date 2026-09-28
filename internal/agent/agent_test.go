@@ -38,3 +38,24 @@ func TestShellQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestExpand(t *testing.T) {
+	tests := []struct {
+		tmpl []string
+		vars map[string]string
+		want string
+	}{
+		{[]string{"opencode", "--prompt", "{prompt}"}, nil, "opencode"},
+		{[]string{"opencode", "--prompt", "{prompt}"}, map[string]string{"prompt": "fix it"}, "opencode --prompt fix it"},
+		{[]string{"claude", "--session-id", "{session}", "{prompt}"}, map[string]string{"session": "u1"}, "claude --session-id u1"},
+		{[]string{"claude", "--resume", "{id}", "{prompt}"}, map[string]string{"id": "abc", "prompt": "go on"}, "claude --resume abc go on"},
+		{[]string{"opencode", "--session", "{id}", "--prompt", "{prompt}"}, map[string]string{"id": "ses_1"}, "opencode --session ses_1"},
+		{[]string{"tool", "--name=job-{id}"}, map[string]string{"id": "7"}, "tool --name=job-7"},
+		{[]string{"claude", "--resume", "{id}", "{prompt}"}, map[string]string{"id": "abc", "prompt": "keep {id} literal"}, "claude --resume abc keep {id} literal"},
+	}
+	for _, tt := range tests {
+		if got := strings.Join(Expand(tt.tmpl, tt.vars), " "); got != tt.want {
+			t.Errorf("Expand(%v, %v) = %q, want %q", tt.tmpl, tt.vars, got, tt.want)
+		}
+	}
+}

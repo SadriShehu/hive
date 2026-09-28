@@ -9,8 +9,9 @@ Design doc: https://claude.ai/code/artifact/5df7a9f0-da62-4b84-a527-eec21528bf63
 
 ## Status
 
-Phases 1–2 of 5 are done: live tracking, and every past session imported and linked
-to the session that spawned it. The TUI and the agent-facing commands come next.
+Phases 1–3 of 5 are done: live tracking, every past session imported and linked to
+the session that spawned it, and the tree UI to jump into, message, start, reopen and
+stop agents. The agent-facing commands (`hive new --wait`, `send`, `tail`) come next.
 
 ## Install
 
@@ -25,7 +26,43 @@ to rerun; `hive uninstall` removes exactly what it added. Sessions that were alr
 running pick the hooks up after a restart; until then they show as untracked, or are
 adopted as soon as they spawn another agent.
 
-## Use
+## The tree
+
+Run `hive`. Inside tmux it opens in the current pane; outside tmux it attaches to a
+tmux session called `hive`, with the tree in its first window. With the popup key
+bound (`hive install tmux`), **prefix + a** opens the tree over whatever you're doing
+and closes once you jump somewhere.
+
+```
+ hive  ● 3 live  ·  203 sessions                                           last 24h
+▾ ● claude   Admin phase 2                          2m │ claude Admin phase 2
+├─   ● opencode admin-phase2-backend           run   1m │ ● working · interactive · pane %1 · ↵ jumps there
+│  └─   ● opencode explore handlers            sub   1m │ ~/go/src/…/kudoesim
+└─   ○ claude   lint fix                        run  30m │ ────────────────────────────────
+                                                        │ › implement the backend plan
+                                                        │   ⚙ Bash: go test ./...
+                                                        │ All gates green.
+```
+
+The right side is live: the screen of the session's tmux pane, or the end of its
+transcript for a headless run, a subagent or a finished session.
+
+| Key | Does |
+| --- | --- |
+| `↵` | jump to the session's pane (a subagent: its parent's); reopen it if it isn't running |
+| `s` | send a message: typed into its pane, or reopens it with the message |
+| `n` / `c` | start an agent / start one as a child of the selected session |
+| `r` | reopen a finished session in its tool's own TUI |
+| `x` | stop it (asks first); a window hive opened closes with it |
+| `/` | filter by title, folder or ID, across all history |
+| `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
+| `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
+
+New agents open in a window of the current tmux session running the tool's real TUI,
+linked under the selected session for `c`. Claude is given its session ID up front,
+so it is in the tree at once; opencode shows as a new session until its first message.
+
+## Use from the shell
 
 ```sh
 hive ls           # trees with anything running or active in the last 24h
@@ -87,4 +124,5 @@ fields work as flags: `hive hook mytool --event start --session abc`.
 
 Hooks never print. Errors go to `~/.local/share/hive/hive.log`; set `HIVE_DEBUG=1` in
 an agent's environment to log every linking decision. `HIVE_HOME` moves the database
-and log elsewhere.
+and log elsewhere; `HIVE_TMUX_SOCKET=name` points hive at a named tmux server
+(`tmux -L name`).

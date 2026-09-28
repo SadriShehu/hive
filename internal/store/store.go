@@ -51,6 +51,10 @@ type Session struct {
 	Source     string `json:"source,omitempty"`
 }
 
+// Synthetic reports whether hive made the session up from a process it saw
+// (untracked, or launched and not reported in yet): its ID isn't the tool's.
+func (s Session) Synthetic() bool { return s.Source == "scan" || s.Source == "pending" }
+
 // ID builds a session ID from a tool name and the tool's own session ID.
 func ID(tool, nativeID string) string { return tool + ":" + nativeID }
 
@@ -311,6 +315,25 @@ func (s *Store) PutLaunch(l Launch) error {
 	_, err := s.db.Exec(`INSERT OR REPLACE INTO launches (pane, tool, parent_id, title, cwd, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`, l.Pane, l.Tool, l.ParentID, l.Title, l.Cwd, l.CreatedAt)
 	return err
+}
+
+// Launches returns the launch records whose agents haven't reported in yet,
+// by pane.
+func (s *Store) Launches() (map[string]Launch, error) {
+	rows, err := s.db.Query(`SELECT pane, tool, parent_id, title, cwd, created_at FROM launches`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]Launch{}
+	for rows.Next() {
+		var l Launch
+		if err := rows.Scan(&l.Pane, &l.Tool, &l.ParentID, &l.Title, &l.Cwd, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[l.Pane] = l
+	}
+	return out, rows.Err()
 }
 
 // TakeLaunch returns and forgets the launch record for pane, if one was made

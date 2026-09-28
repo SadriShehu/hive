@@ -14,6 +14,7 @@ import (
 	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/tmux"
 	"github.com/sadrishehu/hive/internal/tracker"
 	"github.com/sadrishehu/hive/internal/tree"
 )
@@ -48,14 +49,7 @@ func newLsCmd() *cobra.Command {
 			case live:
 				roots = tree.Filter(roots, func(n *tree.Node) bool { return n.Session.Live() })
 			case !all:
-				cutoff := time.Now().Add(-recentWindow).UnixMilli()
-				var recent []*tree.Node
-				for _, r := range roots {
-					if r.Live || r.Last >= cutoff {
-						recent = append(recent, r)
-					}
-				}
-				roots = recent
+				roots = tree.Recent(roots, time.Now().Add(-recentWindow).UnixMilli())
 			}
 			if asJSON {
 				return printJSON(roots)
@@ -162,6 +156,9 @@ func hintInstall() {
 			missing = append(missing, a.Spec().Name)
 		}
 	}
+	if tmux.Available() && !tmux.BindingInstalled(tmux.ConfPath()) {
+		missing = append(missing, "tmux (prefix+a)")
+	}
 	if len(missing) > 0 {
 		fmt.Fprintf(os.Stderr, "%s not connected yet: run `hive install`\n", strings.Join(missing, ", "))
 	}
@@ -190,6 +187,8 @@ func statusWord(s store.Session) string {
 		return "needs you"
 	case s.Status == store.StatusUnknown && s.Source == "scan":
 		return "untracked"
+	case s.Status == store.StatusUnknown && s.Source == "pending":
+		return "new"
 	case s.Status == store.StatusUnknown:
 		return "running"
 	}
@@ -222,8 +221,11 @@ func title(s store.Session) string {
 			return t
 		}
 	}
-	if s.Source == "scan" {
+	switch s.Source {
+	case "scan":
 		return "(untracked)"
+	case "pending", "launch":
+		return "(new session)"
 	}
 	return "(untitled)"
 }

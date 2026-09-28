@@ -405,12 +405,6 @@ func (t *Tracker) Refresh() ([]store.Session, error) {
 			sessions[i].Status, sessions[i].PID, sessions[i].Pane = store.StatusExited, 0, ""
 			continue
 		}
-		if s.Pane != "" && !panes[s.Pane] {
-			if err := t.Store.Attach(s.ID, s.PID, "", ""); err != nil {
-				return nil, err
-			}
-			sessions[i].Pane = ""
-		}
 	}
 
 	// A tool's own subagents end with the session that runs them.
@@ -437,6 +431,13 @@ func (t *Tracker) Refresh() ([]store.Session, error) {
 	if claimed {
 		if sessions, err = t.Store.All(); err != nil {
 			return nil, err
+		}
+	}
+	// A pane this server doesn't have may belong to another tmux server, so
+	// it is hidden from the result, not forgotten.
+	for i := range sessions {
+		if sessions[i].Pane != "" && !panes[sessions[i].Pane] {
+			sessions[i].Pane = ""
 		}
 	}
 	return append(sessions, t.untracked(sessions)...), nil
@@ -530,26 +531,33 @@ func (t *Tracker) cwd(p proc.Proc) string {
 	return dir
 }
 
-// untracked reports orphan processes as sessions without an ID.
+// untracked reports orphan processes as sessions without an ID. One that
+// hive launched and that hasn't reported in yet (opencode names its session
+// only at the first message) shows where hive put it, as source "pending".
 func (t *Tracker) untracked(sessions []store.Session) []store.Session {
 	procs := t.World.Procs()
+	launches, _ := t.Store.Launches()
 	var out []store.Session
 	for _, p := range t.orphans(sessions) {
 		spec, _ := t.toolOf(p)
 		pane, kind := t.placeOf(p, spec)
 		native := "pid-" + strconv.Itoa(p.PID)
-		parent := ""
-		for _, a := range procs.Ancestors(p.PID) {
-			if ss, err := t.Store.OnPID(a); err == nil && len(ss) > 0 {
-				parent = ss[0].ID
-				break
-			}
-		}
-		out = append(out, store.Session{
-			ID: store.ID(spec.Name, native), Tool: spec.Name, NativeID: native, ParentID: parent,
+		s := store.Session{
+			ID: store.ID(spec.Name, native), Tool: spec.Name, NativeID: native,
 			Cwd: t.cwd(p), Kind: kind, Status: store.StatusUnknown,
 			PID: p.PID, Pane: pane, Source: "scan", CreatedAt: p.Started, UpdatedAt: p.Started,
-		})
+		}
+		if l, ok := launches[pane]; ok && pane != "" && l.Tool == spec.Name {
+			s.ParentID, s.Source = l.ParentID, "pending"
+		} else {
+			for _, a := range procs.Ancestors(p.PID) {
+				if ss, err := t.Store.OnPID(a); err == nil && len(ss) > 0 {
+					s.ParentID = ss[0].ID
+					break
+				}
+			}
+		}
+		out = append(out, s)
 	}
 	return out
 }

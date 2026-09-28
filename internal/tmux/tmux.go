@@ -3,10 +3,17 @@ package tmux
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// Socket, when set, selects a separate tmux server (tmux -L), for tests.
+var Socket string
 
 // Pane is one tmux pane.
 type Pane struct {
@@ -23,12 +30,37 @@ func Available() bool {
 	return err == nil
 }
 
+// Inside reports whether this process runs in a tmux pane.
+func Inside() bool { return os.Getenv("TMUX") != "" }
+
+func command(args ...string) *exec.Cmd {
+	if Socket != "" {
+		args = append([]string{"-L", Socket}, args...)
+	}
+	return exec.Command("tmux", args...)
+}
+
+// run runs a tmux command and returns its trimmed output.
+func run(args ...string) (string, error) {
+	var stderr strings.Builder
+	cmd := command(args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("tmux %s: %s", args[0], msg)
+		}
+		return "", fmt.Errorf("tmux %s: %w", args[0], err)
+	}
+	return strings.TrimRight(string(out), "\n"), nil
+}
+
 // Panes lists every pane on the server, or none when no server is running.
 func Panes() ([]Pane, error) {
 	if !Available() {
 		return nil, nil
 	}
-	out, err := exec.Command("tmux", "list-panes", "-a", "-F",
+	out, err := command("list-panes", "-a", "-F",
 		"#{pane_id}\t#{pane_pid}\t#{session_name}\t#{window_index}\t#{window_name}").Output()
 	if err != nil {
 		if _, ok := errors.AsType[*exec.ExitError](err); ok {
@@ -50,3 +82,150 @@ func Panes() ([]Pane, error) {
 	}
 	return panes, nil
 }
+
+// PaneExists reports whether pane is on the server.
+func PaneExists(pane string) bool {
+	panes, _ := Panes()
+	for _, p := range panes {
+		if p.ID == pane {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSession reports whether a session with this name exists.
+func HasSession(name string) bool {
+	return command("has-session", "-t", "="+name).Run() == nil
+}
+
+// CurrentSession is the session of the client looking at this process.
+func CurrentSession() (string, error) {
+	return run("display-message", "-p", "#{session_name}")
+}
+
+// HomeSession is where hive opens agent windows: the current session when
+// inside tmux, otherwise a detached session called "hive", created on demand.
+func HomeSession() (string, error) {
+	if Inside() {
+		return CurrentSession()
+	}
+	if !HasSession("hive") {
+		home, _ := os.UserHomeDir()
+		if _, err := run("new-session", "-d", "-s", "hive", "-c", home); err != nil && !HasSession("hive") {
+			return "", err
+		}
+	}
+	return "hive", nil
+}
+
+// Window describes a new window running one program.
+type Window struct {
+	Session  string // "" means HomeSession
+	Name     string
+	Dir      string
+	Env      map[string]string
+	Argv     []string // run directly, without a shell
+	Detached bool     // don't make it the session's current window
+}
+
+// NewWindow opens a window running w.Argv and returns its pane. The window
+// stays open if the program fails, so its error can be read.
+func NewWindow(w Window) (Pane, error) {
+	if len(w.Argv) == 0 {
+		return Pane{}, errors.New("nothing to run")
+	}
+	session := w.Session
+	if session == "" {
+		var err error
+		if session, err = HomeSession(); err != nil {
+			return Pane{}, err
+		}
+	}
+	args := []string{"new-window", "-P", "-F", "#{pane_id}\t#{pane_pid}\t#{window_index}", "-t", session + ":"}
+	if w.Detached {
+		args = append(args, "-d")
+	}
+	if w.Name != "" {
+		args = append(args, "-n", w.Name)
+	}
+	if w.Dir != "" {
+		args = append(args, "-c", w.Dir)
+	}
+	keys := make([]string, 0, len(w.Env))
+	for k := range w.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "-e", k+"="+w.Env[k])
+	}
+	args = append(args, "--")
+	args = append(args, w.Argv...)
+	out, err := run(args...)
+	if err != nil {
+		return Pane{}, err
+	}
+	f := strings.Split(out, "\t")
+	if len(f) < 3 {
+		return Pane{}, fmt.Errorf("tmux new-window: unexpected output %q", out)
+	}
+	pid, _ := strconv.Atoi(f[1])
+	pane := Pane{ID: f[0], PID: pid, Session: session, Window: f[2], Name: w.Name}
+	run("set-option", "-w", "-t", pane.ID, "remain-on-exit", "failed")
+	return pane, nil
+}
+
+// Focus shows pane on the client looking at this process, switching session,
+// window and pane. It refuses when no client is looking, rather than take
+// over some other client's screen.
+func Focus(pane string) error {
+	client, err := run("display-message", "-p", "#{client_name}")
+	if err != nil {
+		return err
+	}
+	if client == "" {
+		return errors.New("no tmux client is showing hive")
+	}
+	_, err = run("switch-client", "-c", client, "-t", pane)
+	return err
+}
+
+// Paste types text into pane as a bracketed paste, then presses Enter.
+func Paste(pane, text string) error {
+	buffer := fmt.Sprintf("hive-%d", os.Getpid())
+	load := command("load-buffer", "-b", buffer, "-")
+	load.Stdin = strings.NewReader(text)
+	if out, err := load.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux load-buffer: %v: %s", err, out)
+	}
+	if _, err := run("paste-buffer", "-p", "-d", "-b", buffer, "-t", pane); err != nil {
+		return err
+	}
+	// Let the program take the paste in before Enter arrives.
+	time.Sleep(150 * time.Millisecond)
+	_, err := run("send-keys", "-t", pane, "Enter")
+	return err
+}
+
+// Capture returns what pane shows, with colors.
+func Capture(pane string) (string, error) {
+	return run("capture-pane", "-p", "-e", "-t", pane)
+}
+
+// Attach replaces this process with a tmux client attached to session.
+func Attach(session string) error {
+	return execTmux("attach-session", "-t", "="+session)
+}
+
+// Windows lists the names of a session's windows.
+func Windows(session string) ([]string, error) {
+	out, err := run("list-windows", "-t", "="+session, "-F", "#{window_name}")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// Run runs any tmux command.
+func Run(args ...string) (string, error) { return run(args...) }

@@ -41,8 +41,9 @@ func (a *Adapter) Spec() agent.Spec {
 		Process:  []string{"opencode"},
 		Headless: []string{"run"},
 
-		TitleFlags:   []string{"--title"},
-		SessionFlags: []string{"-s", "--session"},
+		TitleFlags:      []string{"--title"},
+		SessionFlags:    []string{"-s", "--session"},
+		ResumeSubagents: true,
 	}
 }
 

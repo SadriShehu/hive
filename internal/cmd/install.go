@@ -12,54 +12,65 @@ import (
 
 	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/tmux"
 )
 
 func newInstallCmd() *cobra.Command {
-	var bin string
+	var bin, key string
 	cmd := &cobra.Command{
-		Use:   "install [claude|opencode ...]",
-		Short: "Connect agents to hive (hooks, plugin); safe to rerun",
-		Long: "Connect agents to hive. With no arguments, every agent found on PATH.\n" +
+		Use:   "install [claude|opencode|tmux ...]",
+		Short: "Connect agents and tmux to hive; safe to rerun",
+		Long: "Connect agents to hive, and bind the tree to a tmux key. With no arguments:\n" +
+			"every agent found on PATH, and tmux when it is installed.\n\n" +
 			"Claude Code gets hooks in its settings.json (backed up to settings.json.bak-hive);\n" +
-			"opencode gets a plugin file. Running sessions pick the change up after a restart.",
+			"opencode gets a plugin file; tmux gets prefix+a (see --key) opening the tree in a\n" +
+			"popup. `hive uninstall` removes exactly these.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hiveBin, err := resolveBin(bin)
 			if err != nil {
 				return err
 			}
-			targets, err := pickAdapters(args)
+			agents, withTmux, err := pickTargets(args, true)
 			if err != nil {
 				return err
 			}
 			var errs []error
-			for _, a := range targets {
+			for _, a := range agents {
 				msg, err := a.Install(hiveBin)
-				report(a, msg, err)
+				report(a.Spec().Name, msg, err)
+				errs = append(errs, err)
+			}
+			if withTmux {
+				msg, err := tmux.InstallBinding(tmux.ConfPath(), key, hiveBin)
+				report("tmux", msg, err)
 				errs = append(errs, err)
 			}
 			return errors.Join(errs...)
 		},
 	}
 	cmd.Flags().StringVar(&bin, "bin", "", "hive binary the integrations should call (default: this one)")
+	cmd.Flags().StringVar(&key, "key", "a", "tmux key that, after the prefix, opens the tree")
 	return cmd
 }
 
 func newUninstallCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "uninstall [claude|opencode ...]",
+		Use:   "uninstall [claude|opencode|tmux ...]",
 		Short: "Remove exactly what install added",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			targets := adapters.All()
-			if len(args) > 0 {
-				var err error
-				if targets, err = named(args); err != nil {
-					return err
-				}
+			agents, withTmux, err := pickTargets(args, false)
+			if err != nil {
+				return err
 			}
 			var errs []error
-			for _, a := range targets {
+			for _, a := range agents {
 				msg, err := a.Uninstall()
-				report(a, msg, err)
+				report(a.Spec().Name, msg, err)
+				errs = append(errs, err)
+			}
+			if withTmux {
+				msg, err := tmux.UninstallBinding(tmux.ConfPath())
+				report("tmux", msg, err)
 				errs = append(errs, err)
 			}
 			return errors.Join(errs...)
@@ -67,40 +78,36 @@ func newUninstallCmd() *cobra.Command {
 	}
 }
 
-func report(a agent.Adapter, msg string, err error) {
+func report(name, msg string, err error) {
 	if err != nil {
 		msg = "error: " + err.Error()
 	}
-	fmt.Printf("%-9s %s\n", a.Spec().Name, msg)
+	fmt.Printf("%-9s %s\n", name, msg)
 }
 
-// pickAdapters returns the named adapters, or every one whose tool is on PATH.
-func pickAdapters(args []string) ([]agent.Adapter, error) {
-	if len(args) > 0 {
-		return named(args)
-	}
-	var out []agent.Adapter
-	for _, a := range adapters.All() {
-		if _, err := exec.LookPath(a.Spec().New[0]); err == nil {
-			out = append(out, a)
+// pickTargets resolves install and uninstall arguments. With none: every
+// agent (for install, those on PATH) and tmux when it is installed.
+func pickTargets(args []string, install bool) (agents []agent.Adapter, withTmux bool, err error) {
+	if len(args) == 0 {
+		for _, a := range adapters.All() {
+			if _, err := exec.LookPath(a.Spec().New[0]); err == nil || !install {
+				agents = append(agents, a)
+			}
 		}
+		return agents, tmux.Available(), nil
 	}
-	if len(out) == 0 {
-		return nil, errors.New("no supported agent found on PATH")
-	}
-	return out, nil
-}
-
-func named(args []string) ([]agent.Adapter, error) {
-	var out []agent.Adapter
 	for _, n := range args {
+		if n == "tmux" {
+			withTmux = true
+			continue
+		}
 		a, ok := adapters.Get(n)
 		if !ok {
-			return nil, fmt.Errorf("unknown agent %q", n)
+			return nil, false, fmt.Errorf("unknown target %q (agents: claude, opencode; or tmux)", n)
 		}
-		out = append(out, a)
+		agents = append(agents, a)
 	}
-	return out, nil
+	return agents, withTmux, nil
 }
 
 // resolveBin returns the absolute path integrations should call.

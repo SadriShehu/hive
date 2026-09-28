@@ -326,6 +326,26 @@ func TestRefreshClaimsOrphansFromHistory(t *testing.T) {
 	}
 }
 
+func TestLaunchedAgentShowsUnderItsParentBeforeReportingIn(t *testing.T) {
+	tr, w := newWorld(t)
+	claudeHook(t, tr, w, 100, "A", agent.Start)
+	tr.Store.PutLaunch(store.Launch{Pane: "%2", Tool: "opencode", ParentID: "claude:A", CreatedAt: w.now})
+	w.add(96, 95, "/opt/homebrew/bin/opencode") // the TUI, before its first message
+	sessions, err := tr.Refresh()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sessions {
+		if s.PID == 96 {
+			if s.ParentID != "claude:A" || s.Source != "pending" || s.Pane != "%2" {
+				t.Fatalf("pending launch = %+v", s)
+			}
+			return
+		}
+	}
+	t.Fatal("launched agent not listed")
+}
+
 func TestClaudeStartExportsParentForItsShell(t *testing.T) {
 	tr, w := newWorld(t)
 	envFile := filepath.Join(t.TempDir(), "env")

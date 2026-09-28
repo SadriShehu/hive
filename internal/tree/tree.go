@@ -110,3 +110,28 @@ func walk(nodes []*Node, indent string, root bool, fn func(*Node, string)) {
 		walk(n.Children, next, false, fn)
 	}
 }
+
+// Recent keeps the trees with something running or activity since cutoff.
+func Recent(roots []*Node, cutoff int64) []*Node {
+	var out []*Node
+	for _, r := range roots {
+		if r.Live || r.Last >= cutoff {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// Prune removes the nodes for which drop is true, with everything under them.
+func Prune(nodes []*Node, drop func(*Node) bool) []*Node {
+	var out []*Node
+	for _, n := range nodes {
+		if drop(n) {
+			continue
+		}
+		c := *n
+		c.Children = Prune(n.Children, drop)
+		out = append(out, &c)
+	}
+	return out
+}

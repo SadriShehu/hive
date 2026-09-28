@@ -1,0 +1,233 @@
+package tracker
+
+import (
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"syscall"
+
+	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/paths"
+	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/tmux"
+)
+
+// LaunchOptions describes where and how to start an agent's TUI.
+type LaunchOptions struct {
+	Tool     string
+	Cwd      string
+	Prompt   string
+	ParentID string // the session this one is a child of; "" for a top-level agent
+	Session  string // tmux session for the window; "" means tmux.HomeSession
+	Detached bool   // open the window without switching to it
+}
+
+// Launched is where an agent now runs.
+type Launched struct {
+	Pane      string
+	SessionID string // known right away when the tool takes a pre-assigned ID
+}
+
+func (t *Tracker) adapter(tool string) agent.Adapter {
+	for _, a := range t.Adapters {
+		if a.Spec().Name == tool {
+			return a
+		}
+	}
+	return nil
+}
+
+// Launch starts a new interactive agent in its own tmux window.
+func (t *Tracker) Launch(o LaunchOptions) (Launched, error) {
+	spec := t.spec(o.Tool)
+	if len(spec.New) == 0 {
+		return Launched{}, fmt.Errorf("hive doesn't know how to start %q", o.Tool)
+	}
+	cwd, err := folder(o.Cwd)
+	if err != nil {
+		return Launched{}, err
+	}
+	var native string
+	if slices.ContainsFunc(spec.New, func(a string) bool { return strings.Contains(a, "{session}") }) {
+		native = newUUID()
+	}
+	argv, err := resolve(agent.Expand(spec.New, map[string]string{"prompt": o.Prompt, "session": native}))
+	if err != nil {
+		return Launched{}, err
+	}
+	env := map[string]string{}
+	if o.ParentID != "" {
+		env[ParentEnv] = o.ParentID
+	}
+	pane, err := tmux.NewWindow(tmux.Window{Session: o.Session, Name: windowName(o.Tool, cwd),
+		Dir: cwd, Env: env, Argv: argv, Detached: o.Detached})
+	if err != nil {
+		return Launched{}, err
+	}
+	now := t.World.Now()
+	if err := t.Store.PutLaunch(store.Launch{Pane: pane.ID, Tool: o.Tool, ParentID: o.ParentID, Cwd: cwd, CreatedAt: now}); err != nil {
+		return Launched{}, err
+	}
+	out := Launched{Pane: pane.ID}
+	if native != "" {
+		// The session exists before its first hook arrives.
+		out.SessionID = store.ID(o.Tool, native)
+		err := errors.Join(
+			t.Store.Upsert(store.Session{ID: out.SessionID, Tool: o.Tool, NativeID: native, ParentID: o.ParentID,
+				Cwd: cwd, Kind: store.KindInteractive, LastPrompt: o.Prompt, CreatedAt: now, UpdatedAt: now, Source: "launch"}),
+			t.Store.Attach(out.SessionID, pane.PID, pane.ID, store.KindInteractive),
+			t.Store.SetStatus(out.SessionID, startStatus(o.Prompt), now),
+		)
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// CanResume says why s can't be reopened, or returns nil.
+func (t *Tracker) CanResume(s store.Session) error {
+	spec := t.spec(s.Tool)
+	switch {
+	case s.Synthetic():
+		return errors.New("hive doesn't know which session this process runs yet")
+	case s.Live():
+		return errors.New("it is already running")
+	case len(spec.Resume) == 0:
+		return fmt.Errorf("hive doesn't know how to reopen %s sessions", s.Tool)
+	case s.Kind == store.KindInternal && !spec.ResumeSubagents:
+		return fmt.Errorf("%s subagents can't be reopened on their own; open the parent", s.Tool)
+	}
+	return nil
+}
+
+// Resume reopens s in the tool's own TUI, in a new tmux window, with prompt
+// as its next message if given.
+func (t *Tracker) Resume(s store.Session, prompt string, o LaunchOptions) (Launched, error) {
+	if err := t.CanResume(s); err != nil {
+		return Launched{}, err
+	}
+	argv, err := resolve(agent.Expand(t.spec(s.Tool).Resume, map[string]string{"id": s.NativeID, "prompt": prompt}))
+	if err != nil {
+		return Launched{}, err
+	}
+	cwd, err := folder(s.Cwd)
+	if err != nil {
+		cwd = paths.Home() // the project folder is gone; the tool will say what it can
+	}
+	pane, err := tmux.NewWindow(tmux.Window{Session: o.Session, Name: windowName(s.Tool, cwd),
+		Dir: cwd, Argv: argv, Detached: o.Detached})
+	if err != nil {
+		return Launched{}, err
+	}
+	now := t.World.Now()
+	err = errors.Join(
+		// If the tool continues under a new session ID, it lands in the same place.
+		t.Store.PutLaunch(store.Launch{Pane: pane.ID, Tool: s.Tool, ParentID: s.ParentID, Cwd: cwd, CreatedAt: now}),
+		t.Store.Attach(s.ID, pane.PID, pane.ID, store.KindInteractive),
+		t.Store.SetStatus(s.ID, startStatus(prompt), now),
+	)
+	return Launched{Pane: pane.ID, SessionID: s.ID}, err
+}
+
+// Send gives s a message: typed into its pane when it runs in one, or by
+// reopening it with the message.
+func (t *Tracker) Send(s store.Session, text string, o LaunchOptions) (string, error) {
+	if strings.TrimSpace(text) == "" {
+		return "", errors.New("nothing to send")
+	}
+	if s.Pane != "" && tmux.PaneExists(s.Pane) {
+		if err := tmux.Paste(s.Pane, text); err != nil {
+			return "", err
+		}
+		return "sent", nil
+	}
+	if s.Live() {
+		switch s.Kind {
+		case store.KindInternal:
+			return "", errors.New("a subagent takes input only through its parent")
+		case store.KindHeadless:
+			return "", fmt.Errorf("it's a headless run (pid %d) and can't take input; send once it finishes", s.PID)
+		}
+		return "", fmt.Errorf("it runs outside tmux (pid %d), where hive can't type", s.PID)
+	}
+	if _, err := t.Resume(s, text, o); err != nil {
+		return "", err
+	}
+	return "reopened with your message", nil
+}
+
+// Stop ends s's process. When the agent is all its pane runs (as in every
+// window hive opens), the pane closes with it; under someone's shell, only
+// the agent is asked to stop and the shell stays.
+func (t *Tracker) Stop(s store.Session) error {
+	if s.PID <= 0 {
+		return errors.New("it isn't running as a process of its own")
+	}
+	// Check the pid still belongs to the tool before signalling it.
+	if p, ok := t.World.Procs()[s.PID]; !ok || !t.spec(s.Tool).Matches(p) {
+		return errors.New("its process is already gone")
+	}
+	for _, p := range t.World.Panes() {
+		if p.ID == s.Pane && p.PID == s.PID {
+			_, err := tmux.Run("kill-pane", "-t", p.ID)
+			return err
+		}
+	}
+	return syscall.Kill(s.PID, syscall.SIGTERM)
+}
+
+// Tail returns the end of s's transcript.
+func (t *Tracker) Tail(s store.Session, n int) ([]agent.Line, error) {
+	if tailer, ok := t.adapter(s.Tool).(agent.Tailer); ok {
+		return tailer.Tail(s, n)
+	}
+	return nil, fmt.Errorf("hive can't read %s transcripts", s.Tool)
+}
+
+func startStatus(prompt string) string {
+	if prompt != "" {
+		return store.StatusWorking
+	}
+	return store.StatusIdle
+}
+
+// folder checks that dir exists, making ~ absolute.
+func folder(dir string) (string, error) {
+	switch {
+	case dir == "" || dir == "~":
+		return paths.Home(), nil
+	case strings.HasPrefix(dir, "~/"):
+		dir = filepath.Join(paths.Home(), dir[2:])
+	}
+	fi, err := os.Stat(dir)
+	if err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("no such folder: %s", dir)
+	}
+	return dir, nil
+}
+
+// resolve makes the program absolute, so the window doesn't depend on the
+// tmux server's PATH.
+func resolve(argv []string) ([]string, error) {
+	path, err := exec.LookPath(argv[0])
+	if err != nil {
+		return nil, fmt.Errorf("%s isn't on PATH", argv[0])
+	}
+	return append([]string{path}, argv[1:]...), nil
+}
+
+func windowName(tool, cwd string) string { return tool + "/" + filepath.Base(cwd) }
+
+func newUUID() string {
+	var b [16]byte
+	rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40 // version 4
+	b[8] = b[8]&0x3f | 0x80 // RFC 4122 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
