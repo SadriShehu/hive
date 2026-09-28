@@ -241,7 +241,7 @@ func TestParentCyclesAreRejected(t *testing.T) {
 func TestRefreshFindsUntrackedAgents(t *testing.T) {
 	tr, w := newWorld(t)
 	claudeHook(t, tr, w, 100, "A", agent.Start)
-	w.add(96, 95, "opencode")       // started before hive was installed
+	w.add(96, 95, "opencode")        // started before hive was installed
 	w.add(97, 96, "opencode worker") // its own worker process, not a session
 
 	sessions, err := tr.Refresh()
