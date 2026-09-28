@@ -1,0 +1,34 @@
+// Package paths locates hive's own files.
+package paths
+
+import (
+	"os"
+	"path/filepath"
+)
+
+// Home is the user's home directory.
+func Home() string {
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+	return h
+}
+
+// DataDir holds the database and log. HIVE_HOME overrides it, which keeps
+// tests and experiments away from the real database.
+func DataDir() string {
+	if d := os.Getenv("HIVE_HOME"); d != "" {
+		return d
+	}
+	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
+		return filepath.Join(d, "hive")
+	}
+	return filepath.Join(Home(), ".local", "share", "hive")
+}
+
+// DBPath is the session database.
+func DBPath() string { return filepath.Join(DataDir(), "hive.db") }
+
+// LogPath receives errors from hook invocations, which must never print.
+func LogPath() string { return filepath.Join(DataDir(), "hive.log") }
