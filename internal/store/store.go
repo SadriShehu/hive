@@ -348,7 +348,7 @@ type Hint struct {
 	Title    string // the title the command gave the new session
 	NativeID string // the session the command named, if it did
 	Cwd      string
-	Headless bool // the command was a non-interactive run
+	Headless bool   // the command was a non-interactive run
 	ChildID  string // the matched session; "" while open, HintGaveUp when never matched
 }
 

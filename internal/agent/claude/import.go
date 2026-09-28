@@ -59,14 +59,14 @@ func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.
 
 // transcript accumulates what one transcript file says about its session.
 type transcript struct {
-	id, parent               string
-	created, updated         int64
-	cwd, cwdNow              string
-	entrypoint               string
-	custom, named, aiTitle   string
-	firstPrompt, lastPrompt  string
-	spoke                    bool // any assistant turn
-	found                    func(agent.ShellCommand)
+	id, parent              string
+	created, updated        int64
+	cwd, cwdNow             string
+	entrypoint              string
+	custom, named, aiTitle  string
+	firstPrompt, lastPrompt string
+	spoke                   bool // any assistant turn
+	found                   func(agent.ShellCommand)
 }
 
 // readTranscript reads a session from its transcript. ok is false for a
