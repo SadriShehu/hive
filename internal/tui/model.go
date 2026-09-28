@@ -651,7 +651,7 @@ func (m Model) selected() (store.Session, bool) {
 
 // rebuild lays the tree out as rows, keeping the selection on the same session.
 func (m *Model) rebuild() {
-	roots := tree.Build(m.sessions)
+	roots := tree.DropEmpty(tree.Build(m.sessions))
 	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
 	if !m.showAll && query == "" {
 		roots = tree.Recent(roots, m.now().Add(-recentWindow).UnixMilli())

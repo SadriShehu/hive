@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/store"
 )
 
 func parse(t *testing.T, payload string, env map[string]string) []agent.Event {
@@ -214,4 +215,17 @@ func sameJSON(t *testing.T, a, b []byte) bool {
 		t.Fatal(err)
 	}
 	return reflect.DeepEqual(x, y)
+}
+
+func TestCheckResumeNeedsATranscript(t *testing.T) {
+	dir := t.TempDir()
+	saved := filepath.Join(dir, "saved.jsonl")
+	os.WriteFile(saved, []byte("{}\n"), 0o600)
+	a := New()
+	if err := a.CheckResume(store.Session{Transcript: saved}); err != nil {
+		t.Errorf("saved session refused: %v", err)
+	}
+	if err := a.CheckResume(store.Session{Transcript: filepath.Join(dir, "never-saved.jsonl")}); err == nil {
+		t.Error("a session with no transcript was offered for reopening")
+	}
 }

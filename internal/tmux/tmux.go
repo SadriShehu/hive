@@ -129,8 +129,12 @@ type Window struct {
 	Detached bool     // don't make it the session's current window
 }
 
-// NewWindow opens a window running w.Argv and returns its pane. The window
-// stays open if the program fails, so its error can be read.
+// NewWindow opens a window running w.Argv and returns its pane.
+//
+// A program that exits cleanly closes its window. One that fails leaves a
+// short message behind that Enter dismisses, instead of tmux's dead pane,
+// which takes no keys at all. The window starts on a placeholder so that
+// is in place even for a program that fails at once.
 func NewWindow(w Window) (Pane, error) {
 	if len(w.Argv) == 0 {
 		return Pane{}, errors.New("nothing to run")
@@ -142,15 +146,9 @@ func NewWindow(w Window) (Pane, error) {
 			return Pane{}, err
 		}
 	}
-	args := []string{"new-window", "-P", "-F", "#{pane_id}\t#{pane_pid}\t#{window_index}", "-t", session + ":"}
-	if w.Detached {
-		args = append(args, "-d")
-	}
-	if w.Name != "" {
-		args = append(args, "-n", w.Name)
-	}
+	var place []string // where the program runs, for both the window and the respawn
 	if w.Dir != "" {
-		args = append(args, "-c", w.Dir)
+		place = append(place, "-c", w.Dir)
 	}
 	keys := make([]string, 0, len(w.Env))
 	for k := range w.Env {
@@ -158,22 +156,59 @@ func NewWindow(w Window) (Pane, error) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		args = append(args, "-e", k+"="+w.Env[k])
+		place = append(place, "-e", k+"="+w.Env[k])
 	}
-	args = append(args, "--")
-	args = append(args, w.Argv...)
+
+	args := []string{"new-window", "-d", "-P", "-F", "#{pane_id}\t#{window_index}", "-t", session + ":"}
+	if w.Name != "" {
+		args = append(args, "-n", w.Name)
+	}
+	args = append(append(args, place...), "--", "sleep", "86400")
 	out, err := run(args...)
 	if err != nil {
 		return Pane{}, err
 	}
-	f := strings.Split(out, "\t")
-	if len(f) < 3 {
-		return Pane{}, fmt.Errorf("tmux new-window: unexpected output %q", out)
+	id, window, _ := strings.Cut(out, "\t")
+	pane := Pane{ID: id, Session: session, Window: window, Name: w.Name}
+
+	label := safeLabel(w.Name, w.Argv[0])
+	onFailure := fmt.Sprintf(`set-option -p -t %[1]s remain-on-exit off ; set-hook -pu -t %[1]s pane-died ; `+
+		`respawn-pane -k -t %[1]s "echo; echo '  hive: %[2]s stopped with an error.'; echo '  Press Enter to close this window.'; read _"`,
+		id, label)
+	steps := [][]string{
+		{"set-option", "-p", "-t", id, "remain-on-exit", "failed"},
+		{"set-hook", "-p", "-t", id, "pane-died", onFailure},
+		append(append(append([]string{"respawn-pane", "-k", "-t", id}, place...), "--"), w.Argv...),
 	}
-	pid, _ := strconv.Atoi(f[1])
-	pane := Pane{ID: f[0], PID: pid, Session: session, Window: f[2], Name: w.Name}
-	run("set-option", "-w", "-t", pane.ID, "remain-on-exit", "failed")
+	for _, step := range steps {
+		if _, err := run(step...); err != nil {
+			run("kill-pane", "-t", id)
+			return Pane{}, err
+		}
+	}
+	pid, err := run("display-message", "-p", "-t", id, "#{pane_pid}")
+	if err != nil {
+		return Pane{}, err
+	}
+	pane.PID, _ = strconv.Atoi(pid)
+	if !w.Detached {
+		run("select-window", "-t", id)
+	}
 	return pane, nil
+}
+
+// safeLabel names the program in the failure message, keeping only
+// characters that are safe inside the quoting there.
+func safeLabel(name, program string) string {
+	if name == "" {
+		name = program
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '\'' || r == '"' || r == '\\' || r == '$' || r == '`' || r == ';' || r == '#' {
+			return -1
+		}
+		return r
+	}, name)
 }
 
 // Focus shows pane on the client looking at this process, switching session,

@@ -103,6 +103,9 @@ func (t *Tracker) CanResume(s store.Session) error {
 	case s.Kind == store.KindInternal && !spec.ResumeSubagents:
 		return fmt.Errorf("%s subagents can't be reopened on their own; open the parent", s.Tool)
 	}
+	if checker, ok := t.adapter(s.Tool).(agent.ResumeChecker); ok {
+		return checker.CheckResume(s)
+	}
 	return nil
 }
 

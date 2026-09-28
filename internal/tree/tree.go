@@ -122,6 +122,22 @@ func Recent(roots []*Node, cutoff int64) []*Node {
 	return out
 }
 
+// DropEmpty removes sessions that ended with nothing in them: no title, no
+// prompt, and nothing left under them once their own empty children are
+// gone. Agents pre-warm spare sessions that never get used.
+func DropEmpty(nodes []*Node) []*Node {
+	var out []*Node
+	for _, n := range nodes {
+		c := *n
+		c.Children = DropEmpty(n.Children)
+		if !c.Live && c.Title == "" && c.LastPrompt == "" && len(c.Children) == 0 && !c.Synthetic() {
+			continue
+		}
+		out = append(out, &c)
+	}
+	return out
+}
+
 // Prune removes the nodes for which drop is true, with everything under them.
 func Prune(nodes []*Node, drop func(*Node) bool) []*Node {
 	var out []*Node

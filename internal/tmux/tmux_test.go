@@ -125,3 +125,28 @@ func TestBindingRoundTrip(t *testing.T) {
 		t.Fatalf("after uninstall = %q", data)
 	}
 }
+
+func TestFailedProgramLeavesAMessageEnterCloses(t *testing.T) {
+	isolated(t)
+	failing, err := NewWindow(Window{Session: "base", Name: "claude/app", Detached: true,
+		Argv: []string{"/bin/sh", "-c", "echo 'No conversation found' >&2; exit 1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clean, _ := NewWindow(Window{Session: "base", Name: "clean", Detached: true, Argv: []string{"/bin/sh", "-c", "exit 0"}})
+	alive, _ := NewWindow(Window{Session: "base", Name: "alive", Detached: true, Argv: []string{"sleep", "30"}})
+
+	waitFor(t, "the failure message", func() bool {
+		screen, _ := Capture(failing.ID)
+		return strings.Contains(screen, "hive: claude/app stopped with an error.") && strings.Contains(screen, "Press Enter")
+	})
+	if PaneExists(clean.ID) {
+		t.Error("a program that exited cleanly left its window open")
+	}
+	if out, _ := run("display-message", "-p", "-t", alive.ID, "#{pane_pid}"); out != fmt.Sprint(alive.PID) || alive.PID == 0 {
+		t.Errorf("pane pid = %s, NewWindow said %d: it must be the program's own", out, alive.PID)
+	}
+
+	run("send-keys", "-t", failing.ID, "Enter")
+	waitFor(t, "Enter to close the window", func() bool { return !PaneExists(failing.ID) })
+}

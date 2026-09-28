@@ -75,6 +75,9 @@ func sample() []store.Session {
 			Kind: "headless", Status: "exited", CreatedAt: ago(40 * time.Minute), UpdatedAt: ago(30 * time.Minute)},
 		{ID: "claude:OLD", Tool: "claude", NativeID: "OLD", Title: "last week's refactor", Cwd: "/src/old",
 			Kind: "interactive", Status: "exited", CreatedAt: ago(7 * 24 * time.Hour), UpdatedAt: ago(7 * 24 * time.Hour)},
+		// A spare session an agent pre-warmed and never used.
+		{ID: "claude:SPARE", Tool: "claude", NativeID: "SPARE", Cwd: "/src/app", Kind: "interactive",
+			Status: "exited", Source: "hook", CreatedAt: ago(10 * time.Minute), UpdatedAt: ago(10 * time.Minute)},
 	}
 }
 

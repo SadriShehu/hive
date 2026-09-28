@@ -44,7 +44,7 @@ func newLsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			roots := tree.Build(sessions)
+			roots := tree.DropEmpty(tree.Build(sessions))
 			switch {
 			case live:
 				roots = tree.Filter(roots, func(n *tree.Node) bool { return n.Session.Live() })

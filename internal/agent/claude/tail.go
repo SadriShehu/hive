@@ -13,6 +13,18 @@ import (
 	"github.com/sadrishehu/hive/internal/store"
 )
 
+// CheckResume refuses sessions Claude never saved: one that got no message
+// has no transcript, and `claude --resume` fails on it.
+func (a *Adapter) CheckResume(s store.Session) error {
+	if s.Transcript == "" {
+		return nil
+	}
+	if _, err := os.Stat(s.Transcript); err != nil {
+		return errors.New("Claude never saved it: it ended before its first message")
+	}
+	return nil
+}
+
 // tailBytes is how much of a transcript's end the preview reads.
 const tailBytes = 512 << 10
 

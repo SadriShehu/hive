@@ -127,6 +127,13 @@ func placeholder(arg string) (string, bool) {
 	return "", false
 }
 
+// ResumeChecker is implemented by adapters that can tell ahead of time that a
+// session can't be reopened, so hive can say why instead of opening a window
+// that fails.
+type ResumeChecker interface {
+	CheckResume(s store.Session) error
+}
+
 // Line is one entry of a session's transcript, for the preview.
 type Line struct {
 	Role string // "user", "assistant" or "tool"
