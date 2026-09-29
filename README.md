@@ -7,6 +7,21 @@ wraps or reimplements an agent.
 
 How it works, and why: [DESIGN.md](DESIGN.md).
 
+## Demo
+
+![hive tracking live Claude Code, opencode, Copilot CLI and Codex sessions as one tree, then jumping between them](docs/demo.gif)
+
+A Claude session spawns an opencode subagent, which runs a headless Codex exec; all
+three show up as one tree. From there: watch each pane live, jump into one, send it a
+message, or start a child of your own.
+
+```sh
+hive                 # the tree, in the current pane or a `hive` tmux session
+```
+
+With the popup bound (`hive install tmux`), **prefix + a** opens the tree over whatever
+you're doing and closes once you jump somewhere.
+
 ## Status
 
 All five phases are done: live tracking of Claude Code, opencode, Copilot CLI and
@@ -222,3 +237,7 @@ Hooks never print. Errors go to `~/.local/share/hive/hive.log`; set `HIVE_DEBUG=
 an agent's environment to log every linking decision. `HIVE_HOME` moves the database
 and log elsewhere; `HIVE_TMUX_SOCKET=name` points hive at a named tmux server
 (`tmux -L name`).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
