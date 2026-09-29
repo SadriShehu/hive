@@ -334,6 +334,19 @@ func (t *Tracker) parentOf(id string, ev agent.Event, pid int, pane string) (str
 			return l.ParentID, "launch"
 		}
 	}
+	return t.inherited(id, pid)
+}
+
+// Caller is the session running the command that runs hive, found the way a
+// new session's parent is (steps 3–5 of parentOf), or "" outside any agent.
+func (t *Tracker) Caller() string {
+	id, _ := t.inherited("", t.World.SelfPID())
+	return id
+}
+
+// inherited finds id's parent from pid's ancestors and the environment.
+func (t *Tracker) inherited(id string, pid int) (string, string) {
+	ok := func(p string) bool { return p != "" && p != id }
 	if pid > 0 {
 		for _, a := range t.World.Procs().Ancestors(pid) {
 			sessions, err := t.Store.OnPID(a)

@@ -32,3 +32,15 @@ func DBPath() string { return filepath.Join(DataDir(), "hive.db") }
 
 // LogPath receives errors from hook invocations, which must never print.
 func LogPath() string { return filepath.Join(DataDir(), "hive.log") }
+
+// ConfigPath is the optional config file that adds tools or changes built-in
+// ones. HIVE_CONFIG overrides it.
+func ConfigPath() string {
+	if p := os.Getenv("HIVE_CONFIG"); p != "" {
+		return p
+	}
+	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
+		return filepath.Join(d, "hive", "config.toml")
+	}
+	return filepath.Join(Home(), ".config", "hive", "config.toml")
+}

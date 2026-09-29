@@ -9,9 +9,11 @@ Design doc: https://claude.ai/code/artifact/5df7a9f0-da62-4b84-a527-eec21528bf63
 
 ## Status
 
-Phases 1–3 of 5 are done: live tracking, every past session imported and linked to
-the session that spawned it, and the tree UI to jump into, message, start, reopen and
-stop agents. The agent-facing commands (`hive new --wait`, `send`, `tail`) come next.
+All five phases are done: live tracking of Claude Code, opencode, Copilot CLI and
+Codex; every past session imported and linked to the session that spawned it; the
+tree UI to jump into, message, start, reopen and stop agents; the same actions as
+commands, so agents can run agents of their own; and tools added or changed in a
+config file.
 
 ## Install
 
@@ -87,6 +89,25 @@ hive sync         # import history now (hive ls does this on its own); --full re
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited.
 `run` marks a headless session, `sub` a tool's own subagent.
 
+Every action in the tree is also a command, so an agent can start interactive
+children, talk to them and check on them:
+
+```sh
+hive new opencode -p "port the tests" --wait   # start it in its own tmux window; prints its ID
+hive send <id> "now run them"                  # type into it; an ended one reopens with the message
+hive tail <id> -n 20                           # the end of its transcript (--json for agents)
+hive jump <id>                                 # go to its pane, reopening it if it has ended
+hive resume <id> -p "carry on"                 # reopen an ended session in the background
+hive kill <id>                                 # stop it; a window hive opened closes with it
+hive doctor                                    # check tmux, the database and every agent's hooks
+```
+
+An `<id>` is the full ID (`claude:48873400-…`), the tool's own ID, or any unique
+prefix of either. `hive new` starts in the current folder (`--cwd` to change it), in
+the background (`--focus` to switch to it), linked under the agent running the command
+(`--parent none` or `--parent <id>` to change that). `--wait` returns once the agent has
+reported in, so a `hive send` right after it isn't typed before the agent can read it.
+
 ## How linking works
 
 Any agent can spawn any agent, in any direction; linking lives in hive's core, not in
@@ -129,6 +150,32 @@ only links sessions nothing else claims.
 A running agent that never reported in (started before `hive install`) is matched to
 its transcript when that is unambiguous: it is the only such process of its tool in
 its folder, and exactly one session there was active since it started.
+
+## Adding or changing a tool
+
+A tool hive doesn't ship with is a few lines of config, and so is a change to a
+built-in one:
+
+```toml
+# ~/.config/hive/config.toml ($XDG_CONFIG_HOME/hive/config.toml; HIVE_CONFIG overrides)
+[[agent]]
+name     = "aider"
+new      = ["aider", "--message", "{prompt}"]
+resume   = ["aider", "--restore-chat-history"]
+headless = ["--message"]
+
+[[agent]]  # a built-in tool: only the fields given change
+name = "opencode"
+new  = ["opencode", "-m", "deepseek/deepseek-v4-pro", "--prompt", "{prompt}"]
+```
+
+`new` and `resume` are the commands that start and reopen a session: `{prompt}` is the
+first message, `{session}` an ID hive picks for it, `{id}` the session to reopen, and a
+flag right before an empty placeholder is dropped with it. `process` names the tool's
+processes (by default, the program `new` runs); `headless`, `title_flags`,
+`session_flags` and `parent_env` help link past spawns, as in the built-in adapters.
+A new tool reports through `hive hook <name>`, below. A config with mistakes is
+ignored, and `hive doctor` says what is wrong with it.
 
 ## Any tool can report
 

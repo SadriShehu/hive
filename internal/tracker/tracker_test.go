@@ -53,7 +53,7 @@ func newWorld(t *testing.T) (*Tracker, *fakeWorld) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return New(st, adapters.All(), w), w
+	return New(st, adapters.Builtin(), w), w
 }
 
 // claudeHook ingests a Claude hook event the way Claude runs it: hive under
