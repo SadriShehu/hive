@@ -288,36 +288,6 @@ func newTailCmd() *cobra.Command {
 	return cmd
 }
 
-func newRmCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "rm <id>",
-		Aliases: []string{"delete"},
-		Short:   "Delete a session and everything under it from hive",
-		Long: "Delete a session and every session under it from hive's records; the tool's own\n" +
-			"transcript stays. Everything in there must have ended first (`hive kill`). A deleted\n" +
-			"session comes back if its agent reports in again; history imports leave it out.",
-		Args: cobra.ExactArgs(1),
-		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
-			family, err := tr.Delete(s)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(os.Stderr, deletedText(s.ID, len(family)-1))
-			return nil
-		}),
-	}
-}
-
-func deletedText(name string, below int) string {
-	switch below {
-	case 0:
-		return "deleted " + name
-	case 1:
-		return "deleted " + name + " and the 1 session under it"
-	}
-	return fmt.Sprintf("deleted %s and the %d sessions under it", name, below)
-}
-
 func newKillCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "kill <id>",

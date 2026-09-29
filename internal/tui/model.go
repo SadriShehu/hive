@@ -1,12 +1,14 @@
 // Package tui is hive's terminal UI: the session tree, a live preview of the
-// selected session, and the keys to jump into, message, start, reopen and
-// stop agents.
+// selected session, and the keys to jump into, message, start, reopen, stop
+// and delete agents; and the trash, to restore sessions or delete them for
+// good.
 package tui
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,7 +55,8 @@ type Model struct {
 	width, height int
 
 	sessions []store.Session
-	byID     map[string]store.Session
+	trashed  []store.Session
+	byID     map[string]store.Session // both of them
 	rows     []row
 	cursor   int
 	offset   int
@@ -62,6 +65,7 @@ type Model struct {
 	collapsed map[string]bool
 	showAll   bool
 	hideSubs  bool
+	trash     bool // the trash shows instead of the tree
 	filter    textinput.Model
 
 	mode      mode
@@ -96,18 +100,40 @@ type preview struct {
 	err     string
 }
 
+// Actions that ask first.
+const (
+	actStop  = "stop"
+	actTrash = "trash"
+	actPurge = "purge"
+)
+
+// confirmation is an action waiting for y.
 type confirmation struct {
+	action  string
 	session store.Session
-	remove  bool
-	below   int
+	below   int // sessions under it that go with it
 }
 
-func descendants(n *tree.Node) int {
-	count := 0
-	for _, c := range n.Children {
-		count += 1 + descendants(c)
+// under returns every session below id in sessions, at any depth.
+func under(sessions []store.Session, id string) []store.Session {
+	children := map[string][]store.Session{}
+	for _, s := range sessions {
+		if s.ParentID != "" {
+			children[s.ParentID] = append(children[s.ParentID], s)
+		}
 	}
-	return count
+	var out []store.Session
+	seen := map[string]bool{id: true}
+	for queue := []string{id}; len(queue) > 0; queue = queue[1:] {
+		for _, c := range children[queue[0]] {
+			if !seen[c.ID] {
+				seen[c.ID] = true
+				out = append(out, c)
+				queue = append(queue, c.ID)
+			}
+		}
+	}
+	return out
 }
 
 func belowText(below int) string {
@@ -178,8 +204,8 @@ func visibleRows(area textarea.Model, limit int) []string {
 type (
 	tickMsg      time.Time
 	refreshedMsg struct {
-		sessions []store.Session
-		err      error
+		sessions, trashed []store.Session
+		err               error
 	}
 	syncedMsg  struct{ err error }
 	previewMsg struct {
@@ -268,7 +294,11 @@ func (m *Model) refreshCmd() tea.Cmd {
 	ops := m.ops
 	return func() tea.Msg {
 		s, err := ops.Refresh()
-		return refreshedMsg{s, err}
+		if err != nil {
+			return refreshedMsg{err: err}
+		}
+		trashed, err := ops.Trashed()
+		return refreshedMsg{sessions: s, trashed: trashed, err: err}
 	}
 }
 
@@ -338,9 +368,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		first := !m.loaded
 		m.loaded = true
-		m.sessions = msg.sessions
-		m.byID = make(map[string]store.Session, len(msg.sessions))
-		for _, s := range msg.sessions {
+		m.sessions, m.trashed = msg.sessions, msg.trashed
+		m.byID = make(map[string]store.Session, len(msg.sessions)+len(msg.trashed))
+		for _, s := range append(slices.Clip(msg.trashed), msg.sessions...) {
 			m.byID[s.ID] = s
 		}
 		m.rebuild()
@@ -395,6 +425,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeHelp:
 			m.mode = modeNormal
 			return m, nil
+		}
+		if m.trash {
+			return m.keyTrash(msg)
 		}
 		return m.keyNormal(msg)
 	}
@@ -482,19 +515,22 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setFlash(label(s)+" isn't running as a process of its own", true)
 				return m, nil
 			}
-			m.mode, m.confirm = modeConfirm, confirmation{session: s}
+			m.mode, m.confirm = modeConfirm, confirmation{action: actStop, session: s}
 		}
 	case "d":
 		if ok {
+			family := under(m.sessions, s.ID)
 			switch {
 			case s.Synthetic():
 				m.setFlash(label(s)+" hasn't reported in yet; hive can't delete it", true)
-			case m.rows[m.cursor].node.Live:
+			case s.Live() || slices.ContainsFunc(family, store.Session.Live):
 				m.setFlash(label(s)+" or something under it is still running; stop it first", true)
 			default:
-				m.mode, m.confirm = modeConfirm, confirmation{session: s, remove: true, below: descendants(m.rows[m.cursor].node)}
+				m.mode, m.confirm = modeConfirm, confirmation{action: actTrash, session: s, below: len(family)}
 			}
 		}
+	case "t":
+		return m.showTrash(true)
 	case "/":
 		m.mode = modeFilter
 		m.filter.Width = max(10, m.width/2)
@@ -526,6 +562,47 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeHelp
 	}
 	return m, nil
+}
+
+// keyTrash handles the keys that differ in the trash; moving around, folding
+// and filtering work as in the tree.
+func (m Model) keyTrash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	s, ok := m.selected()
+	switch msg.String() {
+	case "esc":
+		if m.filter.Value() != "" {
+			return m.keyNormal(msg)
+		}
+		return m.showTrash(false)
+	case "t":
+		return m.showTrash(false)
+	case "r":
+		if ok {
+			ops := m.ops
+			return m, func() tea.Msg {
+				family, err := ops.Restore(s)
+				return doneMsg{text: "restored " + label(s) + belowText(len(family)-1), err: err}
+			}
+		}
+	case "d":
+		if ok {
+			m.mode, m.confirm = modeConfirm, confirmation{action: actPurge, session: s, below: len(under(m.trashed, s.ID))}
+		}
+	case "enter", "s", "n", "c", "x", "a":
+		m.setFlash("in the trash: r restores, d deletes for good, t goes back", true)
+	default:
+		return m.keyNormal(msg)
+	}
+	return m, nil
+}
+
+// showTrash switches between the tree and the trash.
+func (m Model) showTrash(on bool) (tea.Model, tea.Cmd) {
+	m.trash = on
+	m.filter.SetValue("")
+	m.cursor, m.offset, m.selID = 0, 0, ""
+	m.rebuild()
+	return m, m.previewCmd()
 }
 
 func (m Model) keyFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -584,15 +661,31 @@ func (m Model) keyConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() != "y" {
 		return m, nil
 	}
-	c, ops := m.confirm, m.ops
-	if c.remove {
+	c, ops, name := m.confirm, m.ops, label(m.confirm.session)
+	switch c.action {
+	case actTrash:
 		return m, func() tea.Msg {
-			family, err := ops.Delete(c.session)
-			return doneMsg{text: "deleted " + label(c.session) + belowText(len(family)-1), err: err}
+			family, err := ops.Trash(c.session)
+			return doneMsg{text: "moved " + name + belowText(len(family)-1) + " to the trash; t shows it", err: err}
+		}
+	case actPurge:
+		return m, func() tea.Msg {
+			purged, err := ops.Purge(c.session)
+			if err != nil {
+				if n := len(purged.Sessions); n > 0 {
+					err = fmt.Errorf("deleted %d for good, then stopped: %w", n, err)
+				}
+				return doneMsg{err: err}
+			}
+			text := "deleted " + name + belowText(len(purged.Sessions)-1) + " for good"
+			if len(purged.Kept) > 0 {
+				text += "; hive can't delete " + strings.Join(purged.Kept, ", ") + " sessions, whose own copies stay"
+			}
+			return doneMsg{text: text}
 		}
 	}
 	return m, func() tea.Msg {
-		return doneMsg{text: "stopped " + label(c.session), err: ops.Stop(c.session)}
+		return doneMsg{text: "stopped " + name, err: ops.Stop(c.session)}
 	}
 }
 
@@ -751,7 +844,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if i := m.offset + msg.Y - 1; msg.Y >= 1 && i < len(m.rows) && msg.Y <= m.bodyHeight() {
-			if i == m.cursor {
+			if i == m.cursor && !m.trash {
 				return m, m.jump(m.rows[i].node.Session)
 			}
 			return m.move(i - m.cursor)
@@ -786,12 +879,19 @@ func (m Model) selected() (store.Session, bool) {
 	return m.rows[m.cursor].node.Session, true
 }
 
-// rebuild lays the tree out as rows, keeping the selection on the same session.
+// rebuild lays the tree, or the trash, out as rows, keeping the selection on
+// the same session. The trash shows everything in it, empty sessions too:
+// they go with whatever they are under.
 func (m *Model) rebuild() {
-	roots := tree.DropEmpty(tree.Build(m.sessions))
 	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
-	if !m.showAll && query == "" {
-		roots = tree.Recent(roots, m.now().Add(-recentWindow).UnixMilli())
+	var roots []*tree.Node
+	switch {
+	case m.trash:
+		roots = tree.Build(m.trashed)
+	case !m.showAll && query == "":
+		roots = tree.Recent(tree.DropEmpty(tree.Build(m.sessions)), m.now().Add(-recentWindow).UnixMilli())
+	default:
+		roots = tree.DropEmpty(tree.Build(m.sessions))
 	}
 	if m.hideSubs {
 		roots = tree.Prune(roots, func(n *tree.Node) bool { return n.Kind == store.KindInternal })
@@ -890,7 +990,7 @@ func title(s store.Session) string {
 		return "(untracked)"
 	case "pending":
 		return "(new session: waiting for its first message)"
-	case "launch":
+	case store.SourceLaunch:
 		return "(new session)"
 	}
 	return "(untitled)"

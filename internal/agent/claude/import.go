@@ -79,7 +79,7 @@ func readTranscript(path string, mtime time.Time, found func(agent.ShellCommand)
 	defer f.Close()
 
 	t := &transcript{found: found}
-	s := store.Session{Tool: name, Status: store.StatusExited, Transcript: path, Source: "import"}
+	s := store.Session{Tool: name, Status: store.StatusExited, Transcript: path, Source: store.SourceImport}
 	if filepath.Base(filepath.Dir(path)) == "subagents" {
 		// <project>/<session>/subagents/agent-<id>.jsonl
 		session := filepath.Base(filepath.Dir(filepath.Dir(path)))

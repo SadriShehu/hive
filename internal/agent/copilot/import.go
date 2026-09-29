@@ -119,7 +119,7 @@ func (a *Adapter) importDB(ctx context.Context, st *store.Store, changed map[str
 			ID: store.ID(name, r.id), Tool: name, NativeID: r.id, Title: r.title, Cwd: r.cwd,
 			Kind: store.KindInteractive, Status: store.StatusExited,
 			Transcript: filepath.Join(a.sessionStateDir(), r.id, "events.jsonl"),
-			LastPrompt: prompt, CreatedAt: created, UpdatedAt: updated, Source: "import",
+			LastPrompt: prompt, CreatedAt: created, UpdatedAt: updated, Source: store.SourceImport,
 		}
 		if err := st.Upsert(session); err != nil {
 			return err
@@ -199,7 +199,7 @@ func (a *Adapter) importEventFiles(ctx context.Context, st *store.Store, found f
 			ID: store.ID(name, sessionID), Tool: name, NativeID: sessionID, Title: title,
 			Cwd: cwd, Kind: store.KindInteractive, Status: store.StatusExited,
 			Transcript: eventPath, LastPrompt: prompt,
-			CreatedAt: created, UpdatedAt: updated, Source: "import",
+			CreatedAt: created, UpdatedAt: updated, Source: store.SourceImport,
 		}
 		if session.CreatedAt == 0 || session.UpdatedAt == 0 {
 			if info != nil {

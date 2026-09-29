@@ -76,8 +76,16 @@ func (m Model) headerLine() string {
 	left := sBadge.Render("hive") + "  " +
 		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live)) +
 		sDim.Render(fmt.Sprintf("  ·  %d sessions", total))
+	if len(m.trashed) > 0 {
+		left += sDim.Render(fmt.Sprintf("  ·  %d in the trash", len(m.trashed)))
+	}
 	scope := "last 24h"
-	if m.showAll {
+	switch {
+	case m.trash:
+		left = sBadge.Render("hive") + "  " + sText.Render("trash") +
+			sDim.Render(fmt.Sprintf("  ·  %d sessions, deleted from hive; their tools still have them", len(m.trashed)))
+		scope = "t goes back"
+	case m.showAll:
 		scope = "all history"
 	}
 	if q := m.filter.Value(); q != "" {
@@ -104,6 +112,8 @@ func (m Model) treeLines(w, h int) []string {
 		out = []string{sDim.Render(" loading sessions…")}
 	case len(m.rows) == 0 && m.filter.Value() != "":
 		out = []string{sDim.Render(" nothing matches; esc clears the filter")}
+	case len(m.rows) == 0 && m.trash:
+		out = []string{sDim.Render(" the trash is empty"), "", sDim.Render(" t  back to the tree")}
 	case len(m.rows) == 0:
 		out = []string{sDim.Render(" nothing active in the last 24h"), "",
 			sDim.Render(" a  show all history"), sDim.Render(" n  start an agent")}
@@ -185,6 +195,10 @@ func (m Model) previewLines(w, h int) []string {
 		}
 		head = append(head, sDim.Render(ansi.Truncate("from "+from, w, "…")))
 	}
+	if s.DeletedAt > 0 {
+		head = append(head, sError.Render(ansi.Truncate("in the trash since "+age(m.now(), s.DeletedAt)+
+			" ago · r restores it · d deletes it for good", w, "…")))
+	}
 	ids := s.ID
 	if s.CreatedAt > 0 {
 		ids += " · started " + age(m.now(), s.CreatedAt) + " ago"
@@ -207,7 +221,7 @@ func (m Model) where(s store.Session) string {
 		parts = append(parts, "inside its parent", "↵ jumps to the parent")
 	case s.PID > 0:
 		parts = append(parts, fmt.Sprintf("pid %d", s.PID), "not in tmux")
-	case m.ops.CanResume(s) == nil:
+	case s.DeletedAt == 0 && m.ops.CanResume(s) == nil:
 		parts = append(parts, "↵ reopens it")
 	}
 	if len(parts) == 0 {
@@ -318,8 +332,12 @@ func (m Model) hintLine() string {
 	case modeConfirm:
 		c := m.confirm
 		question := fmt.Sprintf("stop %s (pid %d)? ", label(c.session), c.session.PID)
-		if c.remove {
-			question = fmt.Sprintf("delete %s%s from hive? ", label(c.session), belowText(c.below))
+		switch c.action {
+		case actTrash:
+			question = fmt.Sprintf("move %s%s to the trash? ", label(c.session), belowText(c.below))
+		case actPurge:
+			question = fmt.Sprintf("delete %s%s for good, transcripts and all? there's no undo ",
+				label(c.session), belowText(c.below))
 		}
 		return sError.Render(question) + keys("y", "yes", "any other key", "no")
 	case modeNew:
@@ -327,8 +345,12 @@ func (m Model) hintLine() string {
 	case modeHelp:
 		return keys("any key", "close")
 	}
+	if m.trash {
+		return ansi.Truncate(keys("r", "restore", "d", "delete for good", "t", "back", "/", "filter",
+			"i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+	}
 	return ansi.Truncate(keys("↵", "jump", "s", "send", "n", "new", "c", "child", "r", "reopen", "x", "stop",
-		"d", "delete", "/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+		"d", "delete", "t", "trash", "/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
 }
 
 func keys(pairs ...string) string {
@@ -356,7 +378,8 @@ func helpLines() []string {
 		{"n / c", "start a new agent / a new agent as a child of the selected one"},
 		{"r", "reopen a finished session in its tool's own TUI"},
 		{"x", "stop the session's process (asks first)"},
-		{"d", "delete the session and everything under it from hive (asks first); the tool's own files stay"},
+		{"d", "move the session and everything under it to the trash (asks first)"},
+		{"t", "show the trash: r restores, d deletes for good, from its tool too (asks first)"},
 		{"/", "filter by title, folder or ID (searches all history)"},
 		{"a", "show all history / only the last 24h"},
 		{"i", "hide / show subagents"},

@@ -62,7 +62,7 @@ func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.
 	for _, r := range changed {
 		s := store.Session{
 			ID: store.ID(name, r.id), Tool: name, NativeID: r.id, Title: r.title, Cwd: r.dir,
-			Status: store.StatusExited, CreatedAt: r.created, UpdatedAt: r.updated, Source: "import",
+			Status: store.StatusExited, CreatedAt: r.created, UpdatedAt: r.updated, Source: store.SourceImport,
 		}
 		if r.parent != "" {
 			s.ParentID = store.ID(name, r.parent)

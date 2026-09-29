@@ -119,8 +119,8 @@ func (c custom) Uninstall() (string, error) { return "nothing to remove", nil }
 func (c custom) Installed() bool            { return true }
 
 // overridden is a built-in adapter whose Spec config.toml changes. It passes
-// the optional interfaces through, so imports, previews and resume checks
-// work as before.
+// the optional interfaces through, so imports, previews, resume checks and
+// deleting for good work as before.
 type overridden struct {
 	agent.Adapter
 	spec agent.Spec
@@ -154,4 +154,11 @@ func (o overridden) Prewarmed(chain []proc.Proc) bool {
 		return w.Prewarmed(chain)
 	}
 	return false
+}
+
+func (o overridden) Purge(ctx context.Context, s store.Session) error {
+	if p, ok := o.Adapter.(agent.Purger); ok {
+		return p.Purge(ctx, s)
+	}
+	return fmt.Errorf("hive can't delete %s sessions", o.spec.Name)
 }

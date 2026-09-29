@@ -60,7 +60,8 @@ transcript for a headless run, a subagent or a finished session.
 | `n` / `c` | start an agent / start one as a child of the selected session |
 | `r` | reopen a finished session in its tool's own TUI |
 | `x` | stop it (asks first); a window hive opened closes with it |
-| `d` | delete it and everything under it from hive (asks first); the tool's own files stay |
+| `d` | move it and everything under it to the trash (asks first) |
+| `t` | the trash: `r` restores, `d` deletes for good, from its tool too (asks first) |
 | `/` | filter by title, folder or ID, across all history |
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
@@ -102,7 +103,8 @@ hive tail <id> -n 20                           # the end of its transcript (--js
 hive jump <id>                                 # go to its pane, reopening it if it has ended
 hive resume <id> -p "carry on"                 # reopen an ended session in the background
 hive kill <id>                                 # stop it; a window hive opened closes with it
-hive rm <id>                                   # delete it and everything under it from hive's records
+hive rm <id>                                   # move it and everything under it to the trash
+hive trash                                     # list the trash; then `restore <id>`, or `purge <id>` for good
 hive doctor                                    # check tmux, the database and every agent's hooks
 ```
 
@@ -115,10 +117,24 @@ A tool that starts its session only with its first message (opencode without `-p
 gets a stand-in ID, `opencode:pid-N`, which the other commands accept and which
 names the session once it starts.
 
-Deleting a session (`d` in the tree, `hive rm`) removes it and every session under it
-from hive's records only; the tool's own transcript stays where the tool keeps it.
-Everything in there must have ended first. A deleted session stays out of history
-imports, and comes back only if its agent reports in again.
+### Deleting
+
+Deleting goes in two steps. `d` in the tree, or `hive rm`, moves a session and every
+session under it to the trash, once they have all ended: they leave the tree, history
+imports leave them there, and each tool keeps its own copy. From the trash (`t` in the
+tree, `hive trash`) a session comes back with everything under it, or is deleted for
+good: from its tool, the way the tool deletes a session itself, and then from hive. That
+can't be undone, so it asks first; with no terminal to ask on, `hive trash purge` needs
+`--yes`, and `--all` empties the trash. A session in the trash comes back on its own if
+its agent reports in again.
+
+| Tool | Deleting for good removes |
+| --- | --- |
+| Claude Code | a background session through `claude rm` (which refuses while its worktree has unpushed work); then the transcript, its folder (subagents, tool output), and the session's `file-history`, `session-env` and `tasks`. The prompt history all sessions share (`history.jsonl`) keeps its lines |
+| opencode | the session and its messages, through `opencode session delete` |
+| Copilot CLI | its `session-state` folder, as Copilot's own delete does, and its rows in `session-store.db` (turns, files, search index, usage), which Copilot's delete leaves |
+| Codex | the rollout and the thread's row in the state database, through `codex delete` |
+| a tool from config | only hive's record |
 
 ## How linking works
 

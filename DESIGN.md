@@ -24,6 +24,7 @@ Settled before coding started; the Copilot adapter and the config format came la
 | Codex | Built once it was installed | Tested live against Codex 0.158; Codex asks once, in an interactive session, to trust new hooks |
 | Copilot CLI | Added beyond the first plan | Tracked live through user-level hooks; it has no permission hook, so it never shows "needs you" |
 | Config | TOML, `[[agent]]` tables | New tools without Go code; built-in tools changed field by field |
+| Deleting | A trash first, then deleting for good through each tool | Nothing is lost by one key press; what is deleted for good goes the way its tool would delete it, so the tool's own lists stay consistent |
 
 ## Architecture
 
@@ -38,7 +39,7 @@ flowchart TB
   subgraph bin["hive: one Go binary, no daemon"]
     hook["hive hook<br/>finds the parent and pane, sets status, prints nothing"]
     sync["hive sync<br/>imports past sessions, links old spawns"]
-    db[("hive.db (SQLite)<br/>sessions, launches, spawn hints, cursors")]
+    db[("hive.db (SQLite)<br/>sessions, trash, launches, spawn hints, cursors")]
     ui["TUI and CLI<br/>tree, preview, new, send, tail"]
   end
   claude & opencode & copilot & codex -->|status events| hook
@@ -122,8 +123,19 @@ type Adapter interface {
 ```
 
 Optional interfaces add the rest: `Importer` (history for `hive sync`), `Tailer` (the
-preview and `hive tail`), `ResumeChecker` (refuses reopens the tool would fail) and
-`Prewarmer` (sessions a tool starts ahead of use, hidden until their first message).
+preview and `hive tail`), `ResumeChecker` (refuses reopens the tool would fail),
+`Prewarmer` (sessions a tool starts ahead of use, hidden until their first message) and
+`Purger` (deletes a session from the tool's own storage for good).
+
+`Purger` uses the tool's own delete wherever there is one, and treats a session that is
+already gone as deleted. Only IDs made of letters, digits, `-` and `_` reach a file path.
+
+| Tool | Deleting a session for good |
+| --- | --- |
+| Claude Code | `claude rm <short id>` when `jobs/<short id>/state.json` names the session (a `claude --bg` session; it refuses while the worktree has unpushed work, and then nothing else goes); then `projects/*/<id>.jsonl`, `projects/*/<id>/`, `file-history/<id>`, `session-env/<id>`, `tasks/<id>`. A subagent: its `agent-<id>.jsonl` and `.meta.json` |
+| opencode | `opencode session delete <id>`; "Session not found" counts as done |
+| Copilot CLI | `session-state/<id>/`, as Copilot's own delete; then, in one transaction, its rows in every `session-store.db` table with a `session_id` column, and in `sessions` |
+| Codex | `codex delete --force <id>` with `CODEX_HOME` set; a failure with no rollout left counts as done |
 
 | | Claude Code 2.1.283 | opencode 1.18.32 | Copilot CLI 1.0.89 | Codex 0.158.0 |
 | --- | --- | --- | --- | --- |
@@ -182,10 +194,15 @@ is no cgo. Migrations run under `PRAGMA user_version`.
 | `status`, `status_at` | working, attention (needs you), idle or exited; the timestamp drops out-of-order events |
 | `pid`, `pane` | set while live; cleared when the process is gone |
 | `title`, `cwd`, `transcript`, `last_prompt` | display, preview, reopening |
-| `created_at`, `updated_at`, `source` | epoch ms; source is hook, import or launch |
+| `created_at`, `updated_at`, `source` | epoch ms; source is hook, launch, import or inferred (named as a parent by a child) |
 
 Helper tables:
 
+- `trash` — sessions deleted from the tree, and when. Their rows stay in `sessions`, links
+  and all, so restoring loses nothing; every read of the tree leaves them out.
+- `purged_sessions` — IDs deleted for good, so an import can't bring one back from a copy
+  a tool still keeps. Hints matching a purged session as the one a command started stay
+  closed, so that command isn't matched to another session.
 - `launches` — a tmux pane hive opened → tool, parent, title, folder; taken by the first
   session that reports from that pane within 10 minutes.
 - `spawn_hints` — a spawn found in a past shell command: parent, time, tool, title or
@@ -224,6 +241,12 @@ Other keys: `n` new agent, `c` new agent as a child of the selected one, `/` fil
 title, folder or ID, `a` recent or all history, `i` hide or show subagents, `S` sync now,
 `y` copy the ID, `tab` hide the preview, `←` / `→` collapse and expand, `?` help, `q` quit.
 
+**Deleting.** `d` moves the selected session and everything under it to the trash, after
+you confirm; the question counts every session that goes, including ones hidden by the
+filter, `i` or the 24-hour view. It is refused while anything in there runs. `t` shows the
+trash as a tree of its own, with the preview still working: `r` restores a session with
+everything under it, `d` deletes it for good after you confirm, `t` or `esc` goes back.
+
 **Preview.** For a session in a pane, the screen (`tmux capture-pane`); otherwise the end of
 its transcript from the tool's own files, which is how you watch headless runs.
 
@@ -244,6 +267,10 @@ seen yet triggers a history import and one retry.
 | `hive jump <id>` | switch to its pane, reopening it if it has ended; outside tmux, attach |
 | `hive resume <id> [-p text] [--focus]` | reopen an ended session in a background window |
 | `hive kill <id>` | stop its process; a window hive opened closes with it |
+| `hive rm <id>` | move it and everything under it to the trash, once all of it has ended |
+| `hive trash [--json]` | list the trash |
+| `hive trash restore <id>` | bring it back with everything under it |
+| `hive trash purge <id> \| --all [--yes]` | delete for good, from the tools too, deepest first; asks first, and without a terminal needs `--yes` |
 | `hive sync [--full]` | import past sessions and link past spawns |
 | `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a]` | connect tools and bind the popup key; idempotent, backs up first |
 | `hive uninstall [...]` | remove exactly what install added |
@@ -278,6 +305,9 @@ names the real session once it starts.
 | Codex hooks not yet trusted | Codex skips them, even in `codex exec`, until they are accepted once in an interactive `codex` |
 | Two Codex TUIs in one folder | Codex's hooks run in its daemon, so hive matches a TUI it didn't open only when it is the only one in its folder; until one ends, neither gets a pane |
 | A config file with mistakes | ignored whole; `hive doctor` reports it |
+| A session in the trash reports in | a hook event or hive starting it takes it out of the trash, and a session deleted for good is recorded again; an import, a late end event or a child naming it as parent doesn't |
+| A tool fails to delete a session | deleting stops there: what went already is gone from hive too, and the rest stays in the trash with the error shown |
+| An older hive opens the database | it sets the schema version back; every migration since the trash can run again, and a newer version is never lowered |
 
 ## Repo layout
 
@@ -289,13 +319,14 @@ edits, and `BurntSushi/toml`.
 main.go
 internal/
   agent/        Spec, Event, the adapter interfaces, the generic JSON hook
-    claude/     hooks, transcript import, preview, resume check, daemon spares
-    opencode/   plugin (hive.js), opencode.db import, preview
-    copilot/    user-level hooks, session store import, preview
-    codex/      hooks.json, rollout and state DB import, preview
+    agenttest/  fake tools on PATH, for adapter tests
+    claude/     hooks, transcript import, preview, resume check, daemon spares, delete
+    opencode/   plugin (hive.js), opencode.db import, preview, delete
+    copilot/    user-level hooks, session store import, preview, delete
+    codex/      hooks.json, rollout and state DB import, preview, delete
   adapters/     the built-in adapters, with config.toml applied
-  tracker/      linking, liveness, sync, launch/resume/send/stop, lookup
-  store/        SQLite: sessions, launches, spawn hints, import state
+  tracker/      linking, liveness, sync, launch/resume/send/stop, trash and purge, lookup
+  store/        SQLite: sessions, trash, launches, spawn hints, import state
   spawn/        finds agent commands in shell history
   proc/         the process table
   tmux/         windows, panes, paste, capture, the popup binding
@@ -316,6 +347,7 @@ internal/
 | 5. Codex | adapter, non-session subcommands | `56aad41`, `37429d6` | 29 Sep |
 | 4. Agent-facing CLI | `new --wait`, `send`, `tail`, `jump`, `resume`, `kill`, config, `doctor`, stand-in IDs | `e1ecb80`, `eabdbf3` | 29 Sep |
 | — Claude daemon | spares and helper processes hidden | `ef8beea` | 29 Sep |
+| — Deleting | trash (`d`, `hive rm`), restore, deleting for good through each tool | PR #3 | 29 Sep |
 
 ## Testing
 
@@ -331,7 +363,9 @@ internal/
   unset so test agents don't report into the real database. A fake agent — a small program
   that reports through `hive hook` and echoes what is typed — exercises `new`, `send` and
   `kill` without spending anything; real opencode on a free model covered `new --wait`; Copilot
-  and Codex were smoke-tested against scratch data.
+  and Codex were smoke-tested against scratch data. Deleting for good ran with the real
+  `opencode`, `codex` and `claude` binaries against copies of their data in scratch homes
+  (`XDG_DATA_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `COPILOT_HOME`), never the real ones.
 - A claim about a tool (hook format, event names, flags) is checked against the installed
   binary, not its docs: the first Copilot adapter guessed its hook format wrong, which only
   that check caught.

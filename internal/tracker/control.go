@@ -1,6 +1,8 @@
 package tracker
 
 import (
+	"cmp"
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -79,7 +81,7 @@ func (t *Tracker) Launch(o LaunchOptions) (Launched, error) {
 		out.SessionID = store.ID(o.Tool, native)
 		err := errors.Join(
 			t.Store.Upsert(store.Session{ID: out.SessionID, Tool: o.Tool, NativeID: native, ParentID: o.ParentID,
-				Cwd: cwd, Kind: store.KindInteractive, LastPrompt: o.Prompt, CreatedAt: now, UpdatedAt: now, Source: "launch"}),
+				Cwd: cwd, Kind: store.KindInteractive, LastPrompt: o.Prompt, CreatedAt: now, UpdatedAt: now, Source: store.SourceLaunch}),
 			t.Store.Attach(out.SessionID, pane.PID, pane.ID, store.KindInteractive),
 			t.Store.SetStatus(out.SessionID, startStatus(o.Prompt), now),
 		)
@@ -185,33 +187,112 @@ func (t *Tracker) Stop(s store.Session) error {
 	return syscall.Kill(s.PID, syscall.SIGTERM)
 }
 
-// Delete forgets s and everything under it, once nothing in there runs.
-func (t *Tracker) Delete(s store.Session) ([]store.Session, error) {
+// Purged is what Purge deleted.
+type Purged struct {
+	Sessions []store.Session // gone from hive, and from their tools
+	Kept     []string        // tools hive can't delete sessions from: their own copies stay
+}
+
+// Trash moves s and everything under it to the trash, once nothing in there
+// runs. The tools keep their copies, and Restore brings it all back.
+func (t *Tracker) Trash(s store.Session) ([]store.Session, error) {
 	if s.Synthetic() {
 		return nil, errors.New("hive doesn't know which session this process runs yet")
 	}
-	t.World.Forget()
-	if _, err := t.Refresh(); err != nil {
+	family, err := t.idle(s.ID, false)
+	if err != nil {
 		return nil, err
 	}
-	family, err := t.Store.Family(s.ID)
+	return family, t.Store.Trash(sessionIDs(family), t.World.Now())
+}
+
+// Restore takes s and everything under it in the trash out of the trash.
+func (t *Tracker) Restore(s store.Session) ([]store.Session, error) {
+	family, err := t.Store.Family(s.ID, true)
 	if err != nil {
 		return nil, err
 	}
 	if len(family) == 0 {
-		return nil, fmt.Errorf("%s is not in hive's records", s.ID)
+		return nil, fmt.Errorf("%s isn't in the trash", s.ID)
 	}
-	ids := make([]string, len(family))
-	for i, member := range family {
-		if member.Live() {
-			return nil, fmt.Errorf("%s is still running; stop it first", member.ID)
+	return family, t.Store.Restore(sessionIDs(family))
+}
+
+// Purge deletes s and everything under it in the trash for good: from each
+// tool's own storage, then from hive. It goes deepest first and stops at the
+// first session its tool fails to delete, which stays in the trash, and so
+// does everything above it.
+func (t *Tracker) Purge(ctx context.Context, s store.Session) (Purged, error) {
+	var out Purged
+	family, err := t.idle(s.ID, true)
+	if err != nil {
+		return out, err
+	}
+	for _, m := range deepestFirst(family) {
+		if p, ok := t.adapter(m.Tool).(agent.Purger); ok {
+			if err := p.Purge(ctx, m); err != nil {
+				return out, fmt.Errorf("%s: %w", m.ID, err)
+			}
+		} else if !slices.Contains(out.Kept, m.Tool) {
+			out.Kept = append(out.Kept, m.Tool)
 		}
-		ids[i] = member.ID
+		if err := t.Store.Purge(m.ID, t.World.Now()); err != nil {
+			return out, err
+		}
+		out.Sessions = append(out.Sessions, m)
 	}
-	if err := t.Store.Delete(ids, t.World.Now()); err != nil {
+	return out, nil
+}
+
+// idle returns the family of id in the trash or out of it, as trashed says,
+// once it is sure nothing in there runs.
+func (t *Tracker) idle(id string, trashed bool) ([]store.Session, error) {
+	t.World.Forget()
+	if _, err := t.Refresh(); err != nil {
 		return nil, err
 	}
+	family, err := t.Store.Family(id, trashed)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case len(family) == 0 && trashed:
+		return nil, fmt.Errorf("%s isn't in the trash", id)
+	case len(family) == 0:
+		return nil, fmt.Errorf("%s isn't in hive's records, or is in the trash already", id)
+	}
+	for _, m := range family {
+		if m.Live() {
+			return nil, fmt.Errorf("%s is still running; stop it first", m.ID)
+		}
+	}
 	return family, nil
+}
+
+// deepestFirst orders a family so that every session comes before its parent.
+func deepestFirst(family []store.Session) []store.Session {
+	byID := map[string]store.Session{}
+	for _, m := range family {
+		byID[m.ID] = m
+	}
+	depth := func(m store.Session) int {
+		d := 0
+		for p, ok := byID[m.ParentID]; ok && d < len(family); p, ok = byID[p.ParentID] {
+			d++
+		}
+		return d
+	}
+	out := slices.Clone(family)
+	slices.SortStableFunc(out, func(a, b store.Session) int { return cmp.Compare(depth(b), depth(a)) })
+	return out
+}
+
+func sessionIDs(sessions []store.Session) []string {
+	out := make([]string, len(sessions))
+	for i, s := range sessions {
+		out[i] = s.ID
+	}
+	return out
 }
 
 // Tail returns the end of s's transcript.

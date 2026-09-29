@@ -54,7 +54,9 @@ func newLsCmd() *cobra.Command {
 			if asJSON {
 				return printJSON(roots)
 			}
-			printTree(roots, len(sessions))
+			printTree(roots, func(live int) string {
+				return fmt.Sprintf("%d live · %d sessions", live, len(sessions))
+			})
 			hintInstall()
 			return nil
 		},
@@ -91,7 +93,8 @@ type column struct {
 	style string // ANSI SGR parameters
 }
 
-func printTree(roots []*tree.Node, total int) {
+// printTree prints the tree, then a footer saying how many of it are live.
+func printTree(roots []*tree.Node, footer func(live int) string) {
 	now := time.Now()
 	var rows [][]column
 	liveCount := 0
@@ -145,7 +148,7 @@ func printTree(roots []*tree.Node, total int) {
 		}
 		fmt.Println(strings.TrimRight(b.String(), " "))
 	}
-	fmt.Println(paint(fmt.Sprintf("%d live · %d sessions", liveCount, total), "2", color))
+	fmt.Println(paint(footer(liveCount), "2", color))
 }
 
 // hintInstall points at `hive install` for agents on PATH that aren't connected.
@@ -228,7 +231,7 @@ func title(s store.Session) string {
 	switch s.Source {
 	case "scan":
 		return "(untracked)"
-	case "pending", "launch":
+	case "pending", store.SourceLaunch:
 		return "(new session)"
 	}
 	return "(untitled)"
