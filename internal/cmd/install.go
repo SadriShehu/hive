@@ -18,13 +18,13 @@ import (
 func newInstallCmd() *cobra.Command {
 	var bin, key string
 	cmd := &cobra.Command{
-		Use:   "install [claude|opencode|copilot|tmux ...]",
+		Use:   "install [claude|opencode|copilot|codex|tmux ...]",
 		Short: "Connect agents and tmux to hive; safe to rerun",
 		Long: "Connect agents to hive, and bind the tree to a tmux key. With no arguments:\n" +
 			"every agent found on PATH, and tmux when it is installed.\n\n" +
 			"Claude Code gets hooks in its settings.json (backed up to settings.json.bak-hive);\n" +
-			"opencode gets a plugin file; Copilot CLI gets a backed-up user-level hook file; tmux gets\n" +
-			"prefix+a (see --key) opening the tree in a popup. `hive uninstall` removes exactly these.",
+			"opencode gets a plugin file; Copilot CLI and Codex get a backed-up user-level hook file;\n" +
+			"tmux gets prefix+a (see --key) opening the tree in a popup. `hive uninstall` removes exactly these.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hiveBin, err := resolveBin(bin)
 			if err != nil {
@@ -55,7 +55,7 @@ func newInstallCmd() *cobra.Command {
 
 func newUninstallCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "uninstall [claude|opencode|copilot|tmux ...]",
+		Use:   "uninstall [claude|opencode|copilot|codex|tmux ...]",
 		Short: "Remove exactly what install added",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agents, withTmux, err := pickTargets(args, false)
@@ -103,7 +103,7 @@ func pickTargets(args []string, install bool) (agents []agent.Adapter, withTmux 
 		}
 		a, ok := adapters.Get(n)
 		if !ok {
-			return nil, false, fmt.Errorf("unknown target %q (agents: claude, opencode, copilot; or tmux)", n)
+			return nil, false, fmt.Errorf("unknown target %q (agents: claude, opencode, copilot, codex; or tmux)", n)
 		}
 		agents = append(agents, a)
 	}

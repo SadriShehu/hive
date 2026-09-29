@@ -1,6 +1,6 @@
 # hive
 
-Track every coding-agent session (Claude Code, opencode, and GitHub Copilot CLI) as one tree:
+Track every coding-agent session (Claude Code, opencode, GitHub Copilot CLI, and Codex) as one tree:
 who spawned whom, what each agent is doing right now, and a key press to jump into
 or command any of them. Each agent runs its own real TUI in a tmux window; hive never
 wraps or reimplements an agent.
@@ -21,9 +21,11 @@ hive install                                   # connect every agent found on PA
 ```
 
 `hive install` adds hooks to `~/.claude/settings.json` (backed up to
-`settings.json.bak-hive`), writes `~/.config/opencode/plugin/hive.js`, and adds
+`settings.json.bak-hive`), writes `~/.config/opencode/plugin/hive.js`, adds
 `~/.copilot/hooks/hive.json` for Copilot CLI (or `$COPILOT_HOME/hooks/hive.json`,
-backed up to `hive.json.bak-hive` when an existing file is changed).
+backed up to `hive.json.bak-hive` when an existing file is changed), and adds hooks
+to `~/.codex/hooks.json` for Codex (or `$CODEX_HOME/hooks.json`, backed up to
+`hooks.json.bak-hive`). Codex asks you to trust the new hooks when it next starts.
 It is safe to rerun; `hive uninstall` removes exactly what it added. Hooks load when
 an agent starts, so running sessions pick them up after a restart; until then they
 show as untracked, or are adopted as soon as they spawn another agent.
@@ -63,7 +65,7 @@ transcript for a headless run, a subagent or a finished session.
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. Claude and Copilot CLI are given their
 session IDs up front, so they are in the tree at once; opencode shows as a new session
-until its first message.
+until its first message, and Codex reports in as soon as its TUI starts a thread.
 
 ## Use from the shell
 
@@ -99,18 +101,30 @@ the adapters. When a session first reports in, its parent is the first of:
 Copilot CLI does not expose a session-ID environment file or child-shell export
 hook, so its children use process ancestry when the parent is still running.
 
+Codex runs its interactive sessions through a shared `codex app-server` daemon, and
+its hooks run there, not under the TUI in your pane. hive never treats the daemon as
+a session: when a Codex session reports in, hive finds its TUI through the window it
+opened for it, or as the only Codex TUI in that folder; two Codex TUIs in one folder
+stay apart until one of them ends. Codex exports `CODEX_THREAD_ID` to the commands
+it runs, so what a Codex session spawns links to it even through the daemon. Codex's
+own spawned agents are separate threads; they appear as subagents under the thread
+that spawned them.
+
 ### Sessions from before hive
 
 `hive sync` (run by `hive ls`) imports each tool's own history: Claude transcripts
-(`~/.claude/projects`), opencode's database, and Copilot CLI's session store
-(`~/.copilot/session-store.db`, opened read-only) plus session-state event logs. Only
-what changed since the last sync is read, so it takes milliseconds after the first run.
+(`~/.claude/projects`), opencode's database, Copilot CLI's session store
+(`~/.copilot/session-store.db`, opened read-only) plus session-state event logs, and
+Codex's rollouts (`~/.codex/sessions`) plus its state database (`~/.codex/state_*.sqlite`,
+opened read-only) for thread names and spawned-agent links. Only what changed since
+the last sync is read, so it takes milliseconds after the first run.
 
 Past spawns are found in the shell commands every session ran, in any direction:
-`opencode run --title X` inside Claude, `claude -p` inside opencode, and so on. A
-command is matched to the session it started by title first (loop titles like
-`review-p$i` match every run), then by start time and folder; a command continuing a
-session by ID (`opencode run -s ses_…`) only links sessions nothing else claims.
+`opencode run --title X` inside Claude, `claude -p` inside opencode, `codex exec`
+inside either, and so on. A command is matched to the session it started by title
+first (loop titles like `review-p$i` match every run), then by start time and folder;
+a command continuing a session by ID (`opencode run -s ses_…`, `codex resume <id>`)
+only links sessions nothing else claims.
 
 A running agent that never reported in (started before `hive install`) is matched to
 its transcript when that is unambiguous: it is the only such process of its tool in

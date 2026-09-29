@@ -78,6 +78,8 @@ type Spec struct {
 	// Process lists program names that identify the tool's processes.
 	Process []string
 
+	HelperSubcommands []string
+
 	// Headless lists argv markers of a non-interactive run: a flag ("-p")
 	// anywhere, or a subcommand ("run") right after the program name.
 	Headless []string
@@ -88,7 +90,9 @@ type Spec struct {
 
 	// TitleFlags and SessionFlags name the flags that title a new session or
 	// pick the session to continue ("--title", "-s"), so commands found in
-	// history can be matched to the sessions they started.
+	// history can be matched to the sessions they started. A SessionFlags
+	// entry without a leading dash is a subcommand whose next argument is
+	// the session ("resume" for `codex resume <id>`).
 	TitleFlags   []string
 	SessionFlags []string
 
@@ -146,7 +150,13 @@ type Tailer interface {
 }
 
 // Matches reports whether p is one of the tool's processes.
-func (s Spec) Matches(p proc.Proc) bool { return p.Runs(s.Process) }
+func (s Spec) Matches(p proc.Proc) bool {
+	return p.Runs(s.Process) && !s.isHelperProcess(p.Argv())
+}
+
+func (s Spec) isHelperProcess(argv []string) bool {
+	return len(argv) >= 2 && slices.Contains(s.HelperSubcommands, argv[1])
+}
 
 // IsHeadless reports whether argv is a non-interactive run of the tool.
 func (s Spec) IsHeadless(argv []string) bool {

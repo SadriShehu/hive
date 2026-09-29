@@ -203,6 +203,8 @@ func toolStyle(tool string) string {
 		return "36"
 	case "copilot":
 		return "38;5;75"
+	case "codex":
+		return "38;5;35"
 	}
 	return "35"
 }

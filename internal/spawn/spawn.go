@@ -91,7 +91,7 @@ func informational(argv []string) bool {
 func flagValue(argv []string, flags []string) string {
 	for i, a := range argv[1:] {
 		for _, f := range flags {
-			if a == f && i+2 < len(argv) {
+			if a == f && i+2 < len(argv) && valueFollows(f, argv[i+2]) {
 				return argv[i+2]
 			}
 			if v, ok := strings.CutPrefix(a, f+"="); ok {
@@ -100,6 +100,10 @@ func flagValue(argv []string, flags []string) string {
 		}
 	}
 	return ""
+}
+
+func valueFollows(marker, next string) bool {
+	return strings.HasPrefix(marker, "-") || !strings.HasPrefix(next, "-")
 }
 
 // chdir follows `cd args` from cwd. Anything it can't resolve (variables,

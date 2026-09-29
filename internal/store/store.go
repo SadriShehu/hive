@@ -435,11 +435,12 @@ func (s *Store) SetKindIfUnknown(id, kind string) error {
 }
 
 // ClaimCandidates returns top-level sessions of tool in cwd with no process
-// recorded that were active at or after since.
+// recorded that were active at or after since, and did not end after it.
 func (s *Store) ClaimCandidates(tool, cwd string, since int64) ([]Session, error) {
 	rows, err := s.db.Query(`SELECT `+columns+` FROM sessions
-		WHERE tool = ? AND cwd = ? AND pid = 0 AND kind <> ? AND updated_at >= ?`,
-		tool, cwd, KindInternal, since)
+		WHERE tool = ? AND cwd = ? AND pid = 0 AND kind <> ? AND updated_at >= ?
+		AND NOT (status = ? AND status_at > ?)`,
+		tool, cwd, KindInternal, since, StatusExited, since)
 	if err != nil {
 		return nil, err
 	}

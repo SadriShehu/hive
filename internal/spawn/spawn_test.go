@@ -12,6 +12,7 @@ import (
 var specs = []agent.Spec{
 	{Name: "claude", Process: []string{"claude"}, TitleFlags: []string{"-n", "--name"}, SessionFlags: []string{"-r", "--resume", "--session-id"}},
 	{Name: "opencode", Process: []string{"opencode"}, TitleFlags: []string{"--title"}, SessionFlags: []string{"-s", "--session"}},
+	{Name: "codex", Process: []string{"codex"}, Headless: []string{"exec", "e", "review"}, SessionFlags: []string{"resume"}},
 }
 
 func TestFind(t *testing.T) {
@@ -46,6 +47,16 @@ func TestFind(t *testing.T) {
 			[]Found{{Tool: "opencode", Title: "p$i", Cwd: base}}},
 		{"if claude -p check; then echo ok; fi",
 			[]Found{{Tool: "claude", Cwd: base}}},
+		{`codex exec --full-auto "run the tests"`,
+			[]Found{{Tool: "codex", Cwd: base, Headless: true}}},
+		{`codex resume 0f0e0d0c-0b0a-4908-8706-050403020100 "continue"`,
+			[]Found{{Tool: "codex", NativeID: "0f0e0d0c-0b0a-4908-8706-050403020100", Cwd: base}}},
+		{`codex exec resume 0f0e0d0c-0b0a-4908-8706-050403020100 "continue"`,
+			[]Found{{Tool: "codex", NativeID: "0f0e0d0c-0b0a-4908-8706-050403020100", Cwd: base, Headless: true}}},
+		{`codex resume --last`,
+			[]Found{{Tool: "codex", Cwd: base}}},
+		{`codex "fix the build"`,
+			[]Found{{Tool: "codex", Cwd: base}}},
 		// Not invocations.
 		{`echo opencode run --title nope`, nil},
 		{`grep -rn claude .claude/settings.json`, nil},

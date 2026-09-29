@@ -150,6 +150,9 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 		if pid == 0 {
 			pid = t.agentPID(t.spec(ev.Tool))
 		}
+		if pid == 0 && !internal {
+			pid = t.locateProcess(t.spec(ev.Tool), ev.Cwd)
+		}
 		if pid > 0 {
 			var nested bool
 			pane, nested = t.paneOf(pid)
@@ -227,6 +230,54 @@ func (t *Tracker) agentPID(spec agent.Spec) int {
 		}
 	}
 	return 0
+}
+
+func (t *Tracker) locateProcess(spec agent.Spec, cwd string) int {
+	if cwd == "" {
+		return 0
+	}
+	if pid := t.launchedProcessIn(spec, cwd); pid > 0 {
+		return pid
+	}
+	sessions, err := t.Store.All()
+	if err != nil {
+		return 0
+	}
+	var found []int
+	for _, p := range t.orphans(sessions) {
+		if spec.Matches(p) && t.cwd(p) == cwd {
+			found = append(found, p.PID)
+		}
+	}
+	return onlyOne(found)
+}
+
+func (t *Tracker) launchedProcessIn(spec agent.Spec, cwd string) int {
+	launches, err := t.Store.Launches()
+	if err != nil {
+		return 0
+	}
+	byPane := map[string]int{}
+	for _, p := range t.World.Panes() {
+		byPane[p.ID] = p.PID
+	}
+	procs := t.World.Procs()
+	since := t.World.Now() - launchTTL.Milliseconds()
+	var found []int
+	for pane, l := range launches {
+		pid := byPane[pane]
+		if l.Tool == spec.Name && l.Cwd == cwd && l.CreatedAt >= since && spec.Matches(procs[pid]) {
+			found = append(found, pid)
+		}
+	}
+	return onlyOne(found)
+}
+
+func onlyOne(pids []int) int {
+	if len(pids) != 1 {
+		return 0
+	}
+	return pids[0]
 }
 
 // paneOf walks up from pid to the tmux pane hosting it. Meeting another
@@ -498,13 +549,31 @@ func (t *Tracker) claim(sessions []store.Session) (bool, error) {
 		if err := t.Store.Attach(id, p.PID, pane, kind); err != nil {
 			return claimed, err
 		}
-		if err := t.Store.SetStatus(id, store.StatusUnknown, t.World.Now()); err != nil {
+		if candidates[0].Status == store.StatusExited {
+			if err := t.Store.SetStatus(id, store.StatusUnknown, t.World.Now()); err != nil {
+				return claimed, err
+			}
+		}
+		if err := t.adoptLaunchParent(id, pane); err != nil {
 			return claimed, err
 		}
 		t.logf("claim %s pid=%d pane=%q", id, p.PID, pane)
 		claimed = true
 	}
 	return claimed, nil
+}
+
+func (t *Tracker) adoptLaunchParent(id, pane string) error {
+	if pane == "" {
+		return nil
+	}
+	since := t.World.Now() - launchTTL.Milliseconds()
+	l, fresh, err := t.Store.TakeLaunch(pane, since)
+	if err != nil || !fresh || l.ParentID == "" || l.ParentID == id || t.cycles(id, l.ParentID) {
+		return err
+	}
+	_, err = t.Store.SetParent(id, l.ParentID)
+	return err
 }
 
 // placeOf returns the pane a process runs in and whether it is interactive.

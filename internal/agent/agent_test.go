@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/sadrishehu/hive/internal/proc"
 )
 
 func TestIsHeadless(t *testing.T) {
@@ -23,6 +25,26 @@ func TestIsHeadless(t *testing.T) {
 	for _, tt := range tests {
 		if got := tt.spec.IsHeadless(strings.Fields(tt.argv)); got != tt.want {
 			t.Errorf("IsHeadless(%q) = %v, want %v", tt.argv, got, tt.want)
+		}
+	}
+}
+
+func TestMatchesSkipsHelperProcesses(t *testing.T) {
+	codex := Spec{Process: []string{"codex"}, HelperSubcommands: []string{"app-server", "sandbox"}}
+	tests := []struct {
+		argv string
+		want bool
+	}{
+		{"codex", true},
+		{"/opt/homebrew/bin/codex resume abc", true},
+		{"codex exec app-server", true},
+		{"/Users/me/.codex/bin/codex app-server --listen unix://", false},
+		{"codex sandbox -- ls", false},
+		{"claude", false},
+	}
+	for _, tt := range tests {
+		if got := codex.Matches(proc.Proc{Args: strings.Fields(tt.argv)}); got != tt.want {
+			t.Errorf("Matches(%q) = %v, want %v", tt.argv, got, tt.want)
 		}
 	}
 }

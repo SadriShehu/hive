@@ -346,6 +346,81 @@ func TestLaunchedAgentShowsUnderItsParentBeforeReportingIn(t *testing.T) {
 	t.Fatal("launched agent not listed")
 }
 
+func codexHook(t *testing.T, tr *Tracker, w *fakeWorld, id string, typ agent.EventType, cwd string) {
+	t.Helper()
+	w.add(800, 1, "/Users/me/.codex/bin/codex app-server --listen unix:// --managed-daemon")
+	w.add(9800, 800, "/bin/sh -c hive hook codex")
+	w.add(9850, 9800, "hive hook codex")
+	w.self = 9850
+	ingest(t, tr, agent.Event{Tool: "codex", SessionID: id, Type: typ, Cwd: cwd})
+}
+
+func TestDaemonHostedSessionFindsItsProcessInTheLaunchedPane(t *testing.T) {
+	tr, w := newWorld(t)
+	claudeHook(t, tr, w, 100, "A", agent.Start)
+	w.add(700, 80, "/opt/homebrew/bin/codex")
+	w.panes = append(w.panes, tmux.Pane{ID: "%3", PID: 700})
+	if err := tr.Store.PutLaunch(store.Launch{Pane: "%3", Tool: "codex", ParentID: "claude:A", Cwd: "/work", CreatedAt: w.now}); err != nil {
+		t.Fatal(err)
+	}
+	codexHook(t, tr, w, "X", agent.Start, "/work")
+	x := get(t, tr, "codex:X")
+	if x.PID != 700 || x.Pane != "%3" || x.ParentID != "claude:A" || x.Kind != store.KindInteractive || x.Status != store.StatusIdle {
+		t.Fatalf("X = %+v, want pid 700 in %%3, child of claude:A, idle", x)
+	}
+	if a := get(t, tr, "claude:A"); !a.Live() {
+		t.Fatalf("A = %+v, the daemon's pid must not be treated as a session process", a)
+	}
+}
+
+func TestDaemonHostedSessionFindsTheOnlyProcessInItsFolder(t *testing.T) {
+	tr, w := newWorld(t)
+	w.add(700, 95, "codex")
+	codexHook(t, tr, w, "X", agent.Start, "/work")
+	if x := get(t, tr, "codex:X"); x.PID != 700 || x.Pane != "%2" || x.ParentID != "" {
+		t.Fatalf("X = %+v, want pid 700 in %%2 with no parent", x)
+	}
+
+	tr2, w2 := newWorld(t)
+	w2.add(700, 95, "codex")
+	w2.add(701, 95, "codex")
+	codexHook(t, tr2, w2, "Y", agent.Start, "/work")
+	if y := get(t, tr2, "codex:Y"); y.PID != 0 {
+		t.Fatalf("Y = %+v, want no process while two unclaimed TUIs run in /work", y)
+	}
+}
+
+func TestRefreshClaimsDaemonHostedSessionAndAdoptsItsLaunch(t *testing.T) {
+	tr, w := newWorld(t)
+	claudeHook(t, tr, w, 100, "A", agent.Start)
+	w.add(700, 95, "codex")
+	p := w.procs[700]
+	p.Started = 500
+	w.procs[700] = p
+	tr.Store.PutLaunch(store.Launch{Pane: "%2", Tool: "codex", ParentID: "claude:A", Cwd: "/work", CreatedAt: w.now})
+	for _, s := range []store.Session{
+		{ID: "codex:X", Tool: "codex", NativeID: "X", Cwd: "/work", Status: store.StatusIdle, StatusAt: 900, CreatedAt: 900, UpdatedAt: 900, Source: "hook"},
+		{ID: "codex:Y", Tool: "codex", NativeID: "Y", Cwd: "/work", Status: store.StatusExited, StatusAt: 950, CreatedAt: 300, UpdatedAt: 950, Source: "hook"},
+	} {
+		if err := tr.Store.Upsert(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tr.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	x := get(t, tr, "codex:X")
+	if x.PID != 700 || x.Pane != "%2" || x.ParentID != "claude:A" || x.Status != store.StatusIdle {
+		t.Fatalf("X = %+v, want claimed by pid 700 in %%2 under claude:A, still idle", x)
+	}
+	if y := get(t, tr, "codex:Y"); y.PID != 0 {
+		t.Fatalf("Y = %+v, want left alone", y)
+	}
+	if launches, _ := tr.Store.Launches(); len(launches) != 0 {
+		t.Fatalf("launch record kept after the claim: %+v", launches)
+	}
+}
+
 func TestClaudeStartExportsParentForItsShell(t *testing.T) {
 	tr, w := newWorld(t)
 	envFile := filepath.Join(t.TempDir(), "env")
