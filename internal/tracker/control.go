@@ -185,6 +185,35 @@ func (t *Tracker) Stop(s store.Session) error {
 	return syscall.Kill(s.PID, syscall.SIGTERM)
 }
 
+// Delete forgets s and everything under it, once nothing in there runs.
+func (t *Tracker) Delete(s store.Session) ([]store.Session, error) {
+	if s.Synthetic() {
+		return nil, errors.New("hive doesn't know which session this process runs yet")
+	}
+	t.World.Forget()
+	if _, err := t.Refresh(); err != nil {
+		return nil, err
+	}
+	family, err := t.Store.Family(s.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(family) == 0 {
+		return nil, fmt.Errorf("%s is not in hive's records", s.ID)
+	}
+	ids := make([]string, len(family))
+	for i, member := range family {
+		if member.Live() {
+			return nil, fmt.Errorf("%s is still running; stop it first", member.ID)
+		}
+		ids[i] = member.ID
+	}
+	if err := t.Store.Delete(ids, t.World.Now()); err != nil {
+		return nil, err
+	}
+	return family, nil
+}
+
 // Tail returns the end of s's transcript.
 func (t *Tracker) Tail(s store.Session, n int) ([]agent.Line, error) {
 	if tailer, ok := t.adapter(s.Tool).(agent.Tailer); ok {

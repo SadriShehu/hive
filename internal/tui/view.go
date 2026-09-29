@@ -316,14 +316,19 @@ func (m Model) hintLine() string {
 	case modeFilter:
 		return m.filter.View()
 	case modeConfirm:
-		return sError.Render(fmt.Sprintf("stop %s (pid %d)? ", label(m.confirm), m.confirm.PID)) + keys("y", "yes", "any other key", "no")
+		c := m.confirm
+		question := fmt.Sprintf("stop %s (pid %d)? ", label(c.session), c.session.PID)
+		if c.remove {
+			question = fmt.Sprintf("delete %s%s from hive? ", label(c.session), belowText(c.below))
+		}
+		return sError.Render(question) + keys("y", "yes", "any other key", "no")
 	case modeNew:
 		return keys("↵", "next / start", "tab", "field", "←/→", "tool", "esc", "cancel")
 	case modeHelp:
 		return keys("any key", "close")
 	}
 	return ansi.Truncate(keys("↵", "jump", "s", "send", "n", "new", "c", "child", "r", "reopen", "x", "stop",
-		"/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+		"d", "delete", "/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
 }
 
 func keys(pairs ...string) string {
@@ -351,6 +356,7 @@ func helpLines() []string {
 		{"n / c", "start a new agent / a new agent as a child of the selected one"},
 		{"r", "reopen a finished session in its tool's own TUI"},
 		{"x", "stop the session's process (asks first)"},
+		{"d", "delete the session and everything under it from hive (asks first); the tool's own files stay"},
 		{"/", "filter by title, folder or ID (searches all history)"},
 		{"a", "show all history / only the last 24h"},
 		{"i", "hide / show subagents"},

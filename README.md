@@ -60,6 +60,7 @@ transcript for a headless run, a subagent or a finished session.
 | `n` / `c` | start an agent / start one as a child of the selected session |
 | `r` | reopen a finished session in its tool's own TUI |
 | `x` | stop it (asks first); a window hive opened closes with it |
+| `d` | delete it and everything under it from hive (asks first); the tool's own files stay |
 | `/` | filter by title, folder or ID, across all history |
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
@@ -101,6 +102,7 @@ hive tail <id> -n 20                           # the end of its transcript (--js
 hive jump <id>                                 # go to its pane, reopening it if it has ended
 hive resume <id> -p "carry on"                 # reopen an ended session in the background
 hive kill <id>                                 # stop it; a window hive opened closes with it
+hive rm <id>                                   # delete it and everything under it from hive's records
 hive doctor                                    # check tmux, the database and every agent's hooks
 ```
 
@@ -112,6 +114,11 @@ reported in, so a `hive send` right after it isn't typed before the agent can re
 A tool that starts its session only with its first message (opencode without `-p`)
 gets a stand-in ID, `opencode:pid-N`, which the other commands accept and which
 names the session once it starts.
+
+Deleting a session (`d` in the tree, `hive rm`) removes it and every session under it
+from hive's records only; the tool's own transcript stays where the tool keeps it.
+Everything in there must have ended first. A deleted session stays out of history
+imports, and comes back only if its agent reports in again.
 
 ## How linking works
 

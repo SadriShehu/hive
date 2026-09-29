@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -102,5 +103,87 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeleteFamilyAndTombstones(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "hive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, s := range []Session{
+		{ID: "claude:A", Tool: "claude", NativeID: "A", CreatedAt: 1, UpdatedAt: 1},
+		{ID: "opencode:B", Tool: "opencode", NativeID: "B", ParentID: "claude:A", CreatedAt: 2, UpdatedAt: 2},
+		{ID: "claude:C", Tool: "claude", NativeID: "C", ParentID: "opencode:B", CreatedAt: 3, UpdatedAt: 3},
+		{ID: "claude:D", Tool: "claude", NativeID: "D", ParentID: "claude:A", CreatedAt: 4, UpdatedAt: 4},
+		{ID: "claude:E", Tool: "claude", NativeID: "E", CreatedAt: 5, UpdatedAt: 5},
+	} {
+		if err := st.Upsert(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.PutHint(Hint{ParentID: "opencode:B", At: 3, Tool: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutHint(Hint{ParentID: "claude:E", At: 6, Tool: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutLaunch(Launch{Pane: "%1", Tool: "claude", ParentID: "claude:A", CreatedAt: 7}); err != nil {
+		t.Fatal(err)
+	}
+	family, err := st.Family("claude:A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, s := range family {
+		ids = append(ids, s.ID)
+	}
+	if strings.Join(ids, " ") != "claude:A opencode:B claude:C claude:D" {
+		t.Fatalf("family = %v", ids)
+	}
+	if err := st.Delete(ids, 10); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if _, ok, _ := st.Get(id); ok {
+			t.Errorf("%s still recorded", id)
+		}
+	}
+	if _, ok, _ := st.Get("claude:E"); !ok {
+		t.Error("an unrelated session was deleted")
+	}
+	hints, _ := st.OpenHints()
+	if len(hints) != 1 || hints[0].ParentID != "claude:E" {
+		t.Errorf("hints = %+v, want only E's", hints)
+	}
+	if launches, _ := st.Launches(); len(launches) != 0 {
+		t.Errorf("launches = %+v, want the deleted parent's gone", launches)
+	}
+	deleted, _ := st.DeletedIDs()
+	if len(deleted) != 4 || !deleted["claude:C"] {
+		t.Errorf("deleted = %v", deleted)
+	}
+	if err := st.Upsert(Session{ID: "claude:C", Tool: "claude", NativeID: "C", Source: SourceImport, CreatedAt: 3, UpdatedAt: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Get("claude:C"); ok {
+		t.Error("an import brought a deleted session back")
+	}
+	if err := st.Upsert(Session{ID: "claude:C", Tool: "claude", NativeID: "C", Source: "hook", CreatedAt: 3, UpdatedAt: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.Get("claude:C"); !ok {
+		t.Fatal("a hook event did not bring the session back")
+	}
+	if deleted, _ := st.DeletedIDs(); deleted["claude:C"] {
+		t.Error("the tombstone stayed after the session came back")
+	}
+	if err := st.Upsert(Session{ID: "claude:C", Tool: "claude", NativeID: "C", Title: "again", Source: SourceImport, CreatedAt: 3, UpdatedAt: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if s, _, _ := st.Get("claude:C"); s.Title != "again" {
+		t.Error("imports still skip the session after it came back")
 	}
 }

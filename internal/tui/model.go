@@ -68,7 +68,7 @@ type Model struct {
 	input     textarea.Model // the message being sent
 	sendLabel string
 	form      form
-	confirm   store.Session // awaiting y/n to stop
+	confirm   confirmation
 
 	showPreview bool
 	preview     preview
@@ -94,6 +94,30 @@ type preview struct {
 	screen  []string     // what its tmux pane shows
 	entries []agent.Line // or the end of its transcript
 	err     string
+}
+
+type confirmation struct {
+	session store.Session
+	remove  bool
+	below   int
+}
+
+func descendants(n *tree.Node) int {
+	count := 0
+	for _, c := range n.Children {
+		count += 1 + descendants(c)
+	}
+	return count
+}
+
+func belowText(below int) string {
+	switch below {
+	case 0:
+		return ""
+	case 1:
+		return " and the 1 session under it"
+	}
+	return fmt.Sprintf(" and the %d sessions under it", below)
 }
 
 // form is the new-agent form.
@@ -458,7 +482,18 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setFlash(label(s)+" isn't running as a process of its own", true)
 				return m, nil
 			}
-			m.mode, m.confirm = modeConfirm, s
+			m.mode, m.confirm = modeConfirm, confirmation{session: s}
+		}
+	case "d":
+		if ok {
+			switch {
+			case s.Synthetic():
+				m.setFlash(label(s)+" hasn't reported in yet; hive can't delete it", true)
+			case m.rows[m.cursor].node.Live:
+				m.setFlash(label(s)+" or something under it is still running; stop it first", true)
+			default:
+				m.mode, m.confirm = modeConfirm, confirmation{session: s, remove: true, below: descendants(m.rows[m.cursor].node)}
+			}
 		}
 	case "/":
 		m.mode = modeFilter
@@ -549,9 +584,15 @@ func (m Model) keyConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() != "y" {
 		return m, nil
 	}
-	s, ops := m.confirm, m.ops
+	c, ops := m.confirm, m.ops
+	if c.remove {
+		return m, func() tea.Msg {
+			family, err := ops.Delete(c.session)
+			return doneMsg{text: "deleted " + label(c.session) + belowText(len(family)-1), err: err}
+		}
+	}
 	return m, func() tea.Msg {
-		return doneMsg{text: "stopped " + label(s), err: ops.Stop(s)}
+		return doneMsg{text: "stopped " + label(c.session), err: ops.Stop(c.session)}
 	}
 }
 

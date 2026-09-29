@@ -27,6 +27,7 @@ type fakeOps struct {
 	resumed  []string
 	sent     []string
 	stopped  []string
+	deleted  []string
 	copied   []string
 }
 
@@ -57,8 +58,12 @@ func (f *fakeOps) Send(s store.Session, text string) (string, error) {
 	return "sent", nil
 }
 func (f *fakeOps) Stop(s store.Session) error { f.stopped = append(f.stopped, s.ID); return nil }
-func (f *fakeOps) Copy(text string) error     { f.copied = append(f.copied, text); return nil }
-func (f *fakeOps) Tools() []string            { return []string{"claude", "opencode"} }
+func (f *fakeOps) Delete(s store.Session) ([]store.Session, error) {
+	f.deleted = append(f.deleted, s.ID)
+	return []store.Session{s, {ID: "child of " + s.ID}}, nil
+}
+func (f *fakeOps) Copy(text string) error { f.copied = append(f.copied, text); return nil }
+func (f *fakeOps) Tools() []string        { return []string{"claude", "opencode"} }
 
 // sample is a Claude session in a pane that spawned a headless opencode run
 // (which has its own subagent) and a Claude run that finished; plus an old
@@ -325,6 +330,29 @@ func TestSendInputWrapsLongMessage(t *testing.T) {
 	}
 	if m.mode != modeNormal || m.bodyHeight() != full {
 		t.Errorf("after sending: mode=%v body height=%d, want normal and %d", m.mode, m.bodyHeight(), full)
+	}
+}
+
+func TestDeleteAsksAndRefusesRunningSessions(t *testing.T) {
+	m, ops := setup(t, false)
+	m = press(t, m, "d")
+	if m.mode != modeNormal || !strings.Contains(m.flash, "still running") {
+		t.Fatalf("delete on a live tree: mode=%v flash=%q", m.mode, m.flash)
+	}
+	m = press(t, m, "j", "j", "j", "d") // claude:C: finished, no children
+	if m.mode != modeConfirm || !strings.Contains(ansi.Strip(m.View()), "delete claude ‹lint fix› from hive?") {
+		t.Fatalf("delete on an ended session: mode=%v\n%s", m.mode, ansi.Strip(m.View()))
+	}
+	m = press(t, m, "n")
+	if len(ops.deleted) != 0 || m.mode != modeNormal {
+		t.Fatalf("declined delete still ran: %v", ops.deleted)
+	}
+	m = press(t, m, "d", "y")
+	if strings.Join(ops.deleted, ",") != "claude:C" {
+		t.Fatalf("deleted = %v, want claude:C", ops.deleted)
+	}
+	if !strings.Contains(m.flash, "deleted claude ‹lint fix› and the 1 session under it") {
+		t.Errorf("flash = %q", m.flash)
 	}
 }
 

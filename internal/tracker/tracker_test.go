@@ -422,6 +422,45 @@ func TestRefreshClaimsDaemonHostedSessionAndAdoptsItsLaunch(t *testing.T) {
 	}
 }
 
+func TestDeleteRefusesRunningAndRemovesEverythingUnder(t *testing.T) {
+	tr, w := newWorld(t)
+	claudeHook(t, tr, w, 100, "A", agent.Start)
+	ingest(t, tr, agent.Event{Tool: "opencode", SessionID: "B", Type: agent.Start, PID: 201})
+	ingest(t, tr, agent.Event{Tool: "opencode", SessionID: "G", Type: agent.Start, PID: 201, ParentID: "opencode:B", Internal: true})
+	if _, err := tr.Delete(get(t, tr, "claude:A")); err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("deleting a live tree: err=%v", err)
+	}
+	if _, err := tr.Delete(store.Session{ID: "claude:pid-100", Source: "scan"}); err == nil {
+		t.Fatal("an untracked process was deleted")
+	}
+	delete(w.procs, 100)
+	delete(w.procs, 201)
+	w.now = 5_000
+	family, err := tr.Delete(get(t, tr, "claude:A"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(family) != 3 {
+		t.Fatalf("family = %+v, want A, B and G", family)
+	}
+	for _, id := range []string{"claude:A", "opencode:B", "opencode:G"} {
+		if _, ok, _ := tr.Store.Get(id); ok {
+			t.Errorf("%s still recorded", id)
+		}
+	}
+	if err := tr.Store.Upsert(store.Session{ID: "claude:A", Tool: "claude", NativeID: "A", Source: store.SourceImport, CreatedAt: 1, UpdatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := tr.Store.Get("claude:A"); ok {
+		t.Fatal("a history import brought the deleted session back")
+	}
+	w.add(100, 90, "claude")
+	claudeHook(t, tr, w, 100, "A", agent.Start)
+	if a := get(t, tr, "claude:A"); a.PID != 100 {
+		t.Fatalf("A = %+v, want it back once its agent reports in", a)
+	}
+}
+
 func TestClaudeStartExportsParentForItsShell(t *testing.T) {
 	tr, w := newWorld(t)
 	envFile := filepath.Join(t.TempDir(), "env")

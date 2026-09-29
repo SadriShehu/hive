@@ -10,10 +10,13 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+const SourceImport = "import"
 
 // Kinds of session.
 const (
@@ -128,6 +131,10 @@ var migrations = []string{
 		key   TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	);`,
+	`CREATE TABLE deleted_sessions (
+		id TEXT PRIMARY KEY,
+		at INTEGER NOT NULL
+	);`,
 }
 
 // Open opens (creating if needed) the database at path.
@@ -226,6 +233,13 @@ func (s *Store) Upsert(x Session) error {
 	if x.ParentID == x.ID {
 		x.ParentID = ""
 	}
+	if x.Source == SourceImport {
+		if deleted, err := s.isDeleted(x.ID); err != nil || deleted {
+			return err
+		}
+	} else if _, err := s.db.Exec(`DELETE FROM deleted_sessions WHERE id = ?`, x.ID); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`INSERT INTO sessions (`+columns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
@@ -240,6 +254,70 @@ func (s *Store) Upsert(x Session) error {
 		x.ID, x.Tool, x.NativeID, x.ParentID, x.Title, x.Cwd, x.Kind, x.Status, x.StatusAt, x.PID, x.Pane,
 		x.Transcript, x.LastPrompt, x.CreatedAt, x.UpdatedAt, x.Source)
 	return err
+}
+
+func (s *Store) isDeleted(id string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM deleted_sessions WHERE id = ?`, id).Scan(&n)
+	return n > 0, err
+}
+
+func (s *Store) DeletedIDs() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT id FROM deleted_sessions`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Family(id string) ([]Session, error) {
+	rows, err := s.db.Query(`WITH RECURSIVE family(id) AS (
+			SELECT ?
+			UNION
+			SELECT sessions.id FROM sessions JOIN family ON sessions.parent_id = family.id
+		)
+		SELECT `+columns+` FROM sessions WHERE id IN (SELECT id FROM family)
+		ORDER BY created_at, id`, id)
+	if err != nil {
+		return nil, err
+	}
+	return scan(rows)
+}
+
+func (s *Store) Delete(ids []string, at int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		for _, q := range []string{
+			`INSERT OR REPLACE INTO deleted_sessions (id, at) VALUES (?, ?)`,
+			`DELETE FROM sessions WHERE id = ?`,
+			`DELETE FROM spawn_hints WHERE parent_id = ? OR child_id = ?`,
+			`DELETE FROM launches WHERE parent_id = ?`,
+		} {
+			args := []any{id, id}
+			if strings.Contains(q, "(?, ?)") {
+				args = []any{id, at}
+			} else if strings.Count(q, "?") == 1 {
+				args = []any{id}
+			}
+			if _, err := tx.Exec(q, args...); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 // Attach records the process and tmux pane a session runs in. An empty kind
