@@ -87,7 +87,9 @@ hive sync         # import history now (hive ls does this on its own); --full re
 ```
 
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited.
-`run` marks a headless session, `sub` a tool's own subagent.
+`run` marks a headless session, `sub` a tool's own subagent. Sessions a tool starts
+ahead of use (Claude's daemon keeps spares ready for `claude --bg`) stay hidden until
+their first message, and the daemon's own processes are never taken for sessions.
 
 Every action in the tree is also a command, so an agent can start interactive
 children, talk to them and check on them:

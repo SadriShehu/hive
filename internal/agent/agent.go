@@ -146,6 +146,15 @@ type Line struct {
 	Text string
 }
 
+// Prewarmer is implemented by tools that start sessions ahead of use, like
+// Claude Code's daemon, which keeps spares ready for `claude --bg`. hive hides
+// such a session until it gets its first message.
+type Prewarmer interface {
+	// Prewarmed reports whether the session whose process has this ancestry
+	// (the process itself first) may have been started ahead of use.
+	Prewarmed(chain []proc.Proc) bool
+}
+
 // Tailer reads the end of a session's transcript.
 type Tailer interface {
 	Tail(s store.Session, n int) ([]Line, error)

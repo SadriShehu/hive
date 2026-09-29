@@ -12,6 +12,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
 )
 
@@ -146,4 +147,11 @@ func (o overridden) CheckResume(s store.Session) error {
 		return c.CheckResume(s)
 	}
 	return nil
+}
+
+func (o overridden) Prewarmed(chain []proc.Proc) bool {
+	if w, ok := o.Adapter.(agent.Prewarmer); ok {
+		return w.Prewarmed(chain)
+	}
+	return false
 }

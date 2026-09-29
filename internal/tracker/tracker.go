@@ -7,6 +7,7 @@ package tracker
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -509,7 +510,32 @@ func (t *Tracker) Refresh() ([]store.Session, error) {
 			sessions[i].Pane = ""
 		}
 	}
-	return append(sessions, t.untracked(sessions)...), nil
+	return t.withoutPrewarmed(append(sessions, t.untracked(sessions)...), procs), nil
+}
+
+// withoutPrewarmed drops sessions a tool may have started ahead of use (see
+// agent.Prewarmer) while nothing shows anyone has used them: no title, no
+// message, no children. The database keeps them, so they appear with their
+// first message.
+func (t *Tracker) withoutPrewarmed(sessions []store.Session, procs proc.Table) []store.Session {
+	parents := map[string]bool{}
+	for _, s := range sessions {
+		parents[s.ParentID] = true
+	}
+	return slices.DeleteFunc(sessions, func(s store.Session) bool {
+		if !s.Live() || s.PID <= 0 || s.Title != "" || s.LastPrompt != "" || parents[s.ID] {
+			return false
+		}
+		w, ok := t.adapter(s.Tool).(agent.Prewarmer)
+		if !ok {
+			return false
+		}
+		chain := []proc.Proc{procs[s.PID]}
+		for _, pid := range procs.Ancestors(s.PID) {
+			chain = append(chain, procs[pid])
+		}
+		return w.Prewarmed(chain)
+	})
 }
 
 // orphans returns agent processes that no session claims: agents started

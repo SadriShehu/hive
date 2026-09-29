@@ -10,6 +10,7 @@ import (
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/paths"
+	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
 )
 
@@ -35,9 +36,30 @@ func (a *Adapter) Spec() agent.Spec {
 		Headless:  []string{"-p", "--print"},
 		ParentEnv: "CLAUDE_CODE_SESSION_ID",
 
+		// The daemon and the hosts it runs background sessions in, and the
+		// subcommands that manage things rather than run a session.
+		HelperSubcommands: []string{
+			"daemon", "bg-pty-host", "--bg-pty-host", "agents", "attach", "auth", "auto-mode",
+			"doctor", "gateway", "import", "install", "logs", "mcp", "plugin", "plugins",
+			"project", "respawn", "rm", "setup-token", "stop", "kill", "ultrareview",
+			"update", "upgrade",
+		},
+
 		TitleFlags:   []string{"-n", "--name"},
 		SessionFlags: []string{"-r", "--resume", "--session-id"},
 	}
+}
+
+// Prewarmed reports whether a session runs under Claude's daemon, which hosts
+// each background session (`claude --bg`), and each spare it keeps started
+// for the next one, in a bg-pty-host process.
+func (a *Adapter) Prewarmed(chain []proc.Proc) bool {
+	for _, p := range chain {
+		if argv := p.Argv(); len(argv) > 1 && (argv[1] == "bg-pty-host" || argv[1] == "--bg-pty-host") {
+			return true
+		}
+	}
+	return false
 }
 
 // configDir is the user's Claude Code directory.

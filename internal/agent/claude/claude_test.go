@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
 )
 
@@ -227,5 +228,39 @@ func TestCheckResumeNeedsATranscript(t *testing.T) {
 	}
 	if err := a.CheckResume(store.Session{Transcript: filepath.Join(dir, "never-saved.jsonl")}); err == nil {
 		t.Error("a session with no transcript was offered for reopening")
+	}
+}
+
+// Processes of Claude's daemon, as `ps` showed them on Claude Code 2.1.283.
+var (
+	daemon    = proc.Proc{PID: 1, Args: []string{"/opt/claude", "daemon", "run", "--origin", "transient"}}
+	spareHost = proc.Proc{PID: 2, PPID: 1, Args: []string{"claude", "bg-pty-host", "--bg-pty-host", "/tmp/cc-daemon-501/x/spare/c9.pty.sock", "200", "50", "--", "/opt/claude"}}
+	ptyHost   = proc.Proc{PID: 3, PPID: 1, Args: []string{"/opt/claude", "--bg-pty-host", "/tmp/cc-daemon-501/x/pty/ec14.pty.sock", "200", "50", "--", "/opt/claude"}}
+	hosted    = proc.Proc{PID: 4, PPID: 3, Args: []string{"/opt/claude", "--session-id", "ec1421d5", "--"}}
+	inPane    = proc.Proc{PID: 5, PPID: 6, Args: []string{"claude", "--resume", "5071f484"}}
+	shell     = proc.Proc{PID: 6, Args: []string{"-zsh"}}
+)
+
+func TestHelperProcessesAreNotSessions(t *testing.T) {
+	spec := New().Spec()
+	for _, p := range []proc.Proc{daemon, spareHost, ptyHost, {Args: []string{"claude", "attach", "a1"}}, {Args: []string{"claude", "mcp", "serve"}}} {
+		if spec.Matches(p) {
+			t.Errorf("%v counts as a Claude session", p.Args)
+		}
+	}
+	for _, p := range []proc.Proc{hosted, inPane, {Args: []string{"claude", "-p", "hi"}}, {Args: []string{"claude", "fix the login bug"}}} {
+		if !spec.Matches(p) {
+			t.Errorf("%v isn't taken for a Claude session", p.Args)
+		}
+	}
+}
+
+func TestPrewarmed(t *testing.T) {
+	a := New()
+	if !a.Prewarmed([]proc.Proc{hosted, ptyHost, daemon}) {
+		t.Error("a session under the daemon's pty host isn't prewarmed")
+	}
+	if a.Prewarmed([]proc.Proc{inPane, shell}) {
+		t.Error("a session in a terminal counts as prewarmed")
 	}
 }

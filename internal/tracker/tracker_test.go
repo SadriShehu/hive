@@ -437,3 +437,43 @@ func TestClaudeStartExportsParentForItsShell(t *testing.T) {
 		t.Fatalf("env file = %q, want %q", data, want)
 	}
 }
+
+func TestPrewarmedSessionsHideUntilUsed(t *testing.T) {
+	tr, w := newWorld(t)
+	// Claude's daemon with a spare host and a session it started ahead of use.
+	w.add(5000, 1, "/opt/claude daemon run --origin transient")
+	w.add(5001, 5000, "claude bg-pty-host --bg-pty-host /tmp/cc-daemon-501/x/spare/c9.pty.sock 200 50 -- /opt/claude")
+	w.add(5002, 5000, "/opt/claude --bg-pty-host /tmp/cc-daemon-501/x/pty/s1.pty.sock 200 50 -- /opt/claude")
+	w.add(5003, 5002, "/opt/claude --session-id s1")
+	claudeHook(t, tr, w, 5003, "s1", agent.Start)
+	// A Claude opened in a terminal, not typed into yet.
+	claudeHook(t, tr, w, 100, "c1", agent.Start)
+
+	shown := func() map[string]bool {
+		t.Helper()
+		sessions, err := tr.Refresh()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]bool{}
+		for _, s := range sessions {
+			ids[s.ID] = true
+		}
+		return ids
+	}
+	ids := shown()
+	for _, id := range []string{"claude:s1", "claude:pid-5000", "claude:pid-5001", "claude:pid-5002"} {
+		if ids[id] {
+			t.Errorf("%s is shown", id)
+		}
+	}
+	if !ids["claude:c1"] {
+		t.Error("an empty Claude in a terminal is hidden")
+	}
+
+	// Someone uses the spare: it shows from its first message on.
+	ingest(t, tr, agent.Event{Tool: "claude", SessionID: "s1", Type: agent.Prompt, Prompt: "fix the tests", PID: 5003})
+	if !shown()["claude:s1"] {
+		t.Error("a background session with a message is hidden")
+	}
+}
