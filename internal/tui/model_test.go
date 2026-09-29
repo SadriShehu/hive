@@ -303,6 +303,31 @@ func TestNewFormWrapsLongPrompt(t *testing.T) {
 	}
 }
 
+func TestSendInputWrapsLongMessage(t *testing.T) {
+	m, ops := setup(t, false)
+	full := m.bodyHeight()
+	m = press(t, m, "s")
+	long := strings.Repeat("please review the admin handlers for races ", 7) + "then report"
+	m = press(t, m, long)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "then report") || !strings.Contains(view, "send to claude") {
+		t.Fatalf("end of the message or its label not shown:\n%s", view)
+	}
+	if lines := strings.Split(m.View(), "\n"); len(lines) != 30 {
+		t.Errorf("view has %d lines, want 30", len(lines))
+	}
+	if m.bodyHeight() >= full {
+		t.Errorf("body height %d did not shrink below %d for the wrapped message", m.bodyHeight(), full)
+	}
+	m = press(t, m, "enter")
+	if strings.Join(ops.sent, ",") != "claude:A|"+long {
+		t.Errorf("sent = %v, want the whole message", ops.sent)
+	}
+	if m.mode != modeNormal || m.bodyHeight() != full {
+		t.Errorf("after sending: mode=%v body height=%d, want normal and %d", m.mode, m.bodyHeight(), full)
+	}
+}
+
 func TestPreviewShowsPaneOrTranscript(t *testing.T) {
 	m, _ := setup(t, false)
 	if view := ansi.Strip(m.View()); !strings.Contains(view, "screen of %1") || !strings.Contains(view, "pane %1 · ↵ jumps there") {
@@ -321,13 +346,16 @@ func TestViewFitsAnySize(t *testing.T) {
 	for _, size := range [][2]int{{30, 8}, {80, 20}, {99, 24}, {100, 24}, {160, 40}, {240, 70}} {
 		m, _ := setup(t, false)
 		m = step(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"", "?", "n"} {
+		for _, mode := range []string{"", "?", "n", "s"} {
 			mm := m
 			if mode != "" {
 				mm = press(t, m, mode)
 			}
 			if mode == "n" {
 				mm = press(t, mm, "tab", strings.Repeat("wrap me ", 40))
+			}
+			if mode == "s" {
+				mm = press(t, mm, strings.Repeat("wrap me ", 40))
 			}
 			lines := strings.Split(mm.View(), "\n")
 			if len(lines) != size[1] {

@@ -64,10 +64,11 @@ type Model struct {
 	hideSubs  bool
 	filter    textinput.Model
 
-	mode    mode
-	input   textinput.Model // the message being sent
-	form    form
-	confirm store.Session // awaiting y/n to stop
+	mode      mode
+	input     textarea.Model // the message being sent
+	sendLabel string
+	form      form
+	confirm   store.Session // awaiting y/n to stop
 
 	showPreview bool
 	preview     preview
@@ -110,12 +111,12 @@ func (f *form) layout(w int) {
 	f.prompt.SetWidth(max(10, w-12))
 }
 
-func (f *form) promptRows() int {
-	width := max(1, f.prompt.Width())
+func wrappedRows(area textarea.Model) int {
+	width := max(1, area.Width())
 	rows := 0
-	for i, line := range strings.Split(f.prompt.Value(), "\n") {
-		if i == f.prompt.Line() {
-			rows += f.prompt.LineInfo().Height
+	for i, line := range strings.Split(area.Value(), "\n") {
+		if i == area.Line() {
+			rows += area.LineInfo().Height
 			continue
 		}
 		rows += rowsWithSlack(line, width)
@@ -125,6 +126,29 @@ func (f *form) promptRows() int {
 
 func rowsWithSlack(line string, width int) int {
 	return strings.Count(ansi.Wrap(line, width, ""), "\n") + 2
+}
+
+func cursorRow(area textarea.Model) int {
+	width := max(1, area.Width())
+	row := 0
+	for i, line := range strings.Split(area.Value(), "\n") {
+		if i == area.Line() {
+			return row + area.LineInfo().RowOffset
+		}
+		row += rowsWithSlack(line, width)
+	}
+	return row
+}
+
+func visibleRows(area textarea.Model, limit int) []string {
+	lines := strings.Split(area.View(), "\n")
+	rows := min(len(lines), wrappedRows(area))
+	limit = max(1, limit)
+	if rows <= limit {
+		return lines[:rows]
+	}
+	start := min(max(0, cursorRow(area)-limit+1), rows-limit)
+	return lines[start : start+limit]
 }
 
 type (
@@ -151,8 +175,27 @@ type (
 func New(ops Ops, popup bool) Model {
 	m := Model{ops: ops, popup: popup, now: time.Now, collapsed: map[string]bool{}, showPreview: true}
 	m.filter = newInput("/ ", "filter by title, folder or ID")
-	m.input = newInput("", "message")
+	m.input = newPromptArea("message")
 	return m
+}
+
+func (m *Model) layoutSend() {
+	label := m.sendLabel
+	m.input.SetPromptFunc(ansi.StringWidth(label), func(line int) string {
+		if line == 0 {
+			return label
+		}
+		return ""
+	})
+	m.input.SetWidth(max(ansi.StringWidth(label)+10, m.width-1))
+	m.clampScroll()
+}
+
+func (m Model) sendRows() int {
+	if m.mode != modeSend {
+		return 0
+	}
+	return min(wrappedRows(m.input), max(1, m.height-7))
 }
 
 func newInput(prompt, placeholder string) textinput.Model {
@@ -176,6 +219,7 @@ func newPromptArea(placeholder string) textarea.Model {
 	for _, style := range []*textarea.Style{&area.FocusedStyle, &area.BlurredStyle} {
 		style.Base, style.CursorLine, style.Text, style.EndOfBuffer = plain, plain, plain, plain
 		style.Placeholder = sDim
+		style.Prompt = sAccent
 	}
 	area.SetHeight(promptAreaRows)
 	return area
@@ -243,6 +287,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampScroll()
 		if m.mode == modeNew {
 			m.form.layout(m.formWidth())
+		}
+		if m.mode == modeSend {
+			m.layoutSend()
 		}
 		return m, nil
 
@@ -394,8 +441,8 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if ok {
 			m.mode = modeSend
 			m.input.Reset()
-			m.input.Prompt = "send to " + label(s) + " › "
-			m.input.Width = max(10, m.width-len(m.input.Prompt)-4)
+			m.sendLabel = "send to " + label(s) + " › "
+			m.layoutSend()
 			return m, m.input.Focus()
 		}
 	case "n":
@@ -493,6 +540,7 @@ func (m Model) keySend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	m.clampScroll()
 	return m, cmd
 }
 
