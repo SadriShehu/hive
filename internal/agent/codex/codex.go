@@ -1,3 +1,4 @@
+// Package codex connects the OpenAI Codex CLI to hive through its hooks.
 package codex
 
 import (
@@ -16,6 +17,7 @@ import (
 
 const name = "codex"
 
+// Adapter is the Codex adapter. Its paths can be redirected for tests.
 type Adapter struct {
 	HomeDir     string
 	HooksPath   string
@@ -23,18 +25,24 @@ type Adapter struct {
 	StateDBPath string
 }
 
+// New returns the adapter for the user's Codex files.
 func New() *Adapter { return &Adapter{} }
 
+// Spec describes the Codex CLI.
 func (a *Adapter) Spec() agent.Spec {
 	return agent.Spec{
-		Name:              name,
-		New:               []string{"codex", "{prompt}"},
-		Resume:            []string{"codex", "resume", "{id}", "{prompt}"},
-		Process:           []string{"codex"},
-		HelperSubcommands: []string{"app-server", "exec-server", "mcp-server", "sandbox", "login", "agents", "cloud", "remote-control"},
-		Headless:          []string{"exec", "e", "review"},
-		ParentEnv:         "CODEX_THREAD_ID",
-		SessionFlags:      []string{"resume"},
+		Name:    name,
+		New:     []string{"codex", "{prompt}"},
+		Resume:  []string{"codex", "resume", "{id}", "{prompt}"},
+		Process: []string{"codex"},
+		HelperSubcommands: []string{
+			"agents", "login", "logout", "mcp", "mcp-server", "plugin", "app-server", "remote-control", "app",
+			"completion", "update", "doctor", "sandbox", "debug", "apply", "a", "queue", "archive", "delete",
+			"migrate-rollouts", "unarchive", "cloud", "exec-server", "features", "help",
+		},
+		Headless:     []string{"exec", "e", "review"},
+		ParentEnv:    "CODEX_THREAD_ID",
+		SessionFlags: []string{"resume"},
 	}
 }
 
@@ -121,6 +129,8 @@ type hookInput struct {
 	AgentTranscriptPath string `json:"agent_transcript_path"`
 }
 
+// ParseHook maps Codex hook payloads onto hive events. SubagentStart and
+// SubagentStop become events for the subagent itself.
 func (a *Adapter) ParseHook(stdin []byte, _ []string, _ func(string) string) ([]agent.Event, error) {
 	var in hookInput
 	if err := json.Unmarshal(stdin, &in); err != nil {

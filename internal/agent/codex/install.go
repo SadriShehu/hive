@@ -46,11 +46,13 @@ func findOurs(data []byte, event string) []hookRef {
 	return refs
 }
 
+// Installed reports whether hooks.json calls hive on session start.
 func (a *Adapter) Installed() bool {
 	data, err := os.ReadFile(a.hooksPath())
 	return err == nil && len(findOurs(data, "SessionStart")) > 0
 }
 
+// Install adds hive's hooks to Codex's hooks.json, keeping everything else.
 func (a *Adapter) Install(hiveBin string) (string, error) {
 	path := a.hooksPath()
 	data, err := readHooks(path)
@@ -101,6 +103,7 @@ func (a *Adapter) Install(hiveBin string) (string, error) {
 	return msg + trustNote, nil
 }
 
+// Uninstall removes only the hooks that call hive.
 func (a *Adapter) Uninstall() (string, error) {
 	path := a.hooksPath()
 	data, err := readHooks(path)

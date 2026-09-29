@@ -78,6 +78,8 @@ type Spec struct {
 	// Process lists program names that identify the tool's processes.
 	Process []string
 
+	// HelperSubcommands name subcommands whose processes are not sessions
+	// (a daemon, a login flow), so they are never taken for an agent.
 	HelperSubcommands []string
 
 	// Headless lists argv markers of a non-interactive run: a flag ("-p")

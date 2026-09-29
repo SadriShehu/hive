@@ -150,7 +150,7 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 		if pid == 0 {
 			pid = t.agentPID(t.spec(ev.Tool))
 		}
-		if pid == 0 && !internal {
+		if pid == 0 {
 			pid = t.locateProcess(t.spec(ev.Tool), ev.Cwd)
 		}
 		if pid > 0 {

@@ -15,6 +15,7 @@ import (
 
 const tailBytes = 512 << 10
 
+// Tail returns the last n lines of a session's transcript.
 func (a *Adapter) Tail(s store.Session, n int) ([]agent.Line, error) {
 	if n <= 0 {
 		return nil, nil
@@ -107,6 +108,7 @@ func firstLine(text string) string {
 	return line
 }
 
+// CheckResume refuses sessions whose Codex session file is gone.
 func (a *Adapter) CheckResume(s store.Session) error {
 	if s.NativeID == "" {
 		return errors.New("Codex session has no native session ID")

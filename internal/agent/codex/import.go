@@ -22,6 +22,7 @@ import (
 	"github.com/sadrishehu/hive/internal/store"
 )
 
+// Import records Codex threads from its state database and rollout files.
 func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.ShellCommand)) (int, error) {
 	n := 0
 	var errs []error
