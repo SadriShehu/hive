@@ -12,7 +12,7 @@ import (
 	"github.com/sadrishehu/hive/internal/store"
 )
 
-func (m Model) bodyHeight() int { return max(1, m.height-3) }
+func (m Model) bodyHeight() int { return max(1, m.height-3-max(0, m.sendRows()-1)) }
 
 func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
 
@@ -60,7 +60,8 @@ func (m Model) View() string {
 		body = m.treeLines(m.width, h)
 	}
 	lines := append([]string{m.headerLine()}, body...)
-	lines = append(lines, ansi.Truncate(m.hintLine(), m.width, "…"), m.statusLine())
+	lines = append(lines, m.hintLines()...)
+	lines = append(lines, m.statusLine())
 	return strings.Join(lines, "\n")
 }
 
@@ -283,14 +284,13 @@ func (m Model) formLines(w, h int) []string {
 		}
 		return mark + sDim.Render(fmt.Sprintf("%-7s", name)) + value
 	}
-	prompt := strings.Split(f.prompt.View(), "\n")
-	rows := min(len(prompt), f.promptRows(), max(1, h-formChromeRows))
+	prompt := visibleRows(f.prompt, h-formChromeRows)
 	out = append(out,
 		field(0, "tool", strings.Join(tools, "  ")),
 		field(1, "folder", f.folder.View()),
 		field(2, "prompt", prompt[0]),
 	)
-	for _, line := range prompt[1:rows] {
+	for _, line := range prompt[1:] {
 		out = append(out, strings.Repeat(" ", 9)+line)
 	}
 	out = append(out, "", sDim.Render("It opens in a new tmux window, running the tool's own TUI."))
@@ -300,12 +300,21 @@ func (m Model) formLines(w, h int) []string {
 	return fit(out, w, h)
 }
 
+func (m Model) hintLines() []string {
+	if m.mode != modeSend {
+		return []string{ansi.Truncate(m.hintLine(), m.width, "…")}
+	}
+	var out []string
+	for _, line := range visibleRows(m.input, m.sendRows()) {
+		out = append(out, ansi.Truncate(line, m.width, ""))
+	}
+	return out
+}
+
 func (m Model) hintLine() string {
 	switch m.mode {
 	case modeFilter:
 		return m.filter.View()
-	case modeSend:
-		return m.input.View()
 	case modeConfirm:
 		return sError.Render(fmt.Sprintf("stop %s (pid %d)? ", label(m.confirm), m.confirm.PID)) + keys("y", "yes", "any other key", "no")
 	case modeNew:
