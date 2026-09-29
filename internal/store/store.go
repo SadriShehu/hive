@@ -31,6 +31,15 @@ const (
 	StatusExited    = "exited"
 )
 
+// Where a session's record came from. Sessions hive makes up from a process
+// it sees are "scan" and "pending" (see Synthetic).
+const (
+	SourceHook     = "hook"     // the agent reported in
+	SourceLaunch   = "launch"   // hive started it, knowing its ID ahead of the agent
+	SourceImport   = "import"   // read from the tool's own history
+	SourceInferred = "inferred" // named as the parent in a child's environment
+)
+
 // Session is one agent session from any tool.
 type Session struct {
 	ID         string `json:"id"` // "<tool>:<native_id>"
@@ -49,6 +58,7 @@ type Session struct {
 	CreatedAt  int64  `json:"created_at"`
 	UpdatedAt  int64  `json:"updated_at"`
 	Source     string `json:"source,omitempty"`
+	DeletedAt  int64  `json:"deleted_at,omitempty"` // in the trash since, epoch ms; 0 when not. Read only: see Trash
 }
 
 // Synthetic reports whether hive made the session up from a process it saw
@@ -128,6 +138,19 @@ var migrations = []string{
 		key   TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	);`,
+	// The trash holds the sessions deleted from the tree, which keep their
+	// rows until they are restored or deleted for good; purged_sessions
+	// remembers what was deleted for good, so a copy a tool keeps somewhere
+	// doesn't bring it back. It can run twice: a hive from before it sets the
+	// version back to what it knows.
+	`CREATE TABLE IF NOT EXISTS trash (
+		id TEXT PRIMARY KEY,
+		at INTEGER NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS purged_sessions (
+		id TEXT PRIMARY KEY,
+		at INTEGER NOT NULL
+	);`,
 }
 
 // Open opens (creating if needed) the database at path.
@@ -205,8 +228,10 @@ func (s *Store) migrate() (err error) {
 			return fmt.Errorf("migration %d: %w", i+1, err)
 		}
 	}
-	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
-		return err
+	if version < len(migrations) { // a newer hive may have gone further
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
+			return err
+		}
 	}
 	_, err = conn.ExecContext(ctx, "COMMIT")
 	return err
@@ -215,16 +240,39 @@ func (s *Store) migrate() (err error) {
 const columns = `id, tool, native_id, parent_id, title, cwd, kind, status, status_at, pid, pane,
 	transcript, last_prompt, created_at, updated_at, source`
 
+// selected is what scan reads: a session's columns, and when it went to the
+// trash.
+const selected = columns + `, COALESCE((SELECT at FROM trash WHERE trash.id = sessions.id), 0)`
+
+// Whether a session is in the trash, as a condition on sessions.id.
+const (
+	inTrash    = `sessions.id IN (SELECT id FROM trash)`
+	notInTrash = `sessions.id NOT IN (SELECT id FROM trash)`
+)
+
 // Upsert inserts a session or merges into the existing row. The first parent,
 // folder and kind recorded win; a non-empty title, transcript or prompt
 // replaces the old one. Status, process and pane are only set on insert: use
 // SetStatus and Attach to change them.
+//
+// A session in the trash stays there, and one deleted for good stays gone,
+// until its agent reports in again or hive starts it: an import or a child
+// naming it doesn't bring it back.
 func (s *Store) Upsert(x Session) error {
 	if x.Status == "" {
 		x.Status = StatusUnknown
 	}
 	if x.ParentID == x.ID {
 		x.ParentID = ""
+	}
+	if x.Source == SourceHook || x.Source == SourceLaunch {
+		for _, q := range []string{`DELETE FROM trash WHERE id = ?`, `DELETE FROM purged_sessions WHERE id = ?`} {
+			if _, err := s.db.Exec(q, x.ID); err != nil {
+				return err
+			}
+		}
+	} else if purged, err := s.purged(x.ID); err != nil || purged {
+		return err
 	}
 	_, err := s.db.Exec(`INSERT INTO sessions (`+columns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -240,6 +288,101 @@ func (s *Store) Upsert(x Session) error {
 		x.ID, x.Tool, x.NativeID, x.ParentID, x.Title, x.Cwd, x.Kind, x.Status, x.StatusAt, x.PID, x.Pane,
 		x.Transcript, x.LastPrompt, x.CreatedAt, x.UpdatedAt, x.Source)
 	return err
+}
+
+func (s *Store) purged(id string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM purged_sessions WHERE id = ?`, id).Scan(&n)
+	return n > 0, err
+}
+
+// PurgedIDs returns the sessions deleted for good.
+func (s *Store) PurgedIDs() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT id FROM purged_sessions`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// Family returns id and every session under it, oldest first, all in the
+// trash or all out of it, as trashed says: a branch in the other state is
+// left out, with everything under it.
+func (s *Store) Family(id string, trashed bool) ([]Session, error) {
+	state := notInTrash
+	if trashed {
+		state = inTrash
+	}
+	rows, err := s.db.Query(`WITH RECURSIVE family(id) AS (
+			SELECT sessions.id FROM sessions WHERE sessions.id = ? AND `+state+`
+			UNION
+			SELECT sessions.id FROM sessions JOIN family ON sessions.parent_id = family.id WHERE `+state+`
+		)
+		SELECT `+selected+` FROM sessions WHERE id IN (SELECT id FROM family)
+		ORDER BY created_at, id`, id)
+	if err != nil {
+		return nil, err
+	}
+	return scan(rows)
+}
+
+// Trash moves sessions to the trash as of at.
+func (s *Store) Trash(ids []string, at int64) error {
+	return s.each(ids, `INSERT OR REPLACE INTO trash (at, id) VALUES (?, ?)`, at)
+}
+
+// Restore takes sessions out of the trash.
+func (s *Store) Restore(ids []string) error {
+	return s.each(ids, `DELETE FROM trash WHERE id = ?`)
+}
+
+// each runs q once per id, in one transaction; id is q's last argument.
+func (s *Store) each(ids []string, q string, args ...any) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		if _, err := tx.Exec(q, append(args, id)...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// Purge forgets a session for good, with the spawn hints and launch records
+// of the commands it ran. A hint naming it as the session a command started
+// stays matched, so that command isn't matched to another session.
+func (s *Store) Purge(id string, at int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO purged_sessions (id, at) VALUES (?, ?)`, id, at); err != nil {
+		return err
+	}
+	for _, q := range []string{
+		`DELETE FROM sessions WHERE id = ?`,
+		`DELETE FROM trash WHERE id = ?`,
+		`DELETE FROM spawn_hints WHERE parent_id = ?`,
+		`DELETE FROM launches WHERE parent_id = ?`,
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Attach records the process and tmux pane a session runs in. An empty kind
@@ -278,9 +421,9 @@ func (s *Store) EndOthersOnPID(pid int, keep string, at int64) error {
 	return err
 }
 
-// Get returns one session.
+// Get returns one session, in the trash or not.
 func (s *Store) Get(id string) (Session, bool, error) {
-	rows, err := s.db.Query(`SELECT `+columns+` FROM sessions WHERE id = ?`, id)
+	rows, err := s.db.Query(`SELECT `+selected+` FROM sessions WHERE id = ?`, id)
 	if err != nil {
 		return Session{}, false, err
 	}
@@ -291,9 +434,18 @@ func (s *Store) Get(id string) (Session, bool, error) {
 	return list[0], true, nil
 }
 
-// All returns every session.
+// All returns every session that isn't in the trash.
 func (s *Store) All() ([]Session, error) {
-	rows, err := s.db.Query(`SELECT ` + columns + ` FROM sessions`)
+	rows, err := s.db.Query(`SELECT ` + selected + ` FROM sessions WHERE ` + notInTrash)
+	if err != nil {
+		return nil, err
+	}
+	return scan(rows)
+}
+
+// Trashed returns the sessions in the trash.
+func (s *Store) Trashed() ([]Session, error) {
+	rows, err := s.db.Query(`SELECT ` + selected + ` FROM sessions WHERE ` + inTrash)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +454,7 @@ func (s *Store) All() ([]Session, error) {
 
 // OnPID returns the top-level sessions running as pid, most recently active first.
 func (s *Store) OnPID(pid int) ([]Session, error) {
-	rows, err := s.db.Query(`SELECT `+columns+` FROM sessions WHERE pid = ? AND kind <> ?
+	rows, err := s.db.Query(`SELECT `+selected+` FROM sessions WHERE pid = ? AND kind <> ?
 		ORDER BY updated_at DESC`, pid, KindInternal)
 	if err != nil {
 		return nil, err
@@ -417,7 +569,7 @@ func (s *Store) CloseHint(h Hint, childID string) error {
 // and no other command claimed to start them. (A command that continues a
 // session by ID doesn't claim it.)
 func (s *Store) SpawnCandidates(tool, parent string, from, to int64) ([]Session, error) {
-	rows, err := s.db.Query(`SELECT `+columns+` FROM sessions
+	rows, err := s.db.Query(`SELECT `+selected+` FROM sessions
 		WHERE tool = ? AND kind <> ? AND id <> ? AND (parent_id = '' OR parent_id = ?)
 		AND created_at BETWEEN ? AND ?
 		AND id NOT IN (SELECT child_id FROM spawn_hints WHERE native_id = '')
@@ -434,11 +586,12 @@ func (s *Store) SetKindIfUnknown(id, kind string) error {
 	return err
 }
 
-// ClaimCandidates returns top-level sessions of tool in cwd with no process
-// recorded that were active at or after since, and did not end after it.
+// ClaimCandidates returns top-level sessions of tool in cwd, not in the trash,
+// with no process recorded, that were active at or after since and did not
+// end after it.
 func (s *Store) ClaimCandidates(tool, cwd string, since int64) ([]Session, error) {
-	rows, err := s.db.Query(`SELECT `+columns+` FROM sessions
-		WHERE tool = ? AND cwd = ? AND pid = 0 AND kind <> ? AND updated_at >= ?
+	rows, err := s.db.Query(`SELECT `+selected+` FROM sessions
+		WHERE tool = ? AND cwd = ? AND pid = 0 AND kind <> ? AND updated_at >= ? AND `+notInTrash+`
 		AND NOT (status = ? AND status_at > ?)`,
 		tool, cwd, KindInternal, since, StatusExited, since)
 	if err != nil {
@@ -476,7 +629,7 @@ func scan(rows *sql.Rows) ([]Session, error) {
 		var x Session
 		if err := rows.Scan(&x.ID, &x.Tool, &x.NativeID, &x.ParentID, &x.Title, &x.Cwd, &x.Kind,
 			&x.Status, &x.StatusAt, &x.PID, &x.Pane, &x.Transcript, &x.LastPrompt,
-			&x.CreatedAt, &x.UpdatedAt, &x.Source); err != nil {
+			&x.CreatedAt, &x.UpdatedAt, &x.Source, &x.DeletedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, x)

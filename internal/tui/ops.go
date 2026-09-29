@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/store"
@@ -26,6 +27,10 @@ type Ops interface {
 	Resume(s store.Session, prompt string) (tracker.Launched, error)
 	Send(s store.Session, text string) (string, error)
 	Stop(s store.Session) error
+	Trash(s store.Session) ([]store.Session, error)
+	Trashed() ([]store.Session, error)
+	Restore(s store.Session) ([]store.Session, error)
+	Purge(s store.Session) (tracker.Purged, error)
 	Copy(text string) error
 	Tools() []string // tools that can be started here
 }
@@ -65,6 +70,15 @@ func (o *liveOps) Capture(pane string) (string, error)               { return tm
 func (o *liveOps) Focus(pane string) error                           { return tmux.Focus(pane) }
 func (o *liveOps) CanResume(s store.Session) error                   { return o.tracker().CanResume(s) }
 func (o *liveOps) Stop(s store.Session) error                        { return o.tracker().Stop(s) }
+func (o *liveOps) Trash(s store.Session) ([]store.Session, error)    { return o.tracker().Trash(s) }
+func (o *liveOps) Trashed() ([]store.Session, error)                 { return o.st.Trashed() }
+func (o *liveOps) Restore(s store.Session) ([]store.Session, error)  { return o.tracker().Restore(s) }
+
+func (o *liveOps) Purge(s store.Session) (tracker.Purged, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return o.tracker().Purge(ctx, s)
+}
 
 func (o *liveOps) Launch(opts tracker.LaunchOptions) (tracker.Launched, error) {
 	return o.tracker().Launch(opts)

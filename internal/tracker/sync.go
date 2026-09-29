@@ -39,6 +39,10 @@ func (t *Tracker) Sync(ctx context.Context) (SyncResult, error) {
 		specs = append(specs, a.Spec())
 	}
 	res := SyncResult{Imported: map[string]int{}}
+	purged, err := t.Store.PurgedIDs()
+	if err != nil {
+		return res, err
+	}
 	var errs []error
 	for _, a := range t.Adapters {
 		imp, ok := a.(agent.Importer)
@@ -47,6 +51,9 @@ func (t *Tracker) Sync(ctx context.Context) (SyncResult, error) {
 		}
 		var hintErr error
 		n, err := imp.Import(ctx, t.Store, func(c agent.ShellCommand) {
+			if purged[c.SessionID] {
+				return
+			}
 			for _, f := range spawn.Find(c.Command, c.Cwd, specs) {
 				h := store.Hint{ParentID: c.SessionID, At: c.At, Tool: f.Tool, Title: f.Title,
 					NativeID: f.NativeID, Cwd: f.Cwd, Headless: f.Headless}

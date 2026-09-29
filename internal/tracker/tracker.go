@@ -131,11 +131,14 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 	if !exists && ev.Type == agent.End {
 		return nil // never saw it start: nothing to end
 	}
+	if exists && cur.DeletedAt > 0 && ev.Type == agent.End {
+		return nil // a late end doesn't bring a session back from the trash
+	}
 
 	s := store.Session{
 		ID: id, Tool: ev.Tool, NativeID: ev.SessionID,
 		Title: ev.Title, Cwd: ev.Cwd, Transcript: ev.Transcript, LastPrompt: ev.Prompt,
-		CreatedAt: at, UpdatedAt: at, Source: "hook",
+		CreatedAt: at, UpdatedAt: at, Source: store.SourceHook,
 	}
 	// Status events for a subagent don't repeat that it is one.
 	internal := ev.Internal || (exists && cur.Kind == store.KindInternal)
@@ -409,7 +412,7 @@ func (t *Tracker) adopt(parentID string, childPID int, at int64) error {
 			kind = store.KindHeadless
 		}
 		if err := t.Store.Upsert(store.Session{ID: parentID, Tool: tool, NativeID: native,
-			Cwd: t.World.Cwd(a), Kind: kind, CreatedAt: at, UpdatedAt: at, Source: "inferred"}); err != nil {
+			Cwd: t.World.Cwd(a), Kind: kind, CreatedAt: at, UpdatedAt: at, Source: store.SourceInferred}); err != nil {
 			return err
 		}
 		if err := t.Store.Attach(parentID, a, pane, kind); err != nil {

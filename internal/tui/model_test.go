@@ -27,6 +27,10 @@ type fakeOps struct {
 	resumed  []string
 	sent     []string
 	stopped  []string
+	trash    []store.Session // what is in the trash
+	trashed  []string
+	restored []string
+	purged   []string
 	copied   []string
 }
 
@@ -57,8 +61,21 @@ func (f *fakeOps) Send(s store.Session, text string) (string, error) {
 	return "sent", nil
 }
 func (f *fakeOps) Stop(s store.Session) error { f.stopped = append(f.stopped, s.ID); return nil }
-func (f *fakeOps) Copy(text string) error     { f.copied = append(f.copied, text); return nil }
-func (f *fakeOps) Tools() []string            { return []string{"claude", "opencode"} }
+func (f *fakeOps) Trash(s store.Session) ([]store.Session, error) {
+	f.trashed = append(f.trashed, s.ID)
+	return append([]store.Session{s}, under(f.sessions, s.ID)...), nil
+}
+func (f *fakeOps) Trashed() ([]store.Session, error) { return f.trash, nil }
+func (f *fakeOps) Restore(s store.Session) ([]store.Session, error) {
+	f.restored = append(f.restored, s.ID)
+	return append([]store.Session{s}, under(f.trash, s.ID)...), nil
+}
+func (f *fakeOps) Purge(s store.Session) (tracker.Purged, error) {
+	f.purged = append(f.purged, s.ID)
+	return tracker.Purged{Sessions: append([]store.Session{s}, under(f.trash, s.ID)...)}, nil
+}
+func (f *fakeOps) Copy(text string) error { f.copied = append(f.copied, text); return nil }
+func (f *fakeOps) Tools() []string        { return []string{"claude", "opencode"} }
 
 // sample is a Claude session in a pane that spawned a headless opencode run
 // (which has its own subagent) and a Claude run that finished; plus an old
@@ -325,6 +342,78 @@ func TestSendInputWrapsLongMessage(t *testing.T) {
 	}
 	if m.mode != modeNormal || m.bodyHeight() != full {
 		t.Errorf("after sending: mode=%v body height=%d, want normal and %d", m.mode, m.bodyHeight(), full)
+	}
+}
+
+func TestDeleteMovesToTheTrashCountingEverythingUnder(t *testing.T) {
+	ops := &fakeOps{sessions: append(sample(),
+		store.Session{ID: "claude:C/s1", Tool: "claude", NativeID: "C/s1", ParentID: "claude:C", Title: "explore",
+			Kind: "internal", Status: "exited", CreatedAt: ago(35 * time.Minute), UpdatedAt: ago(34 * time.Minute)})}
+	m := New(ops, false)
+	m.now = func() time.Time { return now }
+	m = step(t, m, tea.WindowSizeMsg{Width: 160, Height: 30})
+	m = step(t, m, refreshedMsg{sessions: ops.sessions})
+
+	m = press(t, m, "d")
+	if m.mode != modeNormal || !strings.Contains(m.flash, "still running") {
+		t.Fatalf("delete on a live tree: mode=%v flash=%q", m.mode, m.flash)
+	}
+	// With subagents hidden, C shows no children, but its subagent goes too.
+	m = press(t, m, "i", "j", "j", "d") // claude:C: finished
+	if view := ansi.Strip(m.View()); m.mode != modeConfirm ||
+		!strings.Contains(view, "move claude ‹lint fix› and the 1 session under it to the trash?") {
+		t.Fatalf("delete on an ended session: mode=%v\n%s", m.mode, view)
+	}
+	m = press(t, m, "n")
+	if len(ops.trashed) != 0 || m.mode != modeNormal {
+		t.Fatalf("declined delete still ran: %v", ops.trashed)
+	}
+	m = press(t, m, "d", "y")
+	if strings.Join(ops.trashed, ",") != "claude:C" {
+		t.Fatalf("trashed = %v, want claude:C", ops.trashed)
+	}
+	if !strings.Contains(m.flash, "moved claude ‹lint fix› and the 1 session under it to the trash") {
+		t.Errorf("flash = %q", m.flash)
+	}
+}
+
+func TestTrashRestoresAndDeletesForGood(t *testing.T) {
+	m, ops := setup(t, false)
+	ops.trash = []store.Session{
+		{ID: "claude:T", Tool: "claude", NativeID: "T", Title: "old spike", Status: "exited",
+			CreatedAt: ago(3 * time.Hour), UpdatedAt: ago(2 * time.Hour), DeletedAt: ago(time.Hour)},
+		{ID: "opencode:U", Tool: "opencode", NativeID: "U", ParentID: "claude:T", Kind: "headless", Status: "exited",
+			CreatedAt: ago(3 * time.Hour), UpdatedAt: ago(2 * time.Hour), DeletedAt: ago(time.Hour)},
+	}
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, trashed: ops.trash})
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "2 in the trash") {
+		t.Fatalf("the header doesn't count the trash:\n%s", view)
+	}
+	m = press(t, m, "t")
+	view := ansi.Strip(m.View())
+	if !m.trash || !strings.Contains(view, "old spike") || strings.Contains(view, "Admin phase 2") ||
+		!strings.Contains(view, "in the trash since 1h ago") {
+		t.Fatalf("the trash view:\n%s", view)
+	}
+	m = press(t, m, "enter")
+	if len(ops.focused)+len(ops.resumed) != 0 || !strings.Contains(m.flash, "r restores") {
+		t.Fatalf("enter in the trash: focused=%v resumed=%v flash=%q", ops.focused, ops.resumed, m.flash)
+	}
+	m = press(t, m, "r")
+	if strings.Join(ops.restored, ",") != "claude:T" || !strings.Contains(m.flash, "restored claude ‹old spike› and the 1 session under it") {
+		t.Fatalf("restore: %v, flash %q", ops.restored, m.flash)
+	}
+	m = press(t, m, "d")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "delete claude ‹old spike› and the 1 session under it for good") {
+		t.Fatalf("the purge question:\n%s", view)
+	}
+	m = press(t, m, "y")
+	if strings.Join(ops.purged, ",") != "claude:T" || !strings.Contains(m.flash, "for good") {
+		t.Fatalf("purge: %v, flash %q", ops.purged, m.flash)
+	}
+	m = press(t, m, "t")
+	if m.trash || !strings.Contains(ansi.Strip(m.View()), "Admin phase 2") {
+		t.Fatal("t didn't go back to the tree")
 	}
 }
 

@@ -121,7 +121,7 @@ func readRollout(path string, mtime time.Time) (store.Session, []shellCommand, b
 		ID: store.ID(name, id), Tool: name, NativeID: id, Cwd: r.cwd,
 		Kind: kindOf(r.source, r.originator, r.threadSource, r.agentRole), Status: store.StatusExited,
 		Transcript: path, LastPrompt: firstNonEmpty(r.lastPrompt, r.firstPrompt),
-		CreatedAt: r.created, UpdatedAt: max(r.updated, r.created), Source: "import",
+		CreatedAt: r.created, UpdatedAt: max(r.updated, r.created), Source: store.SourceImport,
 	}
 	commands := r.executed
 	if len(commands) == 0 {
@@ -352,7 +352,7 @@ func (a *Adapter) importThreads(ctx context.Context, db *sql.DB, st *store.Store
 			s := store.Session{
 				ID: id, Tool: name, NativeID: t.id, Title: t.name, Cwd: t.cwd,
 				Kind: kindOf(t.source, "", t.threadSource, t.agentRole), Status: store.StatusExited,
-				Transcript: t.rolloutPath, CreatedAt: t.created, UpdatedAt: max(t.updated, t.created), Source: "import",
+				Transcript: t.rolloutPath, CreatedAt: t.created, UpdatedAt: max(t.updated, t.created), Source: store.SourceImport,
 			}
 			if s.Kind == store.KindInteractive {
 				s.Kind = ""

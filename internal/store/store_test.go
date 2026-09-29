@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -103,4 +104,141 @@ func must(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestTrashRestoreAndPurge(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "hive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, s := range []Session{
+		{ID: "claude:A", Tool: "claude", NativeID: "A", Cwd: "/src", CreatedAt: 1, UpdatedAt: 1},
+		{ID: "opencode:B", Tool: "opencode", NativeID: "B", ParentID: "claude:A", CreatedAt: 2, UpdatedAt: 2},
+		{ID: "claude:C", Tool: "claude", NativeID: "C", ParentID: "opencode:B", CreatedAt: 3, UpdatedAt: 3},
+		{ID: "claude:D", Tool: "claude", NativeID: "D", ParentID: "claude:A", CreatedAt: 4, UpdatedAt: 4},
+		{ID: "claude:E", Tool: "claude", NativeID: "E", CreatedAt: 5, UpdatedAt: 5},
+	} {
+		must(t, st.Upsert(s))
+	}
+	family := func(id string, trashed bool) string {
+		t.Helper()
+		list, err := st.Family(id, trashed)
+		must(t, err)
+		return ids(list)
+	}
+	if got := family("claude:A", false); got != "claude:A opencode:B claude:C claude:D" {
+		t.Fatalf("family = %s", got)
+	}
+
+	// A branch in the trash already is left out of what goes next.
+	must(t, st.Trash([]string{"claude:C"}, 5))
+	if got := family("claude:A", false); got != "claude:A opencode:B claude:D" {
+		t.Fatalf("family without the trashed branch = %s", got)
+	}
+	must(t, st.Trash([]string{"claude:A", "opencode:B", "claude:D"}, 10))
+	all, _ := st.All()
+	trashed, _ := st.Trashed()
+	if ids(all) != "claude:E" || len(trashed) != 4 {
+		t.Fatalf("all = %s, trashed = %s", ids(all), ids(trashed))
+	}
+	if got := family("opencode:B", true); got != "opencode:B claude:C" {
+		t.Fatalf("family in the trash = %s", got)
+	}
+	if c, _ := st.ClaimCandidates("claude", "/src", 0); len(c) != 0 {
+		t.Errorf("a session in the trash can be claimed: %s", ids(c))
+	}
+
+	// Imports and children naming it leave a session in the trash; its agent
+	// reporting in brings it back.
+	must(t, st.Upsert(Session{ID: "claude:A", Tool: "claude", NativeID: "A", Title: "renamed", Source: SourceImport, CreatedAt: 1, UpdatedAt: 1}))
+	must(t, st.Upsert(Session{ID: "claude:D", Tool: "claude", NativeID: "D", Source: SourceInferred, CreatedAt: 4, UpdatedAt: 4}))
+	if a, _, _ := st.Get("claude:A"); a.DeletedAt != 10 || a.Title != "renamed" {
+		t.Errorf("A after an import = %+v, want it still in the trash, renamed", a)
+	}
+	if d, _, _ := st.Get("claude:D"); d.DeletedAt != 10 {
+		t.Errorf("a child naming D brought it back")
+	}
+	must(t, st.Upsert(Session{ID: "claude:D", Tool: "claude", NativeID: "D", Source: SourceHook, CreatedAt: 4, UpdatedAt: 4}))
+	if d, _, _ := st.Get("claude:D"); d.DeletedAt != 0 {
+		t.Errorf("D stayed in the trash after its agent reported in")
+	}
+	must(t, st.Restore([]string{"claude:A"}))
+	if a, _, _ := st.Get("claude:A"); a.DeletedAt != 0 {
+		t.Errorf("A still in the trash after restoring it")
+	}
+
+	// Deleting for good takes the commands the session ran, but keeps what
+	// matched it as the session a command started.
+	must(t, st.PutHint(Hint{ParentID: "opencode:B", At: 3, Tool: "claude"}))
+	must(t, st.CloseHint(Hint{ParentID: "opencode:B", At: 3, Tool: "claude"}, "claude:C"))
+	must(t, st.PutHint(Hint{ParentID: "claude:C", At: 4, Tool: "opencode"}))
+	must(t, st.PutHint(Hint{ParentID: "claude:E", At: 6, Tool: "claude"}))
+	must(t, st.PutLaunch(Launch{Pane: "%1", Tool: "claude", ParentID: "claude:C", CreatedAt: 7}))
+	must(t, st.Purge("claude:C", 20))
+	if _, ok, _ := st.Get("claude:C"); ok {
+		t.Error("C still recorded")
+	}
+	if hints, _ := st.OpenHints(); len(hints) != 1 || hints[0].ParentID != "claude:E" {
+		t.Errorf("open hints = %+v, want only E's", hints)
+	}
+	if launches, _ := st.Launches(); len(launches) != 0 {
+		t.Errorf("launches = %+v, want C's gone", launches)
+	}
+	must(t, st.Upsert(Session{ID: "claude:C", Tool: "claude", NativeID: "C", Source: SourceImport, CreatedAt: 3, UpdatedAt: 3}))
+	if _, ok, _ := st.Get("claude:C"); ok {
+		t.Fatal("an import brought back a session deleted for good")
+	}
+	if purged, _ := st.PurgedIDs(); !purged["claude:C"] {
+		t.Errorf("purged = %v", purged)
+	}
+	must(t, st.Upsert(Session{ID: "claude:C", Tool: "claude", NativeID: "C", Source: SourceHook, CreatedAt: 3, UpdatedAt: 3}))
+	if _, ok, _ := st.Get("claude:C"); !ok {
+		t.Fatal("C's agent reported in, and C stayed gone")
+	}
+	if purged, _ := st.PurgedIDs(); purged["claude:C"] {
+		t.Error("C is back, and still counts as deleted for good")
+	}
+}
+
+// A hive from before the trash sets the schema version back when it opens the
+// database; the trash must survive that, and a newer version must stay.
+func TestMigrationsRunAgainAfterAnOlderHive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hive.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	must(t, st.Upsert(Session{ID: "claude:A", Tool: "claude", NativeID: "A", CreatedAt: 1, UpdatedAt: 1}))
+	must(t, st.Trash([]string{"claude:A"}, 5))
+	_, err = st.db.Exec(`PRAGMA user_version = 2`)
+	must(t, err)
+	st.Close()
+
+	if st, err = Open(path); err != nil {
+		t.Fatalf("reopening after an older hive: %v", err)
+	}
+	if a, _, _ := st.Get("claude:A"); a.DeletedAt != 5 {
+		t.Errorf("A = %+v, want it still in the trash", a)
+	}
+	_, err = st.db.Exec(`PRAGMA user_version = 99`)
+	must(t, err)
+	st.Close()
+	if st, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var version int
+	must(t, st.db.QueryRow(`PRAGMA user_version`).Scan(&version))
+	if version != 99 {
+		t.Errorf("version = %d, want a newer hive's 99 kept", version)
+	}
+}
+
+func ids(list []Session) string {
+	var out []string
+	for _, s := range list {
+		out = append(out, s.ID)
+	}
+	return strings.Join(out, " ")
 }

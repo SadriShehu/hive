@@ -1,6 +1,8 @@
 package tracker
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -419,6 +421,127 @@ func TestRefreshClaimsDaemonHostedSessionAndAdoptsItsLaunch(t *testing.T) {
 	}
 	if launches, _ := tr.Store.Launches(); len(launches) != 0 {
 		t.Fatalf("launch record kept after the claim: %+v", launches)
+	}
+}
+
+// fakePurger stands in for a tool's own delete: it records what it was asked
+// to delete, and refuses fail.
+type fakePurger struct {
+	agent.Adapter
+	purged *[]string
+	fail   string
+}
+
+func (f fakePurger) Purge(_ context.Context, s store.Session) error {
+	if s.ID == f.fail {
+		return errors.New("the tool refused")
+	}
+	*f.purged = append(*f.purged, s.ID)
+	return nil
+}
+
+func TestTrashRestoreAndPurge(t *testing.T) {
+	tr, w := newWorld(t)
+	var purged []string
+	purger := &fakePurger{purged: &purged}
+	for i, a := range tr.Adapters {
+		purger := *purger
+		purger.Adapter = a
+		tr.Adapters[i] = &purger
+	}
+	fail := func(id string) {
+		for _, a := range tr.Adapters {
+			a.(*fakePurger).fail = id
+		}
+	}
+	claudeHook(t, tr, w, 100, "A", agent.Start)
+	ingest(t, tr, agent.Event{Tool: "opencode", SessionID: "B", Type: agent.Start, PID: 201})
+	ingest(t, tr, agent.Event{Tool: "opencode", SessionID: "G", Type: agent.Start, PID: 201, ParentID: "opencode:B", Internal: true})
+	if _, err := tr.Trash(get(t, tr, "claude:A")); err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("trashing a live tree: err=%v", err)
+	}
+	if _, err := tr.Trash(store.Session{ID: "claude:pid-100", Source: "scan"}); err == nil {
+		t.Fatal("an untracked process went to the trash")
+	}
+	delete(w.procs, 100)
+	delete(w.procs, 201)
+	w.now = 5_000
+	family, err := tr.Trash(get(t, tr, "claude:A"))
+	if err != nil || len(family) != 3 {
+		t.Fatalf("trash: family=%+v err=%v, want A, B and G", family, err)
+	}
+	sessions, _ := tr.Refresh()
+	for _, s := range sessions {
+		if !s.Synthetic() {
+			t.Fatalf("the tree still shows %+v", s)
+		}
+	}
+	if _, err := tr.Trash(get(t, tr, "claude:A")); err == nil {
+		t.Error("trashed the same session twice")
+	}
+
+	// A late end doesn't bring a session back; nor does an import.
+	ingest(t, tr, agent.Event{Tool: "opencode", SessionID: "B", Type: agent.End})
+	if err := tr.Store.Upsert(store.Session{ID: "claude:A", Tool: "claude", NativeID: "A", Source: store.SourceImport, CreatedAt: 1, UpdatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if trashed, _ := tr.Store.Trashed(); len(trashed) != 3 {
+		t.Fatalf("trash = %+v, want A, B and G still there", trashed)
+	}
+
+	// Restoring B brings back what is under it, not what is above.
+	if family, err := tr.Restore(get(t, tr, "opencode:B")); err != nil || len(family) != 2 {
+		t.Fatalf("restore: family=%+v err=%v, want B and G", family, err)
+	}
+	if get(t, tr, "claude:A").DeletedAt == 0 || get(t, tr, "opencode:G").DeletedAt != 0 {
+		t.Fatal("restore moved the wrong sessions")
+	}
+	if _, err := tr.Purge(context.Background(), get(t, tr, "opencode:B")); err == nil || !strings.Contains(err.Error(), "isn't in the trash") {
+		t.Fatalf("purging a session outside the trash: err=%v", err)
+	}
+	if _, err := tr.Trash(get(t, tr, "opencode:B")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deleting for good goes deepest first and stops where a tool refuses.
+	fail("opencode:B")
+	out, err := tr.Purge(context.Background(), get(t, tr, "claude:A"))
+	if err == nil || strings.Join(purged, " ") != "opencode:G" || len(out.Sessions) != 1 {
+		t.Fatalf("purge with B refused: purged=%v out=%+v err=%v", purged, out, err)
+	}
+	if _, ok, _ := tr.Store.Get("opencode:G"); ok {
+		t.Error("G is deleted from its tool, and still recorded")
+	}
+	if get(t, tr, "opencode:B").DeletedAt == 0 || get(t, tr, "claude:A").DeletedAt == 0 {
+		t.Error("what the purge didn't reach left the trash")
+	}
+	fail("")
+	if out, err = tr.Purge(context.Background(), get(t, tr, "claude:A")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(purged, " ") != "opencode:G opencode:B claude:A" || len(out.Sessions) != 2 || len(out.Kept) != 0 {
+		t.Fatalf("purged=%v out=%+v", purged, out)
+	}
+	if trashed, _ := tr.Store.Trashed(); len(trashed) != 0 {
+		t.Fatalf("trash = %+v, want it empty", trashed)
+	}
+
+	// A tool hive can't delete from loses only hive's record.
+	if err := tr.Store.Upsert(store.Session{ID: "mytool:X", Tool: "mytool", NativeID: "X", Source: store.SourceHook, CreatedAt: 1, UpdatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.Trash(get(t, tr, "mytool:X")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err = tr.Purge(context.Background(), get(t, tr, "mytool:X")); err != nil || strings.Join(out.Kept, " ") != "mytool" {
+		t.Fatalf("purge of a tool without a delete: out=%+v err=%v", out, err)
+	}
+
+	// Its agent reporting in brings a session back, even after deleting it for good.
+	w.add(100, 90, "claude")
+	claudeHook(t, tr, w, 100, "A", agent.Start)
+	if a := get(t, tr, "claude:A"); a.PID != 100 || a.DeletedAt != 0 {
+		t.Fatalf("A = %+v, want it back once its agent reports in", a)
 	}
 }
 
