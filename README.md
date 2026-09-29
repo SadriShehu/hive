@@ -5,7 +5,7 @@ who spawned whom, what each agent is doing right now, and a key press to jump in
 or command any of them. Each agent runs its own real TUI in a tmux window; hive never
 wraps or reimplements an agent.
 
-Design doc: https://claude.ai/code/artifact/5df7a9f0-da62-4b84-a527-eec21528bf63
+How it works, and why: [DESIGN.md](DESIGN.md).
 
 ## Status
 
