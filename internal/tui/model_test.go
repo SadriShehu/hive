@@ -276,6 +276,33 @@ func TestSendNewChildAndStop(t *testing.T) {
 	}
 }
 
+func TestNewFormWrapsLongPrompt(t *testing.T) {
+	m, ops := setup(t, false)
+	m = press(t, m, "n", "tab")
+	long := strings.Repeat("make the admin page load faster ", 6) + "and add tests"
+	m = press(t, m, long)
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "and add tests") {
+		t.Fatalf("end of the prompt not shown:\n%s", view)
+	}
+	rows := 0
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "admin page") {
+			rows++
+		}
+	}
+	if rows < 3 {
+		t.Errorf("long prompt drawn on %d rows, want it wrapped:\n%s", rows, view)
+	}
+	m = press(t, m, "enter")
+	if len(ops.launched) != 1 || ops.launched[0].Prompt != long {
+		t.Errorf("launched = %+v, want the whole prompt", ops.launched)
+	}
+	if m.mode != modeNormal {
+		t.Errorf("form still open after starting the agent")
+	}
+}
+
 func TestPreviewShowsPaneOrTranscript(t *testing.T) {
 	m, _ := setup(t, false)
 	if view := ansi.Strip(m.View()); !strings.Contains(view, "screen of %1") || !strings.Contains(view, "pane %1 · ↵ jumps there") {
@@ -298,6 +325,9 @@ func TestViewFitsAnySize(t *testing.T) {
 			mm := m
 			if mode != "" {
 				mm = press(t, m, mode)
+			}
+			if mode == "n" {
+				mm = press(t, mm, "tab", strings.Repeat("wrap me ", 40))
 			}
 			lines := strings.Split(mm.View(), "\n")
 			if len(lines) != size[1] {

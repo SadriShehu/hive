@@ -10,8 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/store"
@@ -25,6 +28,9 @@ const (
 	recentWindow = 24 * time.Hour
 	flashFor     = 6 * time.Second
 	previewLines = 80 // transcript entries fetched for the preview
+
+	promptAreaRows = 200
+	formChromeRows = 7
 )
 
 type mode int
@@ -96,7 +102,29 @@ type form struct {
 	tool   int
 	field  int // 0 tool, 1 folder, 2 prompt
 	folder textinput.Model
-	prompt textinput.Model
+	prompt textarea.Model
+}
+
+func (f *form) layout(w int) {
+	f.folder.Width = max(10, w-12)
+	f.prompt.SetWidth(max(10, w-12))
+}
+
+func (f *form) promptRows() int {
+	width := max(1, f.prompt.Width())
+	rows := 0
+	for i, line := range strings.Split(f.prompt.Value(), "\n") {
+		if i == f.prompt.Line() {
+			rows += f.prompt.LineInfo().Height
+			continue
+		}
+		rows += rowsWithSlack(line, width)
+	}
+	return rows
+}
+
+func rowsWithSlack(line string, width int) int {
+	return strings.Count(ansi.Wrap(line, width, ""), "\n") + 2
 }
 
 type (
@@ -135,6 +163,22 @@ func newInput(prompt, placeholder string) textinput.Model {
 	in.PlaceholderStyle = sDim
 	in.CharLimit = 16000
 	return in
+}
+
+func newPromptArea(placeholder string) textarea.Model {
+	area := textarea.New()
+	area.Prompt = ""
+	area.ShowLineNumbers = false
+	area.Placeholder = placeholder
+	area.CharLimit = 16000
+	area.MaxHeight = 0
+	plain := lipgloss.NewStyle()
+	for _, style := range []*textarea.Style{&area.FocusedStyle, &area.BlurredStyle} {
+		style.Base, style.CursorLine, style.Text, style.EndOfBuffer = plain, plain, plain, plain
+		style.Placeholder = sDim
+	}
+	area.SetHeight(promptAreaRows)
+	return area
 }
 
 // Run shows the TUI until the user quits.
@@ -197,6 +241,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.clampScroll()
+		if m.mode == modeNew {
+			m.form.layout(m.formWidth())
+		}
 		return m, nil
 
 	case tickMsg:
@@ -468,7 +515,8 @@ func (m Model) openForm(parent store.Session) (tea.Model, tea.Cmd) {
 	}
 	f := form{parent: parent, tools: tools, field: 1}
 	f.folder = newInput("", "folder")
-	f.prompt = newInput("", "first prompt (optional)")
+	f.prompt = newPromptArea("first prompt (optional)")
+	f.layout(m.formWidth())
 	dir := parent.Cwd
 	if s, ok := m.selected(); dir == "" && ok {
 		dir = s.Cwd

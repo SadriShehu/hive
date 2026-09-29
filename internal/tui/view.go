@@ -23,6 +23,13 @@ func (m Model) treeWidth() int {
 	return max(44, min(110, m.width*52/100))
 }
 
+func (m Model) formWidth() int {
+	if !m.previewVisible() {
+		return m.width
+	}
+	return m.width - m.treeWidth() - 3
+}
+
 // View draws the whole screen: header, tree and preview, key hints, status.
 func (m Model) View() string {
 	if m.width == 0 {
@@ -276,15 +283,17 @@ func (m Model) formLines(w, h int) []string {
 		}
 		return mark + sDim.Render(fmt.Sprintf("%-7s", name)) + value
 	}
-	f.folder.Width = max(10, w-12)
-	f.prompt.Width = max(10, w-12)
+	prompt := strings.Split(f.prompt.View(), "\n")
+	rows := min(len(prompt), f.promptRows(), max(1, h-formChromeRows))
 	out = append(out,
 		field(0, "tool", strings.Join(tools, "  ")),
 		field(1, "folder", f.folder.View()),
-		field(2, "prompt", f.prompt.View()),
-		"",
-		sDim.Render("It opens in a new tmux window, running the tool's own TUI."),
+		field(2, "prompt", prompt[0]),
 	)
+	for _, line := range prompt[1:rows] {
+		out = append(out, strings.Repeat(" ", 9)+line)
+	}
+	out = append(out, "", sDim.Render("It opens in a new tmux window, running the tool's own TUI."))
 	if f.parent.ID != "" {
 		out = append(out, sDim.Render("hive links it under the selected session."))
 	}
