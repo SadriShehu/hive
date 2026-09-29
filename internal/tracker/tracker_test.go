@@ -27,6 +27,7 @@ func (w *fakeWorld) Cwd(int) string           { return "/work" }
 func (w *fakeWorld) Getenv(key string) string { return w.env[key] }
 func (w *fakeWorld) SelfPID() int             { return w.self }
 func (w *fakeWorld) Now() int64               { return w.now }
+func (w *fakeWorld) Forget()                  {}
 
 func (w *fakeWorld) add(pid, ppid int, args string) {
 	w.procs[pid] = proc.Proc{PID: pid, PPID: ppid, Args: strings.Fields(args)}

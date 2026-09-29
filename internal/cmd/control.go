@@ -87,6 +87,11 @@ func goTo(pane string) error {
 	return tmux.Attach(session)
 }
 
+// quietStart is how long `hive new --wait` gives a running agent to report in
+// before it settles for the pending session: some tools, like opencode without
+// a prompt, start their session only with the first message.
+const quietStart = 10 * time.Second
+
 func newNewCmd() *cobra.Command {
 	var cwd, prompt, parent string
 	var wait, focus bool
@@ -99,7 +104,9 @@ func newNewCmd() *cobra.Command {
 			"`hive send` to it, `hive tail` it and check on it with `hive ls --json`.\n\n" +
 			"Claude and Copilot are given their session ID up front, so it prints at once. Other\n" +
 			"tools choose their own, which --wait waits for; --wait also waits until the agent\n" +
-			"is up, so a `hive send` right after it isn't typed before the agent can read it.",
+			"is up, so a `hive send` right after it isn't typed before the agent can read it.\n" +
+			"A tool that starts its session only with its first message gets a stand-in ID,\n" +
+			"<tool>:pid-N, that names the session once it starts.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tool := args[0]
@@ -140,11 +147,15 @@ func newNewCmd() *cobra.Command {
 				if s, ok, _ := st.Get(id); ok {
 					after = s.StatusAt // registered by Launch; wait for the agent's own first event
 				}
-				s, err := tr.WaitForSession(tool, l.Pane, after, timeout)
+				s, err := tr.WaitForSession(tool, l.Pane, after, quietStart, timeout)
 				if err != nil {
 					return err
 				}
 				id = s.ID
+				if s.Synthetic() {
+					fmt.Fprintf(os.Stderr, "%s starts its session with its first message; until then it goes by %s, "+
+						"which hive send, jump and kill accept, and which then names the session\n", tool, id)
+				}
 			}
 			if id != "" {
 				fmt.Println(id)

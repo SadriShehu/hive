@@ -107,6 +107,9 @@ prefix of either. `hive new` starts in the current folder (`--cwd` to change it)
 the background (`--focus` to switch to it), linked under the agent running the command
 (`--parent none` or `--parent <id>` to change that). `--wait` returns once the agent has
 reported in, so a `hive send` right after it isn't typed before the agent can read it.
+A tool that starts its session only with its first message (opencode without `-p`)
+gets a stand-in ID, `opencode:pid-N`, which the other commands accept and which
+names the session once it starts.
 
 ## How linking works
 

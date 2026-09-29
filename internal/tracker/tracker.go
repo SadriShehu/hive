@@ -34,6 +34,9 @@ type World interface {
 	Getenv(key string) string
 	SelfPID() int
 	Now() int64 // epoch ms
+
+	// Forget drops what was read so far, so the next look is fresh.
+	Forget()
 }
 
 // System is the World as seen from this process. The process table and pane
@@ -60,6 +63,8 @@ func (w *System) Panes() []tmux.Pane {
 	}
 	return w.panes
 }
+
+func (w *System) Forget() { *w = System{} }
 
 func (w *System) Cwd(pid int) string       { return proc.Cwd(pid) }
 func (w *System) Getenv(key string) string { return os.Getenv(key) }

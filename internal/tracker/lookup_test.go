@@ -7,6 +7,7 @@ import (
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/tmux"
 )
 
 func TestLookup(t *testing.T) {
@@ -39,7 +40,9 @@ func TestLookup(t *testing.T) {
 }
 
 func TestWaitForSession(t *testing.T) {
-	tr, _ := newWorld(t)
+	tr, w := newWorld(t)
+	w.add(4242, 1, "opencode")
+	w.panes = append(w.panes, tmux.Pane{ID: "%7", PID: 4242})
 	id := "opencode:ses_new"
 	if err := tr.Store.Upsert(store.Session{ID: id, Tool: "opencode", NativeID: "ses_new", CreatedAt: 1_000, UpdatedAt: 1_000}); err != nil {
 		t.Fatal(err)
@@ -50,7 +53,7 @@ func TestWaitForSession(t *testing.T) {
 	if err := tr.Store.SetStatus(id, store.StatusIdle, 1_500); err != nil {
 		t.Fatal(err)
 	}
-	if s, err := tr.WaitForSession("opencode", "%7", 1_200, time.Second); err != nil || s.ID != id {
+	if s, err := tr.WaitForSession("opencode", "%7", 1_200, time.Minute, time.Second); err != nil || s.ID != id {
 		t.Fatalf("WaitForSession = %q, %v", s.ID, err)
 	}
 	// Nothing reported since, or on another pane or tool: time out.
@@ -58,9 +61,37 @@ func TestWaitForSession(t *testing.T) {
 		tool, pane string
 		after      int64
 	}{{"opencode", "%7", 1_500}, {"opencode", "%8", 0}, {"claude", "%7", 0}} {
-		if _, err := tr.WaitForSession(c.tool, c.pane, c.after, 50*time.Millisecond); err == nil {
+		if _, err := tr.WaitForSession(c.tool, c.pane, c.after, time.Minute, 50*time.Millisecond); err == nil {
 			t.Errorf("WaitForSession(%s, %s, %d) found a session", c.tool, c.pane, c.after)
 		}
+	}
+}
+
+func TestWaitForSessionSettlesForPending(t *testing.T) {
+	tr, w := newWorld(t)
+	// opencode without a prompt: running in the window hive opened, silent.
+	w.add(4300, 1, "opencode")
+	w.panes = append(w.panes, tmux.Pane{ID: "%9", PID: 4300})
+	if err := tr.Store.PutLaunch(store.Launch{Pane: "%9", Tool: "opencode", ParentID: "claude:c1", CreatedAt: w.now}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := tr.WaitForSession("opencode", "%9", 0, 0, time.Second)
+	if err != nil || s.ID != "opencode:pid-4300" || s.ParentID != "claude:c1" {
+		t.Fatalf("WaitForSession = %+v, %v", s, err)
+	}
+	// Its first message starts the session; the stand-in ID now finds it.
+	ingest(t, tr, agent.Event{Tool: "opencode", SessionID: "ses_late", Type: agent.Prompt, PID: 4300})
+	sessions, err := tr.Refresh()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"opencode:pid-4300", "pid-4300"} {
+		if got, err := Lookup(sessions, ref); err != nil || got.ID != "opencode:ses_late" {
+			t.Errorf("Lookup(%s) = %q, %v", ref, got.ID, err)
+		}
+	}
+	if _, err := Lookup(sessions, "claude:pid-4300"); err == nil {
+		t.Error("a stand-in ID matched another tool's session")
 	}
 }
 
