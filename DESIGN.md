@@ -376,6 +376,10 @@ internal/
   and Codex were smoke-tested against scratch data. Deleting for good ran with the real
   `opencode`, `codex` and `claude` binaries against copies of their data in scratch homes
   (`XDG_DATA_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `COPILOT_HOME`), never the real ones.
+- The README's demo is recorded the same way: `docs/demo/record.sh` runs stand-in agents
+  (`docs/demo/agent`) that report through `hive hook`, with a config that gives the
+  built-in tools their process names, a scratch `HOME` and a private tmux server, then
+  replays `docs/demo.tape` with vhs.
 - A claim about a tool (hook format, event names, flags) is checked against the installed
   binary, not its docs: the first Copilot adapter guessed its hook format wrong, which only
   that check caught.
