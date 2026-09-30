@@ -241,6 +241,15 @@ Other keys: `n` new agent, `c` new agent as a child of the selected one, `/` fil
 title, folder or ID, `a` recent or all history, `i` hide or show subagents, `S` sync now,
 `y` copy the ID, `tab` hide the preview, `←` / `→` collapse and expand, `?` help, `q` quit.
 
+**New agent.** `n` and `c` open a form: the tool, the folder (the parent's by default) and
+an optional first prompt. Editing the folder lists up to eight folders that complete it:
+those inside what's typed up to its last `/` whose names start with the rest, ignoring
+case, with hidden ones once that starts with a dot. `↑` / `↓` highlight one; `tab` fills
+it in (the first if none is) and lists the folders inside it; `enter` takes the
+highlighted one and moves on, or keeps what's typed when none is; `esc` hides the list.
+`~` and relative paths resolve as starting the agent does. `hive new --cwd` gets the same
+from the shell's folder completion.
+
 **Deleting.** `d` moves the selected session and everything under it to the trash, after
 you confirm; the question counts every session that goes, including ones hidden by the
 filter, `i` or the 24-hour view. It is refused while anything in there runs. `t` shows the
@@ -348,6 +357,7 @@ internal/
 | 4. Agent-facing CLI | `new --wait`, `send`, `tail`, `jump`, `resume`, `kill`, config, `doctor`, stand-in IDs | `e1ecb80`, `eabdbf3` | 29 Sep |
 | — Claude daemon | spares and helper processes hidden | `ef8beea` | 29 Sep |
 | — Deleting | trash (`d`, `hive rm`), restore, deleting for good through each tool | PR #3 | 29 Sep |
+| — Folder suggestions | the new-agent form lists folders as you type; `hive new --cwd` completes them | this branch | 30 Sep |
 
 ## Testing
 

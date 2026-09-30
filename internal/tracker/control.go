@@ -312,12 +312,10 @@ func startStatus(prompt string) string {
 
 // folder checks that dir exists, making ~ absolute.
 func folder(dir string) (string, error) {
-	switch {
-	case dir == "" || dir == "~":
+	if dir == "" {
 		return paths.Home(), nil
-	case strings.HasPrefix(dir, "~/"):
-		dir = filepath.Join(paths.Home(), dir[2:])
 	}
+	dir = paths.Expand(dir)
 	fi, err := os.Stat(dir)
 	if err != nil || !fi.IsDir() {
 		return "", fmt.Errorf("no such folder: %s", dir)

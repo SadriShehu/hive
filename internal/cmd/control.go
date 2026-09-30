@@ -170,6 +170,7 @@ func newNewCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&cwd, "cwd", "", "folder to start in (default: the current one)")
+	_ = cmd.MarkFlagDirname("cwd") // the shell completes folders
 	f.StringVarP(&prompt, "prompt", "p", "", "the agent's first message")
 	f.StringVar(&parent, "parent", "auto", "auto (the agent running this command), none, or a session ID")
 	f.BoolVarP(&wait, "wait", "w", false, "wait until the agent is up, then print its session ID")

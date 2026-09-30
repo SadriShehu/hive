@@ -154,6 +154,43 @@ type form struct {
 	field  int // 0 tool, 1 folder, 2 prompt
 	folder textinput.Model
 	prompt textarea.Model
+
+	folders []string // suggestions that complete the folder being typed
+	pick    int      // the highlighted one; -1 keeps what's typed
+}
+
+// suggest lists the folders that complete the folder field, none highlighted.
+func (f *form) suggest() {
+	f.folders, f.pick = folderSuggestions(f.folder.Value()), -1
+}
+
+// keyFolders works the folder suggestions: ↑/↓ highlight one, tab fills it
+// in (the first if none is) and lists the folders inside it, enter takes it
+// and moves on, esc hides the list until the folder is edited again. It
+// reports whether it used the key.
+func (f *form) keyFolders(msg tea.KeyMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case "up":
+		f.pick = max(-1, f.pick-1)
+	case "down":
+		f.pick = min(len(f.folders)-1, f.pick+1)
+	case "tab":
+		f.folder.SetValue(f.folders[max(0, f.pick)] + "/")
+		f.folder.CursorEnd()
+		f.suggest()
+	case "enter":
+		if f.pick < 0 {
+			return nil, false
+		}
+		f.folder.SetValue(f.folders[f.pick])
+		f.folder.CursorEnd()
+		return f.focus(2), true
+	case "esc":
+		f.folders = nil
+	default:
+		return nil, false
+	}
+	return nil, true
 }
 
 func (f *form) layout(w int) {
@@ -720,6 +757,11 @@ func (m Model) openForm(parent store.Session) (tea.Model, tea.Cmd) {
 
 func (m Model) keyNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	f := &m.form
+	if f.field == 1 && len(f.folders) > 0 {
+		if cmd, ok := f.keyFolders(msg); ok {
+			return m, cmd
+		}
+	}
 	switch msg.String() {
 	case "esc":
 		m.mode = modeNormal
@@ -755,7 +797,11 @@ func (m Model) keyNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch f.field {
 	case 1:
+		typed := f.folder.Value()
 		f.folder, cmd = f.folder.Update(msg)
+		if f.folder.Value() != typed {
+			f.suggest()
+		}
 	case 2:
 		f.prompt, cmd = f.prompt.Update(msg)
 	}
@@ -764,6 +810,7 @@ func (m Model) keyNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (f *form) focus(field int) tea.Cmd {
 	f.field = field
+	f.folders = nil
 	f.folder.Blur()
 	f.prompt.Blur()
 	switch field {
