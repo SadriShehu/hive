@@ -4,6 +4,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Home is the user's home directory.
@@ -13,6 +14,14 @@ func Home() string {
 		return "."
 	}
 	return h
+}
+
+// Expand turns a leading ~ in p into the home directory.
+func Expand(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		return filepath.Join(Home(), p[1:])
+	}
+	return p
 }
 
 // DataDir holds the database and log. HIVE_HOME overrides it, which keeps

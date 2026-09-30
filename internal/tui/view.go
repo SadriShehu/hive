@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -298,12 +299,14 @@ func (m Model) formLines(w, h int) []string {
 		}
 		return mark + sDim.Render(fmt.Sprintf("%-7s", name)) + value
 	}
-	prompt := visibleRows(f.prompt, h-formChromeRows)
+	folders := f.folderLines(h - formChromeRows - 1)
+	prompt := visibleRows(f.prompt, h-formChromeRows-len(folders))
 	out = append(out,
 		field(0, "tool", strings.Join(tools, "  ")),
 		field(1, "folder", f.folder.View()),
-		field(2, "prompt", prompt[0]),
 	)
+	out = append(out, folders...)
+	out = append(out, field(2, "prompt", prompt[0]))
 	for _, line := range prompt[1:] {
 		out = append(out, strings.Repeat(" ", 9)+line)
 	}
@@ -312,6 +315,36 @@ func (m Model) formLines(w, h int) []string {
 		out = append(out, sDim.Render("hive links it under the selected session."))
 	}
 	return fit(out, w, h)
+}
+
+// folderLines draws the folder suggestions under the folder field in at most
+// rows lines, keeping the highlighted one in view.
+func (f form) folderLines(rows int) []string {
+	n := len(f.folders)
+	if f.field != 1 {
+		return nil
+	}
+	shown := min(n, shownFolders, rows)
+	if shown < n {
+		shown = min(shown, rows-1) // a line for the count
+	}
+	if shown < 1 {
+		return nil
+	}
+	start := min(max(0, f.pick-shown+1), n-shown)
+	var out []string
+	for i := start; i < start+shown; i++ {
+		name := filepath.Base(f.folders[i]) + "/"
+		if i == f.pick {
+			out = append(out, strings.Repeat(" ", 7)+sAccent.Render("› "+name))
+		} else {
+			out = append(out, strings.Repeat(" ", 9)+sText.Render(name))
+		}
+	}
+	if shown < n {
+		out = append(out, strings.Repeat(" ", 9)+sDim.Render(fmt.Sprintf("%d–%d of %d", start+1, start+shown, n)))
+	}
+	return out
 }
 
 func (m Model) hintLines() []string {
@@ -341,6 +374,9 @@ func (m Model) hintLine() string {
 		}
 		return sError.Render(question) + keys("y", "yes", "any other key", "no")
 	case modeNew:
+		if f := m.form; f.field == 1 && len(f.folders) > 0 {
+			return keys("tab", "fill in", "↑/↓", "pick", "↵", "next", "esc", "hide list")
+		}
 		return keys("↵", "next / start", "tab", "field", "←/→", "tool", "esc", "cancel")
 	case modeHelp:
 		return keys("any key", "close")
