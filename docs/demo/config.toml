@@ -1,0 +1,27 @@
+# hive's config for the demo: the built-in tools start the stand-ins in
+# agent/ and know them by names no real agent's process has, so agents
+# running on the machine stay out of the demo.
+
+[[agent]]
+name = "claude"
+new = ["hive-demo-claude", "--session-id", "{session}", "{prompt}"]
+resume = ["hive-demo-claude", "--resume", "{id}", "{prompt}"]
+process = ["hive-demo-claude"]
+
+[[agent]]
+name = "opencode"
+new = ["hive-demo-opencode", "--prompt", "{prompt}"]
+resume = ["hive-demo-opencode", "--session", "{id}", "--prompt", "{prompt}"]
+process = ["hive-demo-opencode"]
+
+[[agent]]
+name = "codex"
+new = ["hive-demo-codex", "{prompt}"]
+resume = ["hive-demo-codex", "resume", "{id}", "{prompt}"]
+process = ["hive-demo-codex"]
+
+[[agent]]
+name = "copilot"
+new = ["hive-demo-copilot", "--session-id", "{session}", "--interactive", "{prompt}"]
+resume = ["hive-demo-copilot", "--resume", "{id}", "--interactive", "{prompt}"]
+process = ["hive-demo-copilot"]
