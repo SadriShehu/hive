@@ -1,9 +1,9 @@
 package opencode
 
 import (
-	"database/sql"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tidwall/gjson"
 
@@ -13,7 +13,7 @@ import (
 
 // Tail returns the last n entries of a session, read from opencode's database.
 func (a *Adapter) Tail(s store.Session, n int) ([]agent.Line, error) {
-	db, err := sql.Open("sqlite", "file:"+a.dbPath()+"?mode=ro&_pragma=busy_timeout(2000)")
+	db, err := a.openDB(2 * time.Second)
 	if err != nil {
 		return nil, err
 	}
