@@ -42,6 +42,9 @@ go install github.com/sadrishehu/hive@latest   # any OS with Go; or `go install 
 hive install                                   # connect every agent found on PATH
 ```
 
+`brew upgrade` brings hive along with everything else; for hive alone it is
+`brew upgrade --cask hive`, because the plain name `hive` is Apache Hive in homebrew/core.
+
 Prebuilt binaries for macOS and Linux are on the
 [releases page](https://github.com/SadriShehu/hive/releases). `hive --version` shows
 which build you run.
