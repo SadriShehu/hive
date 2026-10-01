@@ -247,7 +247,9 @@ session that ended before its first message was saved.
 
 Other keys: `n` new agent, `c` new agent as a child of the selected one, `/` filter by
 title, folder or ID, `a` recent or all history, `i` hide or show subagents, `S` sync now,
-`y` copy the ID, `tab` hide the preview, `←` / `→` collapse and expand, `?` help, `q` quit.
+`y` copy the ID, `tab` hide the preview, `u` show what the session used (model, tokens,
+price, context, tools, skills) in place of the pane preview, `←` / `→` collapse and expand,
+`?` help, `q` quit.
 
 **New agent.** `n` and `c` open a form: the tool, the folder (the parent's by default) and
 an optional first prompt. Editing the folder lists up to eight folders that complete it:

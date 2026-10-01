@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"math"
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/sadrishehu/hive/internal/store"
@@ -77,4 +80,19 @@ func statusWord(s store.Session) string {
 		return "running"
 	}
 	return s.Status
+}
+
+func contextStyle(pct int) lipgloss.Style {
+	switch {
+	case pct < 50:
+		return lipgloss.NewStyle().Foreground(cIdle)
+	case pct <= 75:
+		return lipgloss.NewStyle().Foreground(cWorking)
+	}
+	return lipgloss.NewStyle().Foreground(cAttention)
+}
+
+func bar(pct, width int) string {
+	filled := min(width, max(0, int(math.Round(float64(pct)*float64(width)/100))))
+	return contextStyle(pct).Render(strings.Repeat("▓", filled)) + sRule.Render(strings.Repeat("░", width-filled))
 }

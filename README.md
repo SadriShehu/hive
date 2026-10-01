@@ -89,6 +89,7 @@ transcript for a headless run, a subagent or a finished session.
 | `/` | filter by title, folder or ID, across all history |
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
+| `u` | show / hide what the session used: model, tokens, price, context, tools, skills |
 
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. Claude and Copilot CLI are given their
