@@ -298,8 +298,9 @@ and log elsewhere; `HIVE_TMUX_SOCKET=name` points hive at a named tmux server
 Every push to `main` that passes CI and changes more than documentation becomes a
 release: CI tags the next patch version, builds the binaries for macOS and Linux,
 publishes the GitHub release, and updates the Homebrew cask. Put `#minor` or `#major`
-in a commit message or the pull request title to bump that part instead. To pick the
-bump by hand, run the CI workflow from the Actions tab on `main`.
+in the first line of a commit message to bump that part instead; the rest of a message
+can mention the tokens freely. To pick the bump by hand, run the CI workflow from the
+Actions tab on `main`.
 
 ## License
 

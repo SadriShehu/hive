@@ -18,12 +18,14 @@ if [ -z "$bump" ] && [ -n "$last" ]; then
 fi
 
 if [ -z "$bump" ]; then
-  messages=$(git log "${last:+$last..}HEAD" --format=%B)
-  case "$messages" in
-    *'#major'*) bump=major ;;
-    *'#minor'*) bump=minor ;;
-    *) bump=patch ;;
-  esac
+  subjects=$(git log "${last:+$last..}HEAD" --format=%s)
+  bump=patch
+  if grep -qE '(^|[[:space:]])#minor([[:space:]]|$)' <<<"$subjects"; then
+    bump=minor
+  fi
+  if grep -qE '(^|[[:space:]])#major([[:space:]]|$)' <<<"$subjects"; then
+    bump=major
+  fi
 fi
 
 IFS=. read -r major minor patch <<<"${last#v}" || true
