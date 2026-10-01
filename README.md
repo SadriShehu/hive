@@ -37,9 +37,14 @@ config file.
 ## Install
 
 ```sh
-go install github.com/sadrishehu/hive@latest   # or `go install .` in a checkout
+brew install SadriShehu/tap/hive               # macOS, with Homebrew
+go install github.com/sadrishehu/hive@latest   # any OS with Go; or `go install .` in a checkout
 hive install                                   # connect every agent found on PATH
 ```
+
+Prebuilt binaries for macOS and Linux are on the
+[releases page](https://github.com/SadriShehu/hive/releases). `hive --version` shows
+which build you run.
 
 `hive install` adds hooks to `~/.claude/settings.json` (backed up to
 `settings.json.bak-hive`), writes `~/.config/opencode/plugin/hive.js`, adds

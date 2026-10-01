@@ -15,8 +15,9 @@ func Execute() {
 	// instead of the one it runs in or the default.
 	tmux.Socket = os.Getenv("HIVE_TMUX_SOCKET")
 	root := &cobra.Command{
-		Use:   "hive",
-		Short: "One tree of all your coding-agent sessions",
+		Use:     "hive",
+		Version: resolvedVersion(),
+		Short:   "One tree of all your coding-agent sessions",
 		Long: "hive tracks every Claude Code, opencode, Copilot CLI and Codex session, links each agent to the\n" +
 			"agents it spawns, and shows them as one tree. Run it with no command to open\n" +
 			"the tree: jump into any agent, message it, start or reopen one.",
