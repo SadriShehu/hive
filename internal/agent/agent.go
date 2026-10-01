@@ -160,6 +160,10 @@ type Tailer interface {
 	Tail(s store.Session, n int) ([]Line, error)
 }
 
+type UsageReader interface {
+	ReadUsage(ctx context.Context, s store.Session, prev store.Usage, cursor string) (store.Usage, string, error)
+}
+
 // Matches reports whether p is one of the tool's processes.
 func (s Spec) Matches(p proc.Proc) bool {
 	return p.Runs(s.Process) && !s.isHelperProcess(p.Argv())

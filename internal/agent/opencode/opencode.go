@@ -2,13 +2,16 @@
 package opencode
 
 import (
+	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/paths"
@@ -75,6 +78,14 @@ func (a *Adapter) dbPath() string {
 		dir = filepath.Join(paths.Home(), ".local", "share")
 	}
 	return filepath.Join(dir, "opencode", "opencode.db")
+}
+
+func (a *Adapter) openDB(busy time.Duration) (*sql.DB, error) {
+	path := a.dbPath()
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	return sql.Open("sqlite", fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(%d)", path, busy.Milliseconds()))
 }
 
 // ParseHook reads events from the plugin, which speaks the generic contract.

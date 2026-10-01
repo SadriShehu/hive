@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"io/fs"
-	"os"
 	"strconv"
+	"time"
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/store"
@@ -18,11 +18,10 @@ const cursorKey = "opencode:cursor"
 // Import reads sessions updated since the last import from opencode's
 // database, opened read-only, along with the bash commands they ran.
 func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.ShellCommand)) (int, error) {
-	path := a.dbPath()
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+	db, err := a.openDB(5 * time.Second)
+	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil // opencode never ran here
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return 0, err
 	}

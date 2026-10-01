@@ -12,6 +12,7 @@ import (
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
 	"github.com/sadrishehu/hive/internal/tracker"
+	"github.com/sadrishehu/hive/internal/usage"
 )
 
 // Ops is everything the TUI asks of the outside world. liveOps drives the
@@ -33,24 +34,35 @@ type Ops interface {
 	Purge(s store.Session) (tracker.Purged, error)
 	Copy(text string) error
 	Tools() []string // tools that can be started here
+	Usages() (map[string]store.Usage, error)
+	Usage(ctx context.Context, s store.Session) (store.Usage, error)
 }
 
 type liveOps struct {
 	st       *store.Store
 	adapters []agent.Adapter
+	models   usage.Catalog
 
 	mu        sync.Mutex
 	refresher *tracker.Tracker // long-lived: it remembers process folders
 }
 
 // NewLiveOps returns the Ops that act on this machine.
-func NewLiveOps(st *store.Store, adapters []agent.Adapter) Ops {
-	return &liveOps{st: st, adapters: adapters, refresher: tracker.New(st, adapters, &tracker.System{})}
+func NewLiveOps(st *store.Store, adapters []agent.Adapter, models usage.Catalog) Ops {
+	return &liveOps{st: st, adapters: adapters, models: models, refresher: tracker.New(st, adapters, &tracker.System{})}
 }
 
 // tracker returns a tracker with a fresh view of processes and panes.
 func (o *liveOps) tracker() *tracker.Tracker {
-	return tracker.New(o.st, o.adapters, &tracker.System{})
+	tr := tracker.New(o.st, o.adapters, &tracker.System{})
+	tr.Models = o.models
+	return tr
+}
+
+func (o *liveOps) Usages() (map[string]store.Usage, error) { return o.tracker().AllUsage() }
+
+func (o *liveOps) Usage(ctx context.Context, s store.Session) (store.Usage, error) {
+	return o.tracker().Usage(ctx, s)
 }
 
 func (o *liveOps) Refresh() ([]store.Session, error) {
