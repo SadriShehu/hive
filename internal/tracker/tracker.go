@@ -16,6 +16,7 @@ import (
 	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
+	"github.com/sadrishehu/hive/internal/usage"
 )
 
 // ParentEnv is the variable every agent sets, for the commands it runs, to
@@ -80,6 +81,8 @@ type Tracker struct {
 
 	// Logf, when set, receives one line per decision, for debugging links.
 	Logf func(format string, args ...any)
+
+	Models usage.Catalog
 
 	cwds map[string]string // process folders, by pid@start
 }

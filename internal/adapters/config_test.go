@@ -76,6 +76,54 @@ new  = ["opencode", "-m", "deepseek/deepseek-v4-pro", "--prompt", "{prompt}"]
 	if _, ok := opencode.(agent.Tailer); !ok {
 		t.Error("overridden opencode is no longer a Tailer")
 	}
+	if _, ok := opencode.(agent.UsageReader); !ok {
+		t.Error("overridden opencode is no longer a UsageReader")
+	}
+}
+
+func TestLoadConfigModels(t *testing.T) {
+	cfg, err := LoadConfig(writeConfig(t, `
+[[model]]
+name           = "gpt-6-luna"
+input          = 1.25
+output         = 10
+cache_read     = 0.125
+cache_write    = 1.5
+context_window = 258400
+
+[[model]]
+name           = "claude-fable-5-1"
+context_window = 1000000
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, ok := cfg.Models.Lookup("gpt-6-luna"); !ok || m.Output != 10 || m.ContextWindow != 258400 {
+		t.Errorf("gpt-6-luna = %+v, %v", m, ok)
+	}
+	if m, ok := cfg.Models.Lookup("claude-fable-5-1"); !ok || m.Priced() {
+		t.Errorf("a config entry without prices should replace the built-in row: %+v, %v", m, ok)
+	}
+	if m, ok := cfg.Models.Lookup("claude-opus-5-5"); !ok || !m.Priced() {
+		t.Error("built-in rows are gone")
+	}
+}
+
+func TestLoadRejectsModelMistakes(t *testing.T) {
+	for name, text := range map[string]string{
+		"unknown key": "[[model]]\nname = \"x\"\ncache_reed = 1\n",
+		"no name":     "[[model]]\ninput = 1\n",
+		"duplicate":   "[[model]]\nname = \"x\"\n[[model]]\nname = \"x\"\n",
+		"negative":    "[[model]]\nname = \"x\"\noutput = -1\n",
+	} {
+		cfg, err := LoadConfig(writeConfig(t, text))
+		if err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		if _, ok := cfg.Models.Lookup("claude-opus-5-5"); !ok {
+			t.Errorf("%s: a bad config dropped the built-in prices", name)
+		}
+	}
 }
 
 func TestLoadRejectsMistakes(t *testing.T) {

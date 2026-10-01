@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
-	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -64,13 +63,13 @@ func newTrashCmd() *cobra.Command {
 			}
 			roots := tree.Build(trashed)
 			if asJSON {
-				return printJSON(roots)
+				return printJSON(roots, nil)
 			}
 			if len(trashed) == 0 {
 				fmt.Println("the trash is empty")
 				return nil
 			}
-			printTree(roots, func(int) string {
+			printTree(roots, nil, func(int) string {
 				return fmt.Sprintf("%d sessions in the trash · `hive trash restore <id>` · `hive trash purge <id>`", len(trashed))
 			})
 			return nil
@@ -186,7 +185,7 @@ func openTrash() (*store.Store, *tracker.Tracker, []store.Session, error) {
 		st.Close()
 		return nil, nil, nil, err
 	}
-	return st, tracker.New(st, adapters.All(), &tracker.System{}), trashed, nil
+	return st, newTracker(st), trashed, nil
 }
 
 func lookupTrashed(trashed []store.Session, ref string) (store.Session, error) {
