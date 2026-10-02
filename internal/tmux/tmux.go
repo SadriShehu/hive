@@ -222,9 +222,57 @@ func Focus(pane string) error {
 	if client == "" {
 		return errors.New("no tmux client is showing hive")
 	}
-	_, err = run("switch-client", "-c", client, "-t", pane)
+	return FocusClient(client, pane)
+}
+
+// FocusClient shows pane on client, switching session, window and pane.
+func FocusClient(client, pane string) error {
+	_, err := run("switch-client", "-c", client, "-t", pane)
 	return err
 }
+
+// ClientPane returns the pane client is looking at.
+func ClientPane(client string) (string, error) {
+	return run("display-message", "-p", "-c", client, "#{pane_id}")
+}
+
+// Message shows text on client's status line for a few seconds.
+func Message(client, text string) error {
+	_, err := run("display-message", "-c", client, "-d", "4000", literal(text))
+	return err
+}
+
+// Notify shows text for a few seconds on every client that isn't already
+// looking at pane's window. No server means nobody to tell.
+func Notify(text, pane string) error {
+	if !Available() {
+		return nil
+	}
+	var window string
+	if pane != "" {
+		window, _ = run("display-message", "-p", "-t", pane, "#{window_id}")
+	}
+	out, err := command("list-clients", "-F", "#{client_name}\t#{window_id}").Output()
+	if err != nil {
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
+			return nil
+		}
+		return err
+	}
+	var errs []error
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		client, at, _ := strings.Cut(line, "\t")
+		if client == "" || (window != "" && at == window) {
+			continue
+		}
+		errs = append(errs, Message(client, text))
+	}
+	return errors.Join(errs...)
+}
+
+// literal keeps tmux from expanding formats in text, which can run shell
+// commands (#(…)): a session title is the agent's to choose.
+func literal(text string) string { return strings.ReplaceAll(text, "#", "##") }
 
 // Paste types text into pane as a bracketed paste, then presses Enter.
 func Paste(pane, text string) error {

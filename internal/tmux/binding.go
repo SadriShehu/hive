@@ -9,8 +9,41 @@ import (
 	"strings"
 )
 
-// bindingMarker precedes the key binding hive adds to tmux.conf.
-const bindingMarker = "# hive: agent tree popup (`hive uninstall tmux` removes these two lines)"
+// The marker lines that precede each key binding hive adds to tmux.conf.
+const (
+	popupMarker = "# hive: agent tree popup (`hive uninstall tmux` removes these two lines)"
+	nextMarker  = "# hive: jump to the agent that needs you (`hive uninstall tmux` removes these two lines)"
+)
+
+// Binding is a key hive binds after the prefix, written to tmux.conf on the
+// line after its marker, which is how uninstall finds it again.
+type Binding struct {
+	Key    string
+	what   string // what the key does, for messages
+	marker string
+	argv   []string // the tmux command it runs, to bind it live
+	text   string   // the same command, as tmux.conf has it
+}
+
+// PopupBinding opens hive's tree in a popup.
+func PopupBinding(key, hiveBin string) Binding {
+	return Binding{Key: key, what: "the hive popup", marker: popupMarker,
+		argv: []string{"display-popup", "-E", "-w", "90%", "-h", "85%", "-T", " hive ", quote(hiveBin) + " popup"},
+		text: fmt.Sprintf(`display-popup -E -w 90%% -h 85%% -T " hive " "%s popup"`, quote(hiveBin)),
+	}
+}
+
+// NextBinding jumps to the agent that has needed you longest, and to the
+// next one on each press. tmux fills in the client that pressed the key.
+func NextBinding(key, hiveBin string) Binding {
+	cmd := quote(hiveBin) + " jump --next --client '#{client_name}'"
+	return Binding{Key: key, what: "the agent that needs you", marker: nextMarker,
+		argv: []string{"run-shell", "-b", cmd},
+		text: `run-shell -b "` + cmd + `"`,
+	}
+}
+
+func (b Binding) line() string { return "bind-key " + b.Key + " " + b.text }
 
 // ConfPath is the tmux config hive edits: ~/.tmux.conf, unless only the XDG
 // location exists.
@@ -26,11 +59,6 @@ func ConfPath() string {
 	return classic
 }
 
-// popupArgs is the tmux command that opens hive's tree in a popup.
-func popupArgs(hiveBin string) []string {
-	return []string{"display-popup", "-E", "-w", "90%", "-h", "85%", "-T", " hive ", quote(hiveBin) + " popup"}
-}
-
 func quote(s string) string {
 	if strings.ContainsAny(s, " '\"\\$`") {
 		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
@@ -38,23 +66,53 @@ func quote(s string) string {
 	return s
 }
 
-func bindingLine(key, hiveBin string) string {
-	return fmt.Sprintf(`bind-key %s display-popup -E -w 90%% -h 85%% -T " hive " "%s popup"`, key, quote(hiveBin))
-}
-
-// InstallBinding binds prefix+key to hive's popup in the tmux config and, if
-// a server is running, right away. Safe to rerun.
-func InstallBinding(conf, key, hiveBin string) (string, error) {
+// InstallBindings writes bindings to the tmux config and, if a server is
+// running, binds them right away. Safe to rerun: a binding already there is
+// replaced in place.
+func InstallBindings(conf string, bindings ...Binding) (string, error) {
 	data, err := os.ReadFile(conf)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return "", err
 	}
-	want := bindingMarker + "\n" + bindingLine(key, hiveBin)
-	lines := strings.Split(string(data), "\n")
+	text := string(data)
+	var bound []string
+	for _, b := range bindings {
+		text = withBinding(text, b)
+		bound = append(bound, "prefix+"+b.Key+" to "+b.what)
+	}
+	msg := "already bound in " + conf
+	if text != string(data) {
+		if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(conf, []byte(text), 0o644); err != nil {
+			return "", err
+		}
+		msg = "bound " + strings.Join(bound, " and ") + " in " + conf
+	}
+	if Available() {
+		live := true
+		for _, b := range bindings {
+			if _, err := run(append([]string{"bind-key", b.Key}, b.argv...)...); err != nil {
+				live = false
+			}
+		}
+		if live {
+			msg += " (active now)"
+		}
+	}
+	return msg, nil
+}
+
+// withBinding returns conf with b in place of the line after b's marker, or
+// added at the end.
+func withBinding(conf string, b Binding) string {
+	want := b.marker + "\n" + b.line()
+	lines := strings.Split(conf, "\n")
 	var out []string
 	replaced := false
 	for i := 0; i < len(lines); i++ {
-		if lines[i] == bindingMarker {
+		if lines[i] == b.marker {
 			if !replaced {
 				out = append(out, strings.Split(want, "\n")...)
 				replaced = true
@@ -71,26 +129,11 @@ func InstallBinding(conf, key, hiveBin string) (string, error) {
 		}
 		text += "\n" + want + "\n"
 	}
-	msg := "already bound in " + conf
-	if text != string(data) {
-		if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(conf, []byte(text), 0o644); err != nil {
-			return "", err
-		}
-		msg = "bound prefix+" + key + " to the hive popup in " + conf
-	}
-	if Available() {
-		if _, err := run(append([]string{"bind-key", key}, popupArgs(hiveBin)...)...); err == nil {
-			msg += " (active now)"
-		}
-	}
-	return msg, nil
+	return text
 }
 
-// UninstallBinding removes what InstallBinding added.
-func UninstallBinding(conf string) (string, error) {
+// UninstallBindings removes every binding InstallBindings added.
+func UninstallBindings(conf string) (string, error) {
 	data, err := os.ReadFile(conf)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "not installed", nil
@@ -99,13 +142,12 @@ func UninstallBinding(conf string) (string, error) {
 		return "", err
 	}
 	lines := strings.Split(string(data), "\n")
-	var out []string
-	var key string
+	var out, keys []string
 	for i := 0; i < len(lines); i++ {
-		if lines[i] == bindingMarker {
+		if lines[i] == popupMarker || lines[i] == nextMarker {
 			if i+1 < len(lines) {
 				if f := strings.Fields(lines[i+1]); len(f) > 1 {
-					key = f[1]
+					keys = append(keys, f[1])
 				}
 			}
 			i++
@@ -117,20 +159,42 @@ func UninstallBinding(conf string) (string, error) {
 		}
 		out = append(out, lines[i])
 	}
-	if key == "" {
+	if len(keys) == 0 {
 		return "not installed in " + conf, nil
 	}
 	if err := os.WriteFile(conf, []byte(strings.Join(out, "\n")), 0o644); err != nil {
 		return "", err
 	}
 	if Available() {
-		run("unbind-key", key)
+		for _, k := range keys {
+			run("unbind-key", k)
+		}
 	}
-	return "removed the prefix+" + key + " binding from " + conf, nil
+	what := "the prefix+" + strings.Join(keys, " and prefix+") + " binding"
+	if len(keys) > 1 {
+		what += "s"
+	}
+	return "removed " + what + " from " + conf, nil
 }
 
-// BindingInstalled reports whether conf has hive's binding.
-func BindingInstalled(conf string) bool {
+// PopupKey returns the key conf binds to hive's popup, or "".
+func PopupKey(conf string) string { return boundKey(conf, popupMarker) }
+
+// NextKey returns the key conf binds to the agent that needs you, or "".
+func NextKey(conf string) string { return boundKey(conf, nextMarker) }
+
+func boundKey(conf, marker string) string {
 	data, err := os.ReadFile(conf)
-	return err == nil && strings.Contains(string(data), bindingMarker)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, l := range lines {
+		if l == marker && i+1 < len(lines) {
+			if f := strings.Fields(lines[i+1]); len(f) > 1 {
+				return f[1]
+			}
+		}
+	}
+	return ""
 }

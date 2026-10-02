@@ -143,3 +143,35 @@ func TestLoadRejectsMistakes(t *testing.T) {
 		}
 	}
 }
+
+func TestAlerts(t *testing.T) {
+	alerts := func(path string) (Alerts, error) {
+		cfg, err := LoadConfig(path)
+		return cfg.Alerts, err
+	}
+	got, err := alerts(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil || got != (Alerts{Tmux: true}) {
+		t.Fatalf("without config: %+v, %v; want the tmux message only", got, err)
+	}
+	got, err = alerts(writeConfig(t, "[alerts]\ndesktop = true\n"))
+	if err != nil || got != (Alerts{Tmux: true, Desktop: true}) {
+		t.Fatalf("desktop on: %+v, %v", got, err)
+	}
+	got, err = alerts(writeConfig(t, "[alerts]\ntmux = false\n"))
+	if err != nil || got != (Alerts{}) {
+		t.Fatalf("tmux off: %+v, %v", got, err)
+	}
+	got, err = alerts(writeConfig(t, "[[agent]]\nname = \"aider\"\nnew = [\"aider\"]\n"))
+	if err != nil || got != (Alerts{Tmux: true}) {
+		t.Fatalf("a config without [alerts]: %+v, %v; want the defaults", got, err)
+	}
+
+	// A mistake anywhere leaves the defaults, and says what it is.
+	got, err = alerts(writeConfig(t, "[alerts]\nsound = true\n"))
+	if err == nil || got != (Alerts{Tmux: true}) {
+		t.Fatalf("unknown setting: %+v, %v", got, err)
+	}
+	if _, err := Load(writeConfig(t, "[alerts]\ndesktop = true\n\n[[agent]]\nname = \"aider\"\nnew = [\"aider\"]\n")); err != nil {
+		t.Fatalf("alerts next to agents: %v", err)
+	}
+}

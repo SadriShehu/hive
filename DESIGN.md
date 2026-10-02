@@ -20,6 +20,9 @@ Settled before coding started; the Copilot adapter and the config format came la
 | Host | tmux is a hard dependency | Every agent TUI lives in a tmux window; `hive` outside tmux starts or attaches a `hive` tmux session |
 | Tools' own subagents | Shown by default | Claude Task agents, opencode task sessions and Codex's spawned threads appear as children; `i` hides them |
 | Popup key | prefix + `a` (Ctrl+b a) | `hive install tmux --key` changes it |
+| Needs-you key | prefix + `A` | `hive install tmux --next-key` changes it; it runs `hive jump --next` for the client that pressed it |
+| Telling you an agent needs you | a tmux message by default; desktop notifications and the status-line count are opt-in | The hook that records the wait sends it, so there is still no daemon; `hive install` never edits `status-right`, which people style themselves |
+| Waiting on agents | `hive wait` polls the database | A message hive gave an agent counts until a turn ending after it, so a `wait` right after `send` never takes the turn before for the reply |
 | Spawn direction | Any tool can spawn any tool | One mechanism in the core links every direction; adapters only report |
 | Codex | Built once it was installed | Tested live against Codex 0.158; Codex asks once, in an interactive session, to trust new hooks |
 | Copilot CLI | Added beyond the first plan | Tracked live through user-level hooks; it has no permission hook, so it never shows "needs you" |
@@ -170,8 +173,10 @@ new  = ["opencode", "-m", "deepseek/deepseek-v4-pro", "--prompt", "{prompt}"]
 
 Fields: `new`, `resume`, `process` (defaults to the program `new` runs), `headless`,
 `title_flags`, `session_flags`, `parent_env`. An empty placeholder drops the flag right
-before it. An unknown key, a bad name or a duplicate makes hive ignore the whole file, so
-hooks keep working; `hive doctor` says what is wrong.
+before it. An `[alerts]` table says how hive tells you an agent needs you: `tmux` (a
+message, on by default) and `desktop` (off). An unknown key, a bad name or a duplicate
+makes hive ignore the whole file, so hooks keep working and alerts keep their defaults;
+`hive doctor` says what is wrong.
 
 **Any tool can report.** `hive hook <tool>` takes JSON on stdin — `event` (start, prompt,
 busy, idle, attention, end, update), `session_id`, and optionally `pid`, `parent_id`,
@@ -217,6 +222,11 @@ Helper tables:
   tool reported are stored; estimates from built-in and `[[model]]` prices are computed
   when a row is read, so a config change takes effect at once. `hive sync` refreshes rows
   under a 5 s budget, live sessions first; `hive sync` from the shell drains the rest.
+- `inputs` — the last message hive gave a session that its agent hasn't answered yet,
+  and when: by session ID, or by tmux pane for an agent hive started with a prompt that
+  hasn't named its session yet; the first event from that pane hands it over. An
+  `idle`, `attention` or `end` event at or after that time answers it; `start` doesn't,
+  as tools report starting up before they read their first prompt.
 
 **Liveness.** Every 1.5 s the TUI runs one `ps` and one `tmux list-panes`, and every 30 s a
 history sync. A dead pid, or a pid whose program no longer matches the tool, marks the
@@ -269,6 +279,27 @@ everything under it, `d` deletes it for good after you confirm, `t` or `esc` goe
 **Preview.** For a session in a pane, the screen (`tmux capture-pane`); otherwise the end of
 its transcript from the tool's own files, which is how you watch headless runs.
 
+## Needs you
+
+A session needs you while its status is `attention`: a permission prompt or a question.
+Claude Code's idle reminder counts as idle, and Copilot CLI has no hook for either.
+
+- **Alerts.** When `hive hook` records a session going into `attention` (not a repeat,
+  and not an event older than what is recorded), it shows `hive: <tool> ‹title› needs
+  you` with `display-message` on every tmux client whose current window isn't the
+  session's (a subagent's is its parent's), and a desktop notification if `[alerts]`
+  asks for one. The text is escaped for tmux, as a title could otherwise run a command
+  through `#(…)`.
+- **prefix + A** is `run-shell -b "hive jump --next --client '#{client_name}'"`. It
+  switches that client to the session that has waited longest, by `status_at`, or, from
+  one of them, to the next in that order. Output from `run-shell` would show in a pane,
+  so it reports on the client's status line instead, errors included.
+- **`hive status`** counts live sessions: ◆ attention, ● working, ◉ idle. Subagents
+  count only when they need you, since otherwise their work is their parent's. `--tmux`
+  wraps each count in style tags that undo only what they set. It refreshes liveness as
+  `hive ls` does (one `ps`, one `tmux list-panes`, about 50 ms).
+- The tree's header shows the same count.
+
 ## CLI
 
 Every tree action is also a command, so agents can run agents of their own. A session is
@@ -283,7 +314,10 @@ seen yet triggers a history import and one retry.
 | `hive new <tool> [-p text] [--cwd dir] [--parent auto\|none\|<id>] [--wait] [--focus]` | start an agent in a background tmux window, linked under the calling agent; print its ID |
 | `hive send <id> [text \| -]` | type into its pane and press Enter; an ended session reopens with the message |
 | `hive tail <id> [-n 40] [--json]` | print the end of its transcript |
-| `hive jump <id>` | switch to its pane, reopening it if it has ended; outside tmux, attach |
+| `hive wait <id>... [--any] [--timeout d]` | block until each has answered what hive gave it and is idle, needs you, or has ended; print `<id> <idle\|attention\|exited>` as each gets there |
+| `hive jump <id>` | switch to its pane (a subagent's: its parent's), reopening it if it has ended; outside tmux, attach |
+| `hive jump --next` | switch to the session that has needed you longest, or from one of them to the next |
+| `hive status [--tmux]` | one line counting live sessions that need you, work, or are idle; nothing when none runs |
 | `hive resume <id> [-p text] [--focus]` | reopen an ended session in a background window |
 | `hive kill <id>` | stop its process; a window hive opened closes with it |
 | `hive rm <id>` | move it and everything under it to the trash, once all of it has ended |
@@ -291,7 +325,7 @@ seen yet triggers a history import and one retry.
 | `hive trash restore <id>` | bring it back with everything under it |
 | `hive trash purge <id> \| --all [--yes]` | delete for good, from the tools too, deepest first; asks first, and without a terminal needs `--yes` |
 | `hive sync [--full]` | import past sessions and link past spawns |
-| `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a]` | connect tools and bind the popup key; idempotent, backs up first |
+| `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a] [--next-key A]` | connect tools and bind the popup and needs-you keys; idempotent, backs up first |
 | `hive uninstall [...]` | remove exactly what install added |
 | `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and hook errors from the last day |
 | `hive hook <tool>` | for integrations only; prints nothing, always exits 0 |
@@ -303,7 +337,9 @@ in its own window, linked under that Claude session, and Claude uses `hive send`
 reported in, so a `send` right after it isn't typed before the agent can read it. A tool
 that starts its session only with its first message (opencode without a prompt) gets a
 stand-in ID after 10 s of silence, `opencode:pid-N`, which every command accepts and which
-names the real session once it starts.
+names the real session once it starts. `hive wait` then blocks until the child is done
+with what it was given; the `inputs` table keeps it from returning on the idle a tool
+reports as it starts up, or on the end of the turn before a `send`.
 
 ## Edge cases and safety
 
@@ -327,6 +363,9 @@ names the real session once it starts.
 | A session in the trash reports in | a hook event or hive starting it takes it out of the trash, and a session deleted for good is recorded again; an import, a late end event or a child naming it as parent doesn't |
 | A tool fails to delete a session | deleting stops there: what went already is gone from hive too, and the rest stays in the trash with the error shown |
 | An older hive opens the database | it sets the schema version back; every migration since the trash can run again, and a newer version is never lowered |
+| A message that starts no turn (`/help` sent with `hive send`) | no event answers it, so `hive wait` waits for the agent's next turn, or until `--timeout`; what the tree shows is unaffected |
+| A message sent while the agent is busy | the end of the current turn answers it; a tool that queues it for the next turn is working again by the next look, so `wait` goes on, unless that look falls in the moment between |
+| Two Codex TUIs in one folder, started with a prompt | neither gets a pane, so the prompt hive gave one stays on its pane and `wait` can return on the idle Codex reports at start |
 
 ## Repo layout
 
@@ -344,11 +383,11 @@ internal/
     copilot/    user-level hooks, session store import, preview, delete
     codex/      hooks.json, rollout and state DB import, preview, delete
   adapters/     the built-in adapters, with config.toml applied
-  tracker/      linking, liveness, sync, launch/resume/send/stop, trash and purge, lookup
-  store/        SQLite: sessions, trash, launches, spawn hints, import state
+  tracker/      linking, liveness, sync, launch/resume/send/stop, trash and purge, lookup, who needs you, wait
+  store/        SQLite: sessions, trash, launches, spawn hints, import state, inputs
   spawn/        finds agent commands in shell history
   proc/         the process table
-  tmux/         windows, panes, paste, capture, the popup binding
+  tmux/         windows, panes, paste, capture, messages, the key bindings
   tree/         the session tree and its filters
   tui/          the tree UI
   cmd/          the commands
@@ -367,7 +406,8 @@ internal/
 | 4. Agent-facing CLI | `new --wait`, `send`, `tail`, `jump`, `resume`, `kill`, config, `doctor`, stand-in IDs | `e1ecb80`, `eabdbf3` | 29 Sep |
 | — Claude daemon | spares and helper processes hidden | `ef8beea` | 29 Sep |
 | — Deleting | trash (`d`, `hive rm`), restore, deleting for good through each tool | PR #3 | 29 Sep |
-| — Folder suggestions | the new-agent form lists folders as you type; `hive new --cwd` completes them | this branch | 30 Sep |
+| — Folder suggestions | the new-agent form lists folders as you type; `hive new --cwd` completes them | PR #4 | 30 Sep |
+| — Needs you, and waiting | tmux and desktop alerts, prefix + A and `hive jump --next`, `hive status`, `hive wait` | this branch | 2 Oct |
 
 ## Testing
 

@@ -35,6 +35,7 @@ var toolName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 type Config struct {
 	Adapters []agent.Adapter
 	Models   usage.Catalog
+	Alerts   Alerts
 }
 
 // Load returns the built-in adapters with the config file at path applied.
@@ -45,8 +46,11 @@ func Load(path string) ([]agent.Adapter, error) {
 	return cfg.Adapters, err
 }
 
+// LoadConfig returns everything the config file at path sets, on top of the
+// defaults. A file with mistakes changes nothing, and LoadConfig says what is
+// wrong with it.
 func LoadConfig(path string) (Config, error) {
-	cfg := Config{Adapters: Builtin(), Models: usage.Builtin()}
+	cfg := Config{Adapters: Builtin(), Models: usage.Builtin(), Alerts: defaultAlerts}
 	file, err := readConfig(path)
 	if err != nil {
 		return cfg, err
@@ -60,19 +64,30 @@ func LoadConfig(path string) (Config, error) {
 		cfg.Adapters[i] = overridden{cfg.Adapters[i], c.apply(cfg.Adapters[i].Spec())}
 	}
 	cfg.Models = usage.NewCatalog(usage.Builtin(), file.Model)
+	cfg.Alerts = file.Alerts
 	return cfg, nil
 }
 
+// Alerts is the [alerts] table of config.toml: how hive tells you that an
+// agent needs you.
+type Alerts struct {
+	Tmux    bool `toml:"tmux"`    // a message on every tmux client not looking at it; on unless set false
+	Desktop bool `toml:"desktop"` // a desktop notification too
+}
+
+var defaultAlerts = Alerts{Tmux: true}
+
 type configFile struct {
-	Agent []Agent       `toml:"agent"`
-	Model []usage.Model `toml:"model"`
+	Agent  []Agent       `toml:"agent"`
+	Model  []usage.Model `toml:"model"`
+	Alerts Alerts        `toml:"alerts"`
 }
 
 func readConfig(path string) (configFile, error) {
-	var cfg configFile
+	cfg := configFile{Alerts: defaultAlerts} // what the file leaves out keeps its default
 	md, err := toml.DecodeFile(path, &cfg)
 	if errors.Is(err, fs.ErrNotExist) {
-		return configFile{}, nil
+		return configFile{Alerts: defaultAlerts}, nil
 	}
 	if err != nil {
 		return configFile{}, fmt.Errorf("%s: %w", path, err)

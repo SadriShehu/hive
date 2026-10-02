@@ -188,24 +188,130 @@ func newNewCmd() *cobra.Command {
 }
 
 func newJumpCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "jump <id>",
+	var next bool
+	var client string
+	cmd := &cobra.Command{
+		Use:   "jump <id> | --next",
 		Short: "Switch to a session's pane, reopening it if it has ended",
-		Args:  cobra.ExactArgs(1),
-		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
-			if s.Pane != "" && tmux.PaneExists(s.Pane) {
-				return goTo(s.Pane)
+		Long: "Switch to a session's pane (a subagent's: its parent's), reopening it if it has ended.\n\n" +
+			"--next goes to the agent that has needed you longest; from there, to the one after it.\n" +
+			"`hive install tmux` binds it to prefix+A.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if next {
+				return cobra.NoArgs(cmd, args)
 			}
-			if s.Live() {
-				return fmt.Errorf("it runs outside tmux (pid %d), where hive can't take you", s.PID)
+			return cobra.ExactArgs(1)(cmd, args)
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if next {
+				return jumpNext(client)
 			}
-			l, err := tr.Resume(s, "", tracker.LaunchOptions{})
-			if err != nil {
+			return withSession(jump)(cmd, args)
+		},
+	}
+	cmd.Flags().BoolVar(&next, "next", false, "the agent that needs you, longest waiting first")
+	cmd.Flags().StringVar(&client, "client", "", "the tmux client to switch, from a key binding")
+	_ = cmd.Flags().MarkHidden("client")
+	return cmd
+}
+
+func jump(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
+	pane := tracker.PaneFor(s, func(id string) (store.Session, bool) {
+		p, ok, _ := tr.Store.Get(id)
+		return p, ok
+	})
+	if pane != "" && tmux.PaneExists(pane) {
+		return goTo(pane)
+	}
+	switch {
+	case s.Live() && s.Kind == store.KindInternal:
+		return errors.New("it runs inside its parent, which isn't in a tmux pane")
+	case s.Live():
+		return fmt.Errorf("it runs outside tmux (pid %d), where hive can't take you", s.PID)
+	}
+	l, err := tr.Resume(s, "", tracker.LaunchOptions{})
+	if err != nil {
+		return err
+	}
+	return goTo(l.Pane)
+}
+
+// jumpNext goes to the agent that has needed the user longest. With client,
+// from a tmux key, it switches that client and says what happened on its
+// status line: run-shell would show anything printed in a pane.
+func jumpNext(client string) error {
+	err := goToNext(client)
+	if client == "" || err == nil {
+		return err
+	}
+	tmux.Message(client, "hive: "+err.Error())
+	return nil
+}
+
+func goToNext(client string) error {
+	st, _, sessions, err := openTracker()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	byID := map[string]store.Session{}
+	for _, s := range sessions {
+		byID[s.ID] = s
+	}
+	get := func(id string) (store.Session, bool) {
+		s, ok := byID[id]
+		return s, ok
+	}
+	type stop struct {
+		session store.Session
+		pane    string
+	}
+	var stops []stop
+	waiting := tracker.NeedsYou(sessions)
+	for _, s := range waiting {
+		if pane := tracker.PaneFor(s, get); pane != "" {
+			stops = append(stops, stop{s, pane})
+		}
+	}
+	switch {
+	case len(stops) == 0 && len(waiting) > 0:
+		return fmt.Errorf("%s needs you, but runs outside tmux", label(waiting[0]))
+	case len(stops) == 0:
+		return errors.New("nothing needs you")
+	}
+
+	// From one that needs you, go on to the next, wrapping around.
+	here := os.Getenv("TMUX_PANE")
+	if client != "" {
+		here, _ = tmux.ClientPane(client)
+	}
+	start := 0
+	for i, x := range stops {
+		if x.pane == here {
+			start = i + 1
+			break
+		}
+	}
+	for k := range len(stops) {
+		i := (start + k) % len(stops)
+		x := stops[i]
+		if x.pane == here {
+			continue
+		}
+		msg := label(x.session) + " needs you"
+		if len(stops) > 1 {
+			msg += fmt.Sprintf(" (%d of %d)", i+1, len(stops))
+		}
+		if client != "" {
+			if err := tmux.FocusClient(client, x.pane); err != nil {
 				return err
 			}
-			return goTo(l.Pane)
-		}),
+			return tmux.Message(client, "hive: "+msg)
+		}
+		fmt.Fprintln(os.Stderr, msg)
+		return goTo(x.pane)
 	}
+	return errors.New("nothing else needs you")
 }
 
 func newResumeCmd() *cobra.Command {

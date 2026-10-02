@@ -77,10 +77,24 @@ func checkTmux(c *checkup) {
 	}
 	version, _ := exec.Command("tmux", "-V").Output()
 	c.ok(strings.TrimSpace(string(version)))
-	if tmux.BindingInstalled(tmux.ConfPath()) {
-		c.ok("prefix+a opens the tree")
+	if key := tmux.PopupKey(tmux.ConfPath()); key != "" {
+		c.ok("prefix+" + key + " opens the tree")
 	} else {
 		c.warn("no tmux key for the tree", "`hive install tmux`")
+	}
+	if key := tmux.NextKey(tmux.ConfPath()); key != "" {
+		c.ok("prefix+" + key + " jumps to the agent that needs you")
+	} else {
+		c.warn("no tmux key for the agent that needs you", "`hive install tmux`")
+	}
+	if inStatusLine() {
+		c.ok("tmux's status line counts the agents that need you")
+	} else {
+		c.skip("tmux's status line doesn't show `hive status` (optional; see `hive status --help`)")
+	}
+	// A config with mistakes is reported with the agents, below.
+	if cfg, err := adapters.LoadConfig(paths.ConfigPath()); err == nil {
+		c.ok("when an agent needs you: " + alertsText(cfg.Alerts))
 	}
 }
 

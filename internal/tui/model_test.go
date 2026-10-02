@@ -638,3 +638,15 @@ func TestNarrowWindowShowsUsageInTheBody(t *testing.T) {
 		t.Errorf("esc did not bring the tree back:\n%s", view)
 	}
 }
+
+func TestHeaderCountsWhoNeedsYou(t *testing.T) {
+	m, ops := setup(t, false)
+	if view := ansi.Strip(m.View()); strings.Contains(view, "need you") {
+		t.Fatalf("header counts agents needing you when none do:\n%s", strings.Split(view, "\n")[0])
+	}
+	ops.sessions[0].Status = store.StatusAttention
+	m = step(t, m, refreshedMsg{sessions: ops.sessions})
+	if header := strings.Split(ansi.Strip(m.View()), "\n")[0]; !strings.Contains(header, "◆ 1 need you") {
+		t.Fatalf("header = %q", header)
+	}
+}

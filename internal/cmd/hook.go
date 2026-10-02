@@ -69,6 +69,7 @@ func runHook(tool string, args []string, f hookFlags) error {
 	if os.Getenv("HIVE_DEBUG") != "" {
 		tr.Logf = logf
 	}
+	tr.OnAttention = func(s store.Session) { alert(st, s) }
 	var errs []error
 	for _, ev := range events {
 		errs = append(errs, tr.Ingest(ev))
