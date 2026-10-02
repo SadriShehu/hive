@@ -37,9 +37,13 @@ func newHistory(t *testing.T) *history {
 	h.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT NOT NULL,
 			title TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);
 		CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL,
+			time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
+		CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
 			time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)`)
 	return h
 }
+
+func (h *history) transcript(id string) string { return filepath.Join(h.projects, "p", id+".jsonl") }
 
 func (h *history) exec(q string, args ...any) {
 	h.t.Helper()

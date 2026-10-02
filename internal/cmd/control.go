@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ func openTracker() (*store.Store, *tracker.Tracker, []store.Session, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	tr := tracker.New(st, adapters.All(), &tracker.System{})
+	tr := newTracker(st)
 	sessions, err := tr.Refresh()
 	if err != nil {
 		st.Close()
@@ -53,6 +54,13 @@ func find(ctx context.Context, tr *tracker.Tracker, sessions []store.Session, re
 }
 
 // withSession runs fn on the session args[0] names.
+func newTracker(st *store.Store) *tracker.Tracker {
+	cfg := adapters.Current()
+	tr := tracker.New(st, cfg.Adapters, &tracker.System{})
+	tr.Models = cfg.Models
+	return tr
+}
+
 func withSession(fn func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, args []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		st, tr, sessions, err := openTracker()
@@ -393,6 +401,142 @@ func newTailCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&n, "lines", "n", 40, "how many entries")
 	cmd.Flags().BoolVar(&asJSON, "json", false, `JSON: [{"role", "text"}]`)
 	return cmd
+}
+
+func newUsageCmd() *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "usage <id>",
+		Short: "Print what a session used: model, tokens, price, tools, skills, context",
+		Long: "Print what a session used, read from the tool's own records: the model, token counts,\n" +
+			"the price (reported by the tool, or estimated from built-in and [[model]] prices),\n" +
+			"the tools and skills it called, and how much of its context window is in use.",
+		Args: cobra.ExactArgs(1),
+		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
+			u, err := tr.Usage(cmd.Context(), s)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(u)
+			}
+			if u.Empty() {
+				fmt.Println("no usage recorded for this session")
+				return nil
+			}
+			for _, line := range usageLines(s, u) {
+				fmt.Println(line)
+			}
+			return nil
+		}),
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the usage record")
+	return cmd
+}
+
+func usageLines(s store.Session, u store.Usage) []string {
+	var lines []string
+	add := func(label, value string) {
+		if value != "" {
+			lines = append(lines, fmt.Sprintf("%-9s %s", label, value))
+		}
+	}
+	add("model", joinParts(u.Model, u.Effort))
+	add("requests", fmt.Sprint(u.Requests))
+	add("tokens", tokenLine(u.Tokens))
+	add("cost", costLine(s, u))
+	add("context", contextLine(u))
+	add("tools", countLine(u.Tools))
+	add("skills", countLine(u.Skills))
+	var more []string
+	if u.Compactions > 0 {
+		more = append(more, fmt.Sprintf("%d compactions", u.Compactions))
+	}
+	if u.LinesAdded > 0 || u.LinesRemoved > 0 {
+		more = append(more, fmt.Sprintf("lines +%d −%d", u.LinesAdded, u.LinesRemoved))
+	}
+	if u.APIDurationMS > 0 {
+		more = append(more, "api "+(time.Duration(u.APIDurationMS)*time.Millisecond).Round(time.Second).String())
+	}
+	if u.PremiumRequests > 0 {
+		more = append(more, fmt.Sprintf("%g premium requests", u.PremiumRequests))
+	}
+	if u.Partial {
+		more = append(more, "partial: totals come when the session ends")
+	}
+	add("more", strings.Join(more, " · "))
+	return lines
+}
+
+func joinParts(parts ...string) string {
+	var kept []string
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, " · ")
+}
+
+func tokenLine(t store.Tokens) string {
+	parts := []string{fmt.Sprintf("in %d", t.Input), fmt.Sprintf("out %d", t.Output)}
+	if t.CacheRead > 0 {
+		parts = append(parts, fmt.Sprintf("cache read %d", t.CacheRead))
+	}
+	if t.CacheWrite > 0 {
+		parts = append(parts, fmt.Sprintf("cache write %d", t.CacheWrite))
+	}
+	if t.Reasoning > 0 {
+		parts = append(parts, fmt.Sprintf("reasoning %d", t.Reasoning))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func costLine(s store.Session, u store.Usage) string {
+	switch u.CostSource {
+	case store.CostTool:
+		return fmt.Sprintf("$%.2f reported by %s", u.CostUSD, s.Tool)
+	case store.CostConfig:
+		line := fmt.Sprintf("~$%.2f estimated from built-in and [[model]] prices", u.CostUSD)
+		if u.Partial && s.Tool == "claude" {
+			line += " · exact at exit"
+		}
+		return line
+	}
+	if u.Model == "" {
+		return "unknown"
+	}
+	return fmt.Sprintf("unknown · add a [[model]] with prices for %s to config.toml", u.Model)
+}
+
+func contextLine(u store.Usage) string {
+	switch {
+	case u.ContextTokens == 0:
+		return ""
+	case u.ContextWindow > 0:
+		return fmt.Sprintf("%d of %d (%d%%)", u.ContextTokens, u.ContextWindow, u.ContextTokens*100/u.ContextWindow)
+	}
+	return fmt.Sprintf("%d · window unknown", u.ContextTokens)
+}
+
+func countLine(counts map[string]int) string {
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if counts[names[i]] != counts[names[j]] {
+			return counts[names[i]] > counts[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s %d", name, counts[name]))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func newKillCmd() *cobra.Command {

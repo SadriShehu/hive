@@ -32,6 +32,9 @@ type fakeOps struct {
 	restored []string
 	purged   []string
 	copied   []string
+
+	usages     map[string]store.Usage
+	usageAsked []string
 }
 
 func (f *fakeOps) Refresh() ([]store.Session, error) { return f.sessions, nil }
@@ -76,6 +79,37 @@ func (f *fakeOps) Purge(s store.Session) (tracker.Purged, error) {
 }
 func (f *fakeOps) Copy(text string) error { f.copied = append(f.copied, text); return nil }
 func (f *fakeOps) Tools() []string        { return []string{"claude", "opencode"} }
+func (f *fakeOps) Usages() (map[string]store.Usage, error) {
+	return f.usages, nil
+}
+func (f *fakeOps) Usage(_ context.Context, s store.Session) (store.Usage, error) {
+	f.usageAsked = append(f.usageAsked, s.ID)
+	return f.usages[s.ID], nil
+}
+
+// sampleUsage is what the sessions in sample used.
+func sampleUsage() map[string]store.Usage {
+	fable := store.Tokens{Input: 1_200_000, Output: 48_000, CacheRead: 968_000, CacheWrite: 12_000}
+	haiku := store.Tokens{Input: 31_000, Output: 2_000, CacheRead: 10_000}
+	deepseek := store.Tokens{Input: 300_000, Output: 20_000}
+	return map[string]store.Usage{
+		"claude:A": {ID: "claude:A", Model: "claude-fable-5-1", Effort: "xhigh", Requests: 48, Compactions: 2,
+			APIDurationMS: (2*time.Hour + 13*time.Minute).Milliseconds(),
+			Models:        map[string]store.Tokens{"claude-fable-5-1": fable, "claude-haiku-4-5": haiku},
+			Tokens:        fable.Add(haiku), CostUSD: 42.63, CostSource: store.CostTool,
+			ContextTokens: 188_000, ContextWindow: 1_000_000,
+			Tools:  map[string]int{"Bash": 41, "Read": 22, "Edit": 9, "Agent": 3, "Grep": 2, "Glob": 2, "WebFetch": 1, "TodoWrite": 1},
+			Skills: map[string]int{"pr-comments": 2, "writeup": 1}, LinesAdded: 412, LinesRemoved: 87},
+		"opencode:B": {ID: "opencode:B", Model: "deepseek/deepseek-v4-pro", Requests: 12, Tokens: deepseek,
+			Models: map[string]store.Tokens{"deepseek/deepseek-v4-pro": deepseek}, CostUSD: 0.92, CostSource: store.CostTool,
+			Tools: map[string]int{"read": 5}},
+		"claude:C": {ID: "claude:C", Model: "claude-fable-5-1", Requests: 3, Tokens: store.Tokens{Input: 5_000, Output: 1_000},
+			Models:  map[string]store.Tokens{"claude-fable-5-1": {Input: 5_000, Output: 1_000}},
+			CostUSD: 1.37, CostSource: store.CostTool, ContextTokens: 21_000},
+		"claude:OLD": {ID: "claude:OLD", Model: "claude-fable-5-1", Requests: 10, Tokens: store.Tokens{Input: 1},
+			CostUSD: 100, CostSource: store.CostTool},
+	}
+}
 
 // sample is a Claude session in a pane that spawned a headless opencode run
 // (which has its own subagent) and a Claude run that finished; plus an old
@@ -100,11 +134,17 @@ func sample() []store.Session {
 
 func setup(t *testing.T, popup bool) (Model, *fakeOps) {
 	t.Helper()
-	ops := &fakeOps{sessions: sample()}
+	return setupWith(t, popup, sample())
+}
+
+func setupWith(t *testing.T, popup bool, sessions []store.Session) (Model, *fakeOps) {
+	t.Helper()
+	ops := &fakeOps{sessions: sessions, usages: sampleUsage()}
 	m := New(ops, popup)
 	m.now = func() time.Time { return now }
 	m = step(t, m, tea.WindowSizeMsg{Width: 160, Height: 30})
 	m = step(t, m, refreshedMsg{sessions: ops.sessions})
+	m = step(t, m, usagesMsg{usages: ops.usages})
 	return m, ops
 }
 
@@ -437,7 +477,7 @@ func TestViewFitsAnySize(t *testing.T) {
 	for _, size := range [][2]int{{30, 8}, {80, 20}, {99, 24}, {100, 24}, {160, 40}, {240, 70}} {
 		m, _ := setup(t, false)
 		m = step(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"", "?", "n", "s"} {
+		for _, mode := range []string{"", "?", "n", "s", "u"} {
 			mm := m
 			if mode != "" {
 				mm = press(t, m, mode)
@@ -458,6 +498,144 @@ func TestViewFitsAnySize(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestCompactUsageShowsModelTokensCostContextAndTools(t *testing.T) {
+	m, _ := setup(t, false)
+	view := ansi.Strip(m.View())
+	for _, want := range []string{
+		"claude-fable-5-1 +1 · xhigh · 48 requests · 2h13m api",
+		"$42.63 · 1.2M in · 50k out · 990k cache",
+		"context 188k/1M ▓▓░░░░░░░░ 19%",
+		"Bash 41 · Read 22",
+		"screen of %1",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("compact usage lacks %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestUsageKeyTogglesTheFullView(t *testing.T) {
+	m, ops := setup(t, false)
+	m = press(t, m, "u")
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"reported by claude", "978k cache read", "pr-comments 2", "with the 2 sessions under it",
+		"claude-haiku-4-5", "+412 −87", "2 compactions"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("full usage view lacks %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "screen of %1") {
+		t.Error("the pane preview is still shown under u")
+	}
+	if len(ops.usageAsked) == 0 || ops.usageAsked[0] != "claude:A" {
+		t.Errorf("usage asked = %v", ops.usageAsked)
+	}
+	m = press(t, m, "u")
+	if m.showUsage || !strings.Contains(ansi.Strip(m.View()), "screen of %1") {
+		t.Error("u did not toggle the pane preview back")
+	}
+}
+
+func TestHeaderSumsTheCostInView(t *testing.T) {
+	m, ops := setup(t, false)
+	header := func(m Model) string { return ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0]) }
+	if h := header(m); !strings.Contains(h, "last 24h · $44.92") {
+		t.Errorf("header = %q", h)
+	}
+	m = press(t, m, "a")
+	if h := header(m); !strings.Contains(h, "all history · $144.92") {
+		t.Errorf("header with all history = %q", h)
+	}
+	c := ops.usages["claude:C"]
+	c.CostSource = store.CostConfig
+	ops.usages["claude:C"] = c
+	m = step(t, m, usagesMsg{usages: ops.usages})
+	if h := header(m); !strings.Contains(h, "~$144.92") {
+		t.Errorf("header with an estimate = %q", h)
+	}
+	m = press(t, m, "t")
+	if h := header(m); strings.Contains(h, "$") {
+		t.Errorf("the trash header shows a cost: %q", h)
+	}
+}
+
+func TestUsageWithoutAWindowHasNoBar(t *testing.T) {
+	m, _ := setup(t, false)
+	m = press(t, m, "j", "j", "j")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "context 21k") || strings.Contains(view, "░") || strings.Contains(view, "%") {
+		t.Errorf("claude:C's context:\n%s", view)
+	}
+}
+
+func TestPartialUsageIsMarked(t *testing.T) {
+	sessions := append(sample(), store.Session{ID: "copilot:P", Tool: "copilot", NativeID: "P", Title: "research",
+		Kind: "interactive", Status: "working", PID: 300, CreatedAt: ago(time.Minute), UpdatedAt: ago(time.Second)})
+	m, ops := setupWith(t, false, sessions)
+	ops.usages["copilot:P"] = store.Usage{ID: "copilot:P", Model: "gpt-4.1", Requests: 9, Tokens: store.Tokens{Output: 48_000}, Partial: true}
+	m = step(t, m, usagesMsg{usages: ops.usages})
+	if s, _ := m.selected(); s.ID != "copilot:P" {
+		t.Fatalf("selected %s, want the newest live session", s.ID)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "48k out · partial") {
+		t.Errorf("partial mark missing:\n%s", view)
+	}
+	m = press(t, m, "u")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "totals come when the session ends") || !strings.Contains(view, "unknown · no price for gpt-4.1") {
+		t.Errorf("full view of a partial session:\n%s", view)
+	}
+}
+
+func TestUsageIgnoresAStaleResult(t *testing.T) {
+	m, _ := setup(t, false)
+	m = step(t, m, usageMsg{id: "claude:C", usage: store.Usage{ID: "claude:C", CostUSD: 999, CostSource: store.CostTool}})
+	if m.usages["claude:C"].CostUSD != 1.37 {
+		t.Errorf("a result for an unselected session was kept: %+v", m.usages["claude:C"])
+	}
+}
+
+func TestUsageIsReadAgainOnlyForLiveSessions(t *testing.T) {
+	m, ops := setup(t, false)
+	asked := func() string { return strings.Join(ops.usageAsked, " ") }
+	if asked() != "claude:A" {
+		t.Fatalf("after setup: %q", asked())
+	}
+	m = step(t, m, tickMsg(now))
+	if asked() != "claude:A" {
+		t.Errorf("a tick within 6s re-read usage: %q", asked())
+	}
+	later := now.Add(7 * time.Second)
+	m.now = func() time.Time { return later }
+	m = step(t, m, tickMsg(later))
+	if asked() != "claude:A claude:A" {
+		t.Errorf("a live session was not re-read after 6s: %q", asked())
+	}
+	m = press(t, m, "j", "j", "j")
+	if asked() != "claude:A claude:A opencode:B opencode:G claude:C" {
+		t.Errorf("each selection is read once: %q", asked())
+	}
+	evenLater := later.Add(7 * time.Second)
+	m.now = func() time.Time { return evenLater }
+	m = step(t, m, tickMsg(evenLater))
+	if asked() != "claude:A claude:A opencode:B opencode:G claude:C" {
+		t.Errorf("a finished session was re-read: %q", asked())
+	}
+}
+
+func TestNarrowWindowShowsUsageInTheBody(t *testing.T) {
+	m, _ := setup(t, false)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "u")
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "reported by claude") || strings.Contains(view, "├─") {
+		t.Errorf("narrow usage view:\n%s", view)
+	}
+	m = press(t, m, "esc")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "├─") || m.flash == "QUIT" {
+		t.Errorf("esc did not bring the tree back:\n%s", view)
 	}
 }
 

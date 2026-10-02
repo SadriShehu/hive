@@ -151,3 +151,31 @@ func Prune(nodes []*Node, drop func(*Node) bool) []*Node {
 	}
 	return out
 }
+
+func Cost(nodes []*Node, usages map[string]store.Usage) (total float64, estimate bool) {
+	for _, n := range nodes {
+		u, ok := usages[n.Session.ID]
+		if ok && u.CostSource != "" {
+			total += u.CostUSD
+			estimate = estimate || u.CostSource == store.CostConfig
+		}
+		children := n.Children
+		if ok && u.CostCoversChildren() {
+			children = externalChildren(n)
+		}
+		sub, subEstimate := Cost(children, usages)
+		total += sub
+		estimate = estimate || subEstimate
+	}
+	return total, estimate
+}
+
+func externalChildren(n *Node) []*Node {
+	var out []*Node
+	for _, c := range n.Children {
+		if c.Session.Kind != store.KindInternal {
+			out = append(out, c)
+		}
+	}
+	return out
+}

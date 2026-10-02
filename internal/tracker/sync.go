@@ -27,8 +27,10 @@ const (
 
 // SyncResult summarizes one sync.
 type SyncResult struct {
-	Imported map[string]int // sessions read, per tool
-	Linked   int            // past spawns newly linked to their parent
+	Imported     map[string]int // sessions read, per tool
+	Linked       int            // past spawns newly linked to their parent
+	UsageRead    int
+	UsagePending int
 }
 
 // Sync imports sessions from every tool's own storage and links past spawns:
@@ -69,7 +71,9 @@ func (t *Tracker) Sync(ctx context.Context) (SyncResult, error) {
 	}
 	linked, err := t.link()
 	res.Linked = linked
-	return res, errors.Join(append(errs, err)...)
+	read, pending, usageErr := t.RefreshUsage(ctx, usageBudget)
+	res.UsageRead, res.UsagePending = read, pending
+	return res, errors.Join(append(errs, err, usageErr)...)
 }
 
 // link matches open hints to the sessions they started. Commands that

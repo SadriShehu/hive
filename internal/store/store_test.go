@@ -211,6 +211,7 @@ func TestMigrationsRunAgainAfterAnOlderHive(t *testing.T) {
 	}
 	must(t, st.Upsert(Session{ID: "claude:A", Tool: "claude", NativeID: "A", CreatedAt: 1, UpdatedAt: 1}))
 	must(t, st.Trash([]string{"claude:A"}, 5))
+	must(t, st.UpsertUsage(UsageRecord{Usage: Usage{ID: "claude:A", Requests: 2}}))
 	_, err = st.db.Exec(`PRAGMA user_version = 2`)
 	must(t, err)
 	st.Close()
@@ -220,6 +221,9 @@ func TestMigrationsRunAgainAfterAnOlderHive(t *testing.T) {
 	}
 	if a, _, _ := st.Get("claude:A"); a.DeletedAt != 5 {
 		t.Errorf("A = %+v, want it still in the trash", a)
+	}
+	if u, ok, _ := st.Usage("claude:A"); !ok || u.Requests != 2 {
+		t.Errorf("usage = %+v, %v; want it kept", u, ok)
 	}
 	_, err = st.db.Exec(`PRAGMA user_version = 99`)
 	must(t, err)

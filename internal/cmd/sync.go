@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -31,19 +31,22 @@ func newSyncCmd() *cobra.Command {
 			}
 			defer st.Close()
 			if full {
-				if err := st.ResetImports(); err != nil {
+				if err := errors.Join(st.ResetImports(), st.ResetUsage()); err != nil {
 					return err
 				}
 			}
-			res, err := tracker.New(st, adapters.All(), &tracker.System{}).Sync(cmd.Context())
+			tr := newTracker(st)
+			res, err := tr.Sync(cmd.Context())
+			drained, _, usageErr := tr.RefreshUsage(cmd.Context(), 0)
 			var parts []string
-			for _, a := range adapters.All() {
+			for _, a := range tr.Adapters {
 				if n, ok := res.Imported[a.Spec().Name]; ok {
 					parts = append(parts, fmt.Sprintf("%s %d", a.Spec().Name, n))
 				}
 			}
-			fmt.Printf("sessions read: %s · past spawns linked: %d\n", strings.Join(parts, ", "), res.Linked)
-			return err
+			fmt.Printf("sessions read: %s · past spawns linked: %d · usage read: %d\n",
+				strings.Join(parts, ", "), res.Linked, res.UsageRead+drained)
+			return errors.Join(err, usageErr)
 		},
 	}
 	cmd.Flags().BoolVar(&full, "full", false, "re-read everything, not just what changed")

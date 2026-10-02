@@ -93,8 +93,8 @@ func checkTmux(c *checkup) {
 		c.skip("tmux's status line doesn't show `hive status` (optional; see `hive status --help`)")
 	}
 	// A config with mistakes is reported with the agents, below.
-	if alerts, err := adapters.LoadAlerts(paths.ConfigPath()); err == nil {
-		c.ok("when an agent needs you: " + alertsText(alerts))
+	if cfg, err := adapters.LoadConfig(paths.ConfigPath()); err == nil {
+		c.ok("when an agent needs you: " + alertsText(cfg.Alerts))
 	}
 }
 

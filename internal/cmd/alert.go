@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/sadrishehu/hive/internal/adapters"
-	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -18,7 +17,7 @@ import (
 // desktop notification. It runs in a hook, which never prints, so what goes
 // wrong goes to the log.
 func alert(st *store.Store, s store.Session) {
-	cfg, _ := adapters.LoadAlerts(paths.ConfigPath())
+	cfg := adapters.Current().Alerts
 	text := label(s) + " needs you"
 	if cfg.Tmux {
 		pane := tracker.PaneFor(s, func(id string) (store.Session, bool) {

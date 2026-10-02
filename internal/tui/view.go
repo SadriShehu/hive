@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sadrishehu/hive/internal/human"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -17,6 +18,10 @@ import (
 func (m Model) bodyHeight() int { return max(1, m.height-3-max(0, m.sendRows()-1)) }
 
 func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
+
+func (m Model) usageTakesTheBody() bool {
+	return m.showUsage && m.showPreview && !m.previewVisible() && m.mode != modeNew && m.mode != modeHelp
+}
 
 func (m Model) treeWidth() int {
 	if !m.previewVisible() {
@@ -42,6 +47,8 @@ func (m Model) View() string {
 	switch {
 	case m.mode == modeHelp:
 		body = fit(helpLines(), m.width, h)
+	case m.usageTakesTheBody():
+		body = m.previewLines(m.width, h)
 	case m.previewVisible():
 		tw := m.treeWidth()
 		pw := m.width - tw - 3
@@ -103,6 +110,13 @@ func (m Model) headerLine() string {
 		scope = "syncing… · " + scope
 	}
 	right := sDim.Render(scope)
+	if total, estimate := m.costInView(); total > 0 {
+		mark := ""
+		if estimate {
+			mark = "~"
+		}
+		right += sDim.Render(" · ") + sText.Render(mark+human.USD(total))
+	}
 	gap := m.width - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 1 {
 		return ansi.Truncate(left, m.width, "")
@@ -208,8 +222,15 @@ func (m Model) previewLines(w, h int) []string {
 	if s.CreatedAt > 0 {
 		ids += " · started " + age(m.now(), s.CreatedAt) + " ago"
 	}
-	head = append(head, sDim.Render(ansi.Truncate(ids, w, "…")), sRule.Render(strings.Repeat("─", w)))
+	head = append(head, sDim.Render(ansi.Truncate(ids, w, "…")))
+	if !m.showUsage {
+		head = append(head, m.usageSummary(s, w, summaryRows(h))...)
+	}
+	head = append(head, sRule.Render(strings.Repeat("─", w)))
 	room := max(0, h-len(head))
+	if m.showUsage {
+		return fit(append(head, m.usageLines(s, m.selectedNode(), w, room)...), w, h)
+	}
 	return fit(append(head, m.previewContent(s, w, room)...), w, h)
 }
 
@@ -386,11 +407,11 @@ func (m Model) hintLine() string {
 		return keys("any key", "close")
 	}
 	if m.trash {
-		return ansi.Truncate(keys("r", "restore", "d", "delete for good", "t", "back", "/", "filter",
+		return ansi.Truncate(keys("r", "restore", "d", "delete for good", "t", "back", "u", "usage", "/", "filter",
 			"i", "subagents", "?", "help", "q", "quit"), m.width, "…")
 	}
 	return ansi.Truncate(keys("↵", "jump", "s", "send", "n", "new", "c", "child", "r", "reopen", "x", "stop",
-		"d", "delete", "t", "trash", "/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+		"d", "delete", "t", "trash", "u", "usage", "/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
 }
 
 func keys(pairs ...string) string {
@@ -427,6 +448,7 @@ func helpLines() []string {
 		{"y", "copy the session ID"},
 		{"S", "sync history now (it also runs every 30s)"},
 		{"tab", "hide / show the preview"},
+		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills"},
 		{"q", "quit (esc too, in the popup)"},
 	}
 	out := []string{sBold.Render("hive keys"), ""}
@@ -435,7 +457,8 @@ func helpLines() []string {
 	}
 	out = append(out, "",
 		"  "+sDim.Render("● working  ◆ needs you  ◉ idle  ◌ running / untracked  ○ exited"),
-		"  "+sDim.Render("run: a headless run   sub: a tool's own subagent"))
+		"  "+sDim.Render("run: a headless run   sub: a tool's own subagent"),
+		"  "+sDim.Render("$ in the header: what the sessions in view cost · ~ an estimate from list prices · partial: totals come when the session ends"))
 	return out
 }
 

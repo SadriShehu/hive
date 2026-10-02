@@ -151,6 +151,34 @@ var migrations = []string{
 		id TEXT PRIMARY KEY,
 		at INTEGER NOT NULL
 	);`,
+	`CREATE TABLE IF NOT EXISTS session_usage (
+		id                    TEXT PRIMARY KEY,
+		model                 TEXT NOT NULL DEFAULT '',
+		models                TEXT NOT NULL DEFAULT '{}',
+		input_tokens          INTEGER NOT NULL DEFAULT 0,
+		output_tokens         INTEGER NOT NULL DEFAULT 0,
+		cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+		cache_write_tokens    INTEGER NOT NULL DEFAULT 0,
+		cache_write_1h_tokens INTEGER NOT NULL DEFAULT 0,
+		reasoning_tokens      INTEGER NOT NULL DEFAULT 0,
+		cost_usd              REAL NOT NULL DEFAULT 0,
+		cost_source           TEXT NOT NULL DEFAULT '',
+		context_tokens        INTEGER NOT NULL DEFAULT 0,
+		context_window        INTEGER NOT NULL DEFAULT 0,
+		tools                 TEXT NOT NULL DEFAULT '{}',
+		skills                TEXT NOT NULL DEFAULT '{}',
+		requests              INTEGER NOT NULL DEFAULT 0,
+		compactions           INTEGER NOT NULL DEFAULT 0,
+		effort                TEXT NOT NULL DEFAULT '',
+		api_duration_ms       INTEGER NOT NULL DEFAULT 0,
+		lines_added           INTEGER NOT NULL DEFAULT 0,
+		lines_removed         INTEGER NOT NULL DEFAULT 0,
+		premium_requests      REAL NOT NULL DEFAULT 0,
+		partial               INTEGER NOT NULL DEFAULT 0,
+		cursor                TEXT NOT NULL DEFAULT '',
+		version               INTEGER NOT NULL DEFAULT 0,
+		updated_at            INTEGER NOT NULL
+	);`,
 	// inputs holds the last message hive gave each session that its agent
 	// hasn't answered yet, so `hive wait` doesn't take the agent for done
 	// before it has started. Like the trash, it can run twice.
@@ -382,6 +410,7 @@ func (s *Store) Purge(id string, at int64) error {
 	for _, q := range []string{
 		`DELETE FROM sessions WHERE id = ?`,
 		`DELETE FROM trash WHERE id = ?`,
+		`DELETE FROM session_usage WHERE id = ?`,
 		`DELETE FROM spawn_hints WHERE parent_id = ?`,
 		`DELETE FROM launches WHERE parent_id = ?`,
 		`DELETE FROM inputs WHERE id = ?`,

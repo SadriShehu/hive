@@ -76,6 +76,54 @@ new  = ["opencode", "-m", "deepseek/deepseek-v4-pro", "--prompt", "{prompt}"]
 	if _, ok := opencode.(agent.Tailer); !ok {
 		t.Error("overridden opencode is no longer a Tailer")
 	}
+	if _, ok := opencode.(agent.UsageReader); !ok {
+		t.Error("overridden opencode is no longer a UsageReader")
+	}
+}
+
+func TestLoadConfigModels(t *testing.T) {
+	cfg, err := LoadConfig(writeConfig(t, `
+[[model]]
+name           = "gpt-6-luna"
+input          = 1.25
+output         = 10
+cache_read     = 0.125
+cache_write    = 1.5
+context_window = 258400
+
+[[model]]
+name           = "claude-fable-5-1"
+context_window = 1000000
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, ok := cfg.Models.Lookup("gpt-6-luna"); !ok || m.Output != 10 || m.ContextWindow != 258400 {
+		t.Errorf("gpt-6-luna = %+v, %v", m, ok)
+	}
+	if m, ok := cfg.Models.Lookup("claude-fable-5-1"); !ok || m.Priced() {
+		t.Errorf("a config entry without prices should replace the built-in row: %+v, %v", m, ok)
+	}
+	if m, ok := cfg.Models.Lookup("claude-opus-5-5"); !ok || !m.Priced() {
+		t.Error("built-in rows are gone")
+	}
+}
+
+func TestLoadRejectsModelMistakes(t *testing.T) {
+	for name, text := range map[string]string{
+		"unknown key": "[[model]]\nname = \"x\"\ncache_reed = 1\n",
+		"no name":     "[[model]]\ninput = 1\n",
+		"duplicate":   "[[model]]\nname = \"x\"\n[[model]]\nname = \"x\"\n",
+		"negative":    "[[model]]\nname = \"x\"\noutput = -1\n",
+	} {
+		cfg, err := LoadConfig(writeConfig(t, text))
+		if err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		if _, ok := cfg.Models.Lookup("claude-opus-5-5"); !ok {
+			t.Errorf("%s: a bad config dropped the built-in prices", name)
+		}
+	}
 }
 
 func TestLoadRejectsMistakes(t *testing.T) {
@@ -97,23 +145,31 @@ func TestLoadRejectsMistakes(t *testing.T) {
 }
 
 func TestAlerts(t *testing.T) {
-	alerts, err := LoadAlerts(filepath.Join(t.TempDir(), "missing.toml"))
-	if err != nil || alerts != (Alerts{Tmux: true}) {
-		t.Fatalf("without config: %+v, %v; want the tmux message only", alerts, err)
+	alerts := func(path string) (Alerts, error) {
+		cfg, err := LoadConfig(path)
+		return cfg.Alerts, err
 	}
-	alerts, err = LoadAlerts(writeConfig(t, "[alerts]\ndesktop = true\n"))
-	if err != nil || alerts != (Alerts{Tmux: true, Desktop: true}) {
-		t.Fatalf("desktop on: %+v, %v", alerts, err)
+	got, err := alerts(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil || got != (Alerts{Tmux: true}) {
+		t.Fatalf("without config: %+v, %v; want the tmux message only", got, err)
 	}
-	alerts, err = LoadAlerts(writeConfig(t, "[alerts]\ntmux = false\n"))
-	if err != nil || alerts != (Alerts{}) {
-		t.Fatalf("tmux off: %+v, %v", alerts, err)
+	got, err = alerts(writeConfig(t, "[alerts]\ndesktop = true\n"))
+	if err != nil || got != (Alerts{Tmux: true, Desktop: true}) {
+		t.Fatalf("desktop on: %+v, %v", got, err)
+	}
+	got, err = alerts(writeConfig(t, "[alerts]\ntmux = false\n"))
+	if err != nil || got != (Alerts{}) {
+		t.Fatalf("tmux off: %+v, %v", got, err)
+	}
+	got, err = alerts(writeConfig(t, "[[agent]]\nname = \"aider\"\nnew = [\"aider\"]\n"))
+	if err != nil || got != (Alerts{Tmux: true}) {
+		t.Fatalf("a config without [alerts]: %+v, %v; want the defaults", got, err)
 	}
 
 	// A mistake anywhere leaves the defaults, and says what it is.
-	alerts, err = LoadAlerts(writeConfig(t, "[alerts]\nsound = true\n"))
-	if err == nil || alerts != (Alerts{Tmux: true}) {
-		t.Fatalf("unknown setting: %+v, %v", alerts, err)
+	got, err = alerts(writeConfig(t, "[alerts]\nsound = true\n"))
+	if err == nil || got != (Alerts{Tmux: true}) {
+		t.Fatalf("unknown setting: %+v, %v", got, err)
 	}
 	if _, err := Load(writeConfig(t, "[alerts]\ndesktop = true\n\n[[agent]]\nname = \"aider\"\nnew = [\"aider\"]\n")); err != nil {
 		t.Fatalf("alerts next to agents: %v", err)

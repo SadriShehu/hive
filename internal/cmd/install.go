@@ -142,5 +142,19 @@ func resolveBin(flag string) (string, error) {
 	if strings.Contains(exe, "go-build") {
 		return "", errors.New("this is a `go run` binary that will disappear; `go install` hive first or pass --bin")
 	}
-	return exe, nil
+	return stableBinPath(exe), nil
+}
+
+func stableBinPath(resolvedExe string) string {
+	onPath, err := exec.LookPath("hive")
+	if err != nil {
+		return resolvedExe
+	}
+	if onPath, err = filepath.Abs(onPath); err != nil {
+		return resolvedExe
+	}
+	if target, err := filepath.EvalSymlinks(onPath); err != nil || target != resolvedExe {
+		return resolvedExe
+	}
+	return onPath
 }

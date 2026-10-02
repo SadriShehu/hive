@@ -38,9 +38,17 @@ config file.
 ## Install
 
 ```sh
-go install github.com/sadrishehu/hive@latest   # or `go install .` in a checkout
+brew install SadriShehu/tap/hive               # macOS, with Homebrew
+go install github.com/sadrishehu/hive@latest   # any OS with Go; or `go install .` in a checkout
 hive install                                   # connect every agent found on PATH
 ```
+
+`brew upgrade` brings hive along with everything else; for hive alone it is
+`brew upgrade --cask hive`, because the plain name `hive` is Apache Hive in homebrew/core.
+
+Prebuilt binaries for macOS and Linux are on the
+[releases page](https://github.com/SadriShehu/hive/releases). `hive --version` shows
+which build you run.
 
 `hive install` adds hooks to `~/.claude/settings.json` (backed up to
 `settings.json.bak-hive`), writes `~/.config/opencode/plugin/hive.js`, adds
@@ -85,6 +93,7 @@ transcript for a headless run, a subagent or a finished session.
 | `/` | filter by title, folder or ID, across all history |
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
+| `u` | show / hide what the session used: model, tokens, price, context, tools, skills |
 
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. Claude and Copilot CLI are given their
@@ -148,6 +157,7 @@ hive new opencode -p "port the tests" --wait   # start it in its own tmux window
 hive wait <id>                                 # until it has answered: prints "<id> idle", "attention" or "exited"
 hive send <id> "now run them"                  # type into it; an ended one reopens with the message
 hive tail <id> -n 20                           # the end of its transcript (--json for agents)
+hive usage <id>                                # model, tokens, price, tools, skills, context (--json)
 hive jump <id>                                 # go to its pane, reopening it if it has ended
 hive jump --next                               # go to the agent that needs you
 hive status                                    # one line: how many need you, work, are idle
@@ -202,6 +212,50 @@ its agent reports in again.
 | Copilot CLI | its `session-state` folder, as Copilot's own delete does, and its rows in `session-store.db` (turns, files, search index, usage), which Copilot's delete leaves |
 | Codex | the rollout and the thread's row in the state database, through `codex delete` |
 | a tool from config | only hive's record |
+
+## What a session used
+
+hive reads each tool's own records for the model, the token counts, the price, the tools
+and skills called, and how much of the context window is in use. `hive usage <id>`
+prints it, `hive ls --json` carries it per row, and `hive ls` adds a `$` column and a
+footer total when it has a price. `hive sync` reads what changed since the last sync,
+a few KB for a running session.
+
+```
+model     claude-fable-5-1 · xhigh
+requests  88
+tokens    in 2312 · out 215708 · cache read 22468435 · cache write 767681
+cost      $43.83 reported by claude
+context   477989 of 1000000 (47%)
+tools     Bash 41 · Read 22 · Edit 9 · Agent 3
+skills    pr-comments 2 · /review 1
+```
+
+Where the numbers come from, per tool:
+
+- **Claude Code** writes its exact cost into the transcript when the process exits. While
+  a session runs, hive estimates the price from the token counts with built-in list prices
+  for Claude models (marked `~`), and Claude's figure replaces it at exit. That figure covers
+  the session's subagents and helper calls, so the subagents' own estimates never add to
+  it. The context window is 200k, or 1M when the model is set with `[1m]` or a larger
+  context was observed.
+- **opencode** records the price and tokens per message; hive sums them.
+- **Codex** records tokens and the context window, but no price. Add a `[[model]]` with
+  prices to `config.toml` to see one.
+- **Copilot CLI** records output tokens per message and the full totals, with premium
+  requests, when a session ends; until then its numbers are marked partial.
+
+```toml
+# ~/.config/hive/config.toml
+[[model]]                   # USD per million tokens; a built-in Claude row with the same name is replaced
+name           = "gpt-6-luna"
+input          = 1.25
+output         = 10
+cache_read     = 0.125
+cache_write    = 1.5
+cache_write_1h = 2.5        # optional; cache_write applies to every write without it
+context_window = 258400
+```
 
 ## How linking works
 
@@ -289,6 +343,15 @@ Hooks never print. Errors go to `~/.local/share/hive/hive.log`; set `HIVE_DEBUG=
 an agent's environment to log every linking decision. `HIVE_HOME` moves the database
 and log elsewhere; `HIVE_TMUX_SOCKET=name` points hive at a named tmux server
 (`tmux -L name`).
+
+## Releases
+
+Every push to `main` that passes CI and changes more than documentation becomes a
+release: CI tags the next patch version, builds the binaries for macOS and Linux,
+publishes the GitHub release, and updates the Homebrew cask. Put `#minor` or `#major`
+in the first line of a commit message to bump that part instead; the rest of a message
+can mention the tokens freely. To pick the bump by hand, run the CI workflow from the
+Actions tab on `main`.
 
 ## License
 

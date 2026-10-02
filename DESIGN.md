@@ -150,6 +150,7 @@ already gone as deleted. Only IDs made of letters, digits, `-` and `_` reach a f
 | New | `claude --session-id {session} {prompt}` | `opencode --prompt {prompt}` | `copilot --session-id {session} --interactive {prompt}` | `codex {prompt}` |
 | Resume | `claude --resume {id} {prompt}` | `opencode --session {id} --prompt {prompt}` | `copilot --resume {id} --interactive {prompt}` | `codex resume {id} {prompt}` |
 | Headless marker | `-p`, `--print` | `run` | `-p`, `--prompt` | `exec`, `e`, `review` |
+| Usage from | `message.usage` and `message.model` per request (once per `requestId`), `cost-state` at exit, `tool_use` blocks | `message.data` tokens and cost, `part` tool rows | `assistant.message.outputTokens`, `tool.execution_start`, `session.shutdown` totals | `token_usage_record`, `token_count` (window), `turn_context.model`, tool call items |
 
 Claude and Copilot take a session ID at launch, so a session hive starts is in the tree
 before its first hook fires. opencode and Codex choose their own; `hive new --wait` waits
@@ -214,6 +215,13 @@ Helper tables:
   session ID, folder, and the child once matched.
 - `import_state` — sync cursors: size and modification time per transcript, and
   `time_updated` for the tools' databases.
+- `session_usage` — one row per session: model, per-model token counts (JSON), totals,
+  the price the tool reported, the input side of the last request and the window size,
+  tool and skill call counts (JSON), and the reader's cursor (byte offset plus what it
+  needs to continue, as JSON) so a growing file costs only its new bytes. Only prices the
+  tool reported are stored; estimates from built-in and `[[model]]` prices are computed
+  when a row is read, so a config change takes effect at once. `hive sync` refreshes rows
+  under a 5 s budget, live sessions first; `hive sync` from the shell drains the rest.
 - `inputs` — the last message hive gave a session that its agent hasn't answered yet,
   and when: by session ID, or by tmux pane for an agent hive started with a prompt that
   hasn't named its session yet; the first event from that pane hands it over. An
@@ -249,7 +257,9 @@ session that ended before its first message was saved.
 
 Other keys: `n` new agent, `c` new agent as a child of the selected one, `/` filter by
 title, folder or ID, `a` recent or all history, `i` hide or show subagents, `S` sync now,
-`y` copy the ID, `tab` hide the preview, `←` / `→` collapse and expand, `?` help, `q` quit.
+`y` copy the ID, `tab` hide the preview, `u` show what the session used (model, tokens,
+price, context, tools, skills) in place of the pane preview, `←` / `→` collapse and expand,
+`?` help, `q` quit.
 
 **New agent.** `n` and `c` open a form: the tool, the folder (the parent's by default) and
 an optional first prompt. Editing the folder lists up to eight folders that complete it:

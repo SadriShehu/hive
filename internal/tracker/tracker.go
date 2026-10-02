@@ -16,6 +16,7 @@ import (
 	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
+	"github.com/sadrishehu/hive/internal/usage"
 )
 
 // ParentEnv is the variable every agent sets, for the commands it runs, to
@@ -84,6 +85,8 @@ type Tracker struct {
 	// OnAttention, when set, is told when a session starts waiting on the
 	// user: a permission prompt or a question.
 	OnAttention func(s store.Session)
+
+	Models usage.Catalog
 
 	cwds map[string]string // process folders, by pid@start
 }

@@ -23,6 +23,11 @@ func All() []agent.Adapter {
 	return all
 }
 
+func Current() Config {
+	cfg, _ := LoadConfig(paths.ConfigPath())
+	return cfg
+}
+
 // Get returns the adapter named name.
 func Get(name string) (agent.Adapter, bool) {
 	for _, a := range All() {

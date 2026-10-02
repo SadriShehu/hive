@@ -14,6 +14,7 @@ import (
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/usage"
 )
 
 // Agent is one [[agent]] table of config.toml: a tool hive doesn't ship with,
@@ -31,24 +32,40 @@ type Agent struct {
 
 var toolName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+type Config struct {
+	Adapters []agent.Adapter
+	Models   usage.Catalog
+	Alerts   Alerts
+}
+
 // Load returns the built-in adapters with the config file at path applied.
 // A missing file is no config; a file with mistakes changes nothing, and Load
 // says what is wrong with it.
 func Load(path string) ([]agent.Adapter, error) {
-	all := Builtin()
-	cfg, err := readConfig(path)
+	cfg, err := LoadConfig(path)
+	return cfg.Adapters, err
+}
+
+// LoadConfig returns everything the config file at path sets, on top of the
+// defaults. A file with mistakes changes nothing, and LoadConfig says what is
+// wrong with it.
+func LoadConfig(path string) (Config, error) {
+	cfg := Config{Adapters: Builtin(), Models: usage.Builtin(), Alerts: defaultAlerts}
+	file, err := readConfig(path)
 	if err != nil {
-		return all, err
+		return cfg, err
 	}
-	for _, c := range cfg.Agent {
-		i := slices.IndexFunc(all, func(a agent.Adapter) bool { return a.Spec().Name == c.Name })
+	for _, c := range file.Agent {
+		i := slices.IndexFunc(cfg.Adapters, func(a agent.Adapter) bool { return a.Spec().Name == c.Name })
 		if i < 0 {
-			all = append(all, custom{c.apply(agent.Spec{Name: c.Name})})
+			cfg.Adapters = append(cfg.Adapters, custom{c.apply(agent.Spec{Name: c.Name})})
 			continue
 		}
-		all[i] = overridden{all[i], c.apply(all[i].Spec())}
+		cfg.Adapters[i] = overridden{cfg.Adapters[i], c.apply(cfg.Adapters[i].Spec())}
 	}
-	return all, nil
+	cfg.Models = usage.NewCatalog(usage.Builtin(), file.Model)
+	cfg.Alerts = file.Alerts
+	return cfg, nil
 }
 
 // Alerts is the [alerts] table of config.toml: how hive tells you that an
@@ -58,44 +75,38 @@ type Alerts struct {
 	Desktop bool `toml:"desktop"` // a desktop notification too
 }
 
-// LoadAlerts returns the [alerts] settings in the config file at path. A file
-// with mistakes leaves the defaults, as Load does, and says what is wrong.
-func LoadAlerts(path string) (Alerts, error) {
-	cfg, err := readConfig(path)
-	if err != nil {
-		return defaults().Alerts, err
-	}
-	return cfg.Alerts, nil
+var defaultAlerts = Alerts{Tmux: true}
+
+type configFile struct {
+	Agent  []Agent       `toml:"agent"`
+	Model  []usage.Model `toml:"model"`
+	Alerts Alerts        `toml:"alerts"`
 }
 
-type config struct {
-	Agent  []Agent `toml:"agent"`
-	Alerts Alerts  `toml:"alerts"`
-}
-
-func defaults() config { return config{Alerts: Alerts{Tmux: true}} }
-
-func readConfig(path string) (config, error) {
-	cfg := defaults()
+func readConfig(path string) (configFile, error) {
+	cfg := configFile{Alerts: defaultAlerts} // what the file leaves out keeps its default
 	md, err := toml.DecodeFile(path, &cfg)
 	if errors.Is(err, fs.ErrNotExist) {
-		return defaults(), nil
+		return configFile{Alerts: defaultAlerts}, nil
 	}
 	if err != nil {
-		return defaults(), fmt.Errorf("%s: %w", path, err)
+		return configFile{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
-		return defaults(), fmt.Errorf("%s: unknown setting %q", path, keys[0].String())
+		return configFile{}, fmt.Errorf("%s: unknown setting %q", path, keys[0].String())
 	}
 	seen := map[string]bool{}
 	for _, c := range cfg.Agent {
 		switch {
 		case !toolName.MatchString(c.Name):
-			return defaults(), fmt.Errorf("%s: agent name %q must be lowercase letters, digits, - or _", path, c.Name)
+			return configFile{}, fmt.Errorf("%s: agent name %q must be lowercase letters, digits, - or _", path, c.Name)
 		case seen[c.Name]:
-			return defaults(), fmt.Errorf("%s: agent %q is defined twice", path, c.Name)
+			return configFile{}, fmt.Errorf("%s: agent %q is defined twice", path, c.Name)
 		}
 		seen[c.Name] = true
+	}
+	if err := usage.Validate(cfg.Model); err != nil {
+		return configFile{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
 }
@@ -183,4 +194,11 @@ func (o overridden) Purge(ctx context.Context, s store.Session) error {
 		return p.Purge(ctx, s)
 	}
 	return fmt.Errorf("hive can't delete %s sessions", o.spec.Name)
+}
+
+func (o overridden) ReadUsage(ctx context.Context, s store.Session, prev store.Usage, cursor string) (store.Usage, string, error) {
+	if r, ok := o.Adapter.(agent.UsageReader); ok {
+		return r.ReadUsage(ctx, s, prev, cursor)
+	}
+	return prev, cursor, agent.ErrNoUsage
 }

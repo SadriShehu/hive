@@ -15,7 +15,6 @@ import (
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
-	"github.com/sadrishehu/hive/internal/tracker"
 	"github.com/sadrishehu/hive/internal/tree"
 )
 
@@ -36,11 +35,15 @@ func newLsCmd() *cobra.Command {
 				return err
 			}
 			defer st.Close()
-			tr := tracker.New(st, adapters.All(), &tracker.System{})
+			tr := newTracker(st)
 			if !noSync {
 				syncQuietly(cmd.Context(), tr)
 			}
 			sessions, err := tr.Refresh()
+			if err != nil {
+				return err
+			}
+			usages, err := tr.AllUsage()
 			if err != nil {
 				return err
 			}
@@ -52,10 +55,10 @@ func newLsCmd() *cobra.Command {
 				roots = tree.Recent(roots, time.Now().Add(-recentWindow).UnixMilli())
 			}
 			if asJSON {
-				return printJSON(roots)
+				return printJSON(roots, usages)
 			}
-			printTree(roots, func(live int) string {
-				return fmt.Sprintf("%d live · %d sessions", live, len(sessions))
+			printTree(roots, usages, func(live int) string {
+				return fmt.Sprintf("%d live · %d sessions", live, len(sessions)) + listedCost(roots, usages)
 			})
 			hintInstall()
 			return nil
@@ -68,17 +71,22 @@ func newLsCmd() *cobra.Command {
 	return cmd
 }
 
-func printJSON(roots []*tree.Node) error {
+func printJSON(roots []*tree.Node, usages map[string]store.Usage) error {
 	type row struct {
 		store.Session
-		Live  bool `json:"live"`
-		Depth int  `json:"depth"`
+		Live  bool         `json:"live"`
+		Depth int          `json:"depth"`
+		Usage *store.Usage `json:"usage,omitempty"`
 	}
 	rows := []row{}
 	var add func(nodes []*tree.Node, depth int)
 	add = func(nodes []*tree.Node, depth int) {
 		for _, n := range nodes {
-			rows = append(rows, row{n.Session, n.Session.Live(), depth})
+			r := row{Session: n.Session, Live: n.Session.Live(), Depth: depth}
+			if u, ok := usages[n.Session.ID]; ok && !u.Empty() {
+				r.Usage = &u
+			}
+			rows = append(rows, r)
 			add(n.Children, depth+1)
 		}
 	}
@@ -94,10 +102,11 @@ type column struct {
 }
 
 // printTree prints the tree, then a footer saying how many of it are live.
-func printTree(roots []*tree.Node, footer func(live int) string) {
+func printTree(roots []*tree.Node, usages map[string]store.Usage, footer func(live int) string) {
 	now := time.Now()
 	var rows [][]column
 	liveCount := 0
+	showCost := anyCost(roots, usages)
 	tree.Walk(roots, func(n *tree.Node, prefix string) {
 		s := n.Session
 		live := s.Live()
@@ -109,7 +118,7 @@ func printTree(roots []*tree.Node, footer func(live int) string) {
 		if !live {
 			dim = "2"
 		}
-		rows = append(rows, []column{
+		cells := []column{
 			{prefix, "2"},
 			{glyph, glyphStyle},
 			{s.Tool, toolStyle(s.Tool)},
@@ -117,9 +126,11 @@ func printTree(roots []*tree.Node, footer func(live int) string) {
 			{kindTag(s), "2"},
 			{statusWord(s), glyphStyle},
 			{age(now, s.UpdatedAt), "2"},
-			{shortPath(s.Cwd), "2"},
-			{shortID(s), "2"},
-		})
+		}
+		if showCost {
+			cells = append(cells, column{costText(usages[s.ID]), "2"})
+		}
+		rows = append(rows, append(cells, column{shortPath(s.Cwd), "2"}, column{shortID(s), "2"}))
 	})
 	if len(rows) == 0 {
 		fmt.Println("no sessions yet; try `hive ls --all`, or `hive install` to start tracking")
@@ -149,6 +160,38 @@ func printTree(roots []*tree.Node, footer func(live int) string) {
 		fmt.Println(strings.TrimRight(b.String(), " "))
 	}
 	fmt.Println(paint(footer(liveCount), "2", color))
+}
+
+func anyCost(roots []*tree.Node, usages map[string]store.Usage) bool {
+	found := false
+	tree.Walk(roots, func(n *tree.Node, _ string) {
+		if usages[n.Session.ID].CostSource != "" {
+			found = true
+		}
+	})
+	return found
+}
+
+func costText(u store.Usage) string {
+	switch u.CostSource {
+	case store.CostTool:
+		return fmt.Sprintf("$%.2f", u.CostUSD)
+	case store.CostConfig:
+		return fmt.Sprintf("~$%.2f", u.CostUSD)
+	}
+	return ""
+}
+
+func listedCost(roots []*tree.Node, usages map[string]store.Usage) string {
+	total, estimate := tree.Cost(roots, usages)
+	if total == 0 {
+		return ""
+	}
+	mark := ""
+	if estimate {
+		mark = "~"
+	}
+	return fmt.Sprintf(" · %s$%.2f listed", mark, total)
 }
 
 // hintInstall points at `hive install` for agents on PATH that aren't connected.

@@ -77,6 +77,11 @@ type Model struct {
 	showPreview bool
 	preview     preview
 
+	showUsage bool
+	usages    map[string]store.Usage
+	usage     usageFetch
+	roots     []*tree.Node
+
 	flash    string
 	flashErr bool
 	flashAt  time.Time
@@ -244,7 +249,16 @@ type (
 		sessions, trashed []store.Session
 		err               error
 	}
-	syncedMsg  struct{ err error }
+	syncedMsg struct{ err error }
+	usagesMsg struct {
+		usages map[string]store.Usage
+		err    error
+	}
+	usageMsg struct {
+		id    string
+		usage store.Usage
+		err   error
+	}
 	previewMsg struct {
 		id      string
 		screen  []string
@@ -319,7 +333,7 @@ func Run(ops Ops, popup bool) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), m.syncCmd(), tick())
+	return tea.Batch(m.refreshCmd(), m.usagesCmd(), m.syncCmd(), tick())
 }
 
 func tick() tea.Cmd {
@@ -350,9 +364,44 @@ func (m *Model) syncCmd() tea.Cmd {
 	}
 }
 
+func (m Model) usagesCmd() tea.Cmd {
+	ops := m.ops
+	return func() tea.Msg {
+		usages, err := ops.Usages()
+		return usagesMsg{usages: usages, err: err}
+	}
+}
+
+func (m *Model) usageCmd() tea.Cmd {
+	s, ok := m.selected()
+	if !ok || s.Synthetic() || m.syncing {
+		return nil
+	}
+	if m.usage.id == s.ID {
+		if m.usage.done && !s.Live() {
+			return nil
+		}
+		if m.now().Sub(m.usage.at) < usageEvery {
+			return nil
+		}
+	}
+	m.usage = usageFetch{id: s.ID, at: m.now()}
+	ops := m.ops
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), usageTimeout)
+		defer cancel()
+		u, err := ops.Usage(ctx, s)
+		return usageMsg{id: s.ID, usage: u, err: err}
+	}
+}
+
 // previewCmd loads what the selected session shows: its pane's screen when
-// it runs in one, else the end of its transcript.
+// it runs in one, else the end of its transcript; and its usage.
 func (m *Model) previewCmd() tea.Cmd {
+	return tea.Batch(m.contentCmd(), m.usageCmd())
+}
+
+func (m *Model) contentCmd() tea.Cmd {
 	s, ok := m.selected()
 	if !ok {
 		return nil
@@ -422,9 +471,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash("sync: "+msg.err.Error(), true)
 		}
 		if m.refreshing {
+			return m, m.usagesCmd()
+		}
+		return m, tea.Batch(m.refreshCmd(), m.usagesCmd())
+
+	case usagesMsg:
+		if msg.err == nil {
+			m.usages = msg.usages
+		}
+		return m, nil
+
+	case usageMsg:
+		if msg.id != m.selID {
 			return m, nil
 		}
-		return m, m.refreshCmd()
+		m.usage.done = true
+		if msg.err != nil {
+			m.usage.err = msg.err.Error()
+			return m, nil
+		}
+		if m.usages == nil {
+			m.usages = map[string]store.Usage{}
+		}
+		m.usages[msg.id] = msg.usage
+		return m, nil
 
 	case previewMsg:
 		if msg.id == m.selID {
@@ -485,6 +555,10 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter.SetValue("")
 			m.rebuild()
 			return m, m.previewCmd()
+		}
+		if m.usageTakesTheBody() {
+			m.showUsage = false
+			return m, nil
 		}
 		if m.popup {
 			return m, tea.Quit
@@ -595,6 +669,10 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "tab":
 		m.showPreview = !m.showPreview
+	case "u":
+		m.showUsage = !m.showUsage
+		m.usage.at = time.Time{}
+		return m, m.usageCmd()
 	case "?":
 		m.mode = modeHelp
 	}
@@ -916,6 +994,13 @@ func (m Model) selected() (store.Session, bool) {
 	return m.rows[m.cursor].node.Session, true
 }
 
+func (m Model) selectedNode() *tree.Node {
+	if m.cursor < 0 || m.cursor >= len(m.rows) {
+		return nil
+	}
+	return m.rows[m.cursor].node
+}
+
 // rebuild lays the tree, or the trash, out as rows, keeping the selection on
 // the same session. The trash shows everything in it, empty sessions too:
 // they go with whatever they are under.
@@ -959,6 +1044,7 @@ func (m *Model) rebuild() {
 		}
 	}
 	walk(roots, "", true)
+	m.roots = roots
 
 	m.cursor = min(m.cursor, max(0, len(m.rows)-1))
 	for i, r := range m.rows {
