@@ -1,0 +1,21 @@
+name: Support another agent
+description: A CLI coding agent hive should track out of the box
+labels: [enhancement]
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: Which agent
+      placeholder: aider, Gemini CLI, ...
+    validations:
+      required: true
+  - type: textarea
+    id: hooks
+    attributes:
+      label: How it could report to hive
+      description: Hooks, plugins or session files it writes, if you know. Links to its docs help.
+  - type: textarea
+    id: config
+    attributes:
+      label: What you tried in config.toml
+      description: Any tool can be added with an `[[agent]]` table today (see the README). Say what worked and what didn't.

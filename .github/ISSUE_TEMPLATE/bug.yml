@@ -1,0 +1,29 @@
+name: Bug
+description: Something hive does wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      placeholder: |
+        1. Start claude in a tmux window
+        2. ...
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `hive --version` and `hive doctor`
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: OS, tmux version, and the agents involved, with versions
+      placeholder: macOS 26, tmux 3.7, Claude Code 2.1.283, Codex 0.158

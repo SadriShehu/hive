@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -47,8 +48,10 @@ func newInstallCmd() *cobra.Command {
 				report("tmux", msg, err)
 				errs = append(errs, err)
 				if err == nil && !inStatusLine() {
-					report("", "to count the agents that need you in tmux's status line, add to "+tmux.ConfPath()+":\n"+
-						"          set -ag status-right ' #("+hiveBin+" status --tmux)'", nil)
+					report("", "to count the agents that need you in tmux's status line, add to "+tmux.ConfPath()+":", nil)
+					for _, line := range statusLineConf(hiveBin) {
+						report("", "  "+line, nil)
+					}
 				}
 			}
 			return errors.Join(errs...)
@@ -58,6 +61,28 @@ func newInstallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&key, "key", "a", "tmux key that, after the prefix, opens the tree")
 	cmd.Flags().StringVar(&nextKey, "next-key", "A", "tmux key that, after the prefix, jumps to the agent that needs you")
 	return cmd
+}
+
+// statusLineConf returns the tmux.conf lines that add `hive status` to the
+// right side of tmux's status line as it is now. They set the whole value:
+// `set -ag` would add another copy each time tmux.conf is loaded.
+func statusLineConf(hiveBin string) []string {
+	bin := hiveBin
+	if strings.ContainsAny(bin, " \t") {
+		bin = `"` + bin + `"` // tmux runs it with sh; the line around it is single-quoted
+	}
+	count := "#(" + bin + " status --tmux)"
+	right, err := tmux.Run("show-options", "-gv", "status-right")
+	if err != nil || strings.Contains(right, "'") {
+		return []string{"(add ' " + count + "' to the end of your status-right)"}
+	}
+	var lines []string
+	if n, err := tmux.Run("show-options", "-gv", "status-right-length"); err == nil {
+		if width, _ := strconv.Atoi(n); width > 0 && width < 60 { // tmux's default, 40, cuts the count off
+			lines = append(lines, "set -g status-right-length 60")
+		}
+	}
+	return append(lines, "set -g status-right '"+strings.TrimSpace(right+" "+count)+"'")
 }
 
 // inStatusLine reports whether tmux's status line already runs `hive status`.
