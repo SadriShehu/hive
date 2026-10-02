@@ -15,8 +15,10 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "One line for a status bar: how many agents need you, work, or are idle",
 		Long: "Print how many running agents need you (◆), are working (●) or are idle (◉), leaving\n" +
-			"out the ones at zero, and nothing at all when no agent runs. For tmux's status line:\n\n" +
-			"  set -ag status-right ' #(hive status --tmux)'\n\n" +
+			"out the ones at zero, and nothing at all when no agent runs.\n\n" +
+			"For tmux's status line, add #(hive status --tmux) to the end of status-right in\n" +
+			"tmux.conf; `hive install tmux` prints the line with your current right side in it.\n" +
+			"Set the whole value: `set -ag` would add another copy each time tmux.conf is loaded.\n\n" +
 			"--tmux colors it with tmux's own style tags. tmux runs it again every status-interval\n" +
 			"(15s unless set), so a lower one shows changes sooner.",
 		Args: cobra.NoArgs,

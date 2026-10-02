@@ -27,13 +27,18 @@ With the keys bound (`hive install tmux`), **prefix + a** opens the tree over wh
 you're doing and closes once you jump somewhere, and **prefix + A** jumps straight to the
 agent that needs you.
 
-## Status
+## Quick start
 
-All five phases are done: live tracking of Claude Code, opencode, Copilot CLI and
-Codex; every past session imported and linked to the session that spawned it; the
-tree UI to jump into, message, start, reopen and stop agents; the same actions as
-commands, so agents can run agents of their own; and tools added or changed in a
-config file.
+hive needs tmux, on macOS or Linux.
+
+```sh
+brew install SadriShehu/tap/hive    # or: go install github.com/sadrishehu/hive@latest
+hive install                        # hooks for every agent on your PATH, and the tmux keys
+hive                                # the tree
+```
+
+Every agent you start from then on shows up in the tree, however it was started: by
+you, by another agent, or with `n` in the tree. Past sessions are imported too.
 
 ## Install
 
@@ -111,13 +116,17 @@ without the tree open:
 - **prefix + A** goes to the agent that has needed you longest; press it again there
   for the next one. `hive jump --next` does the same from a shell.
 - **A count in tmux's status line**, if you add it: `◆2 ●3 ◉1` for 2 that need you, 3
-  working and 1 idle (nothing when no agent runs). `hive install tmux` prints the line:
+  working and 1 idle (nothing when no agent runs). `hive install tmux` prints the lines
+  to add, with your current right side in them. With tmux's default right side:
 
   ```tmux
-  set -ag status-right ' #(hive status --tmux)'
+  set -g status-right-length 60
+  set -g status-right '#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}"#{=21:pane_title}" %H:%M %d-%b-%y #(hive status --tmux)'
   ```
 
-  tmux runs it every `status-interval` (15s unless set).
+  If you set `status-right` yourself, add `#(hive status --tmux)` to your own value.
+  Avoid `set -ag`, which adds another copy each time tmux.conf is loaded. tmux runs the
+  count every `status-interval` (15s unless set).
 - **A desktop notification**, if you ask for one in the config file:
 
   ```toml
@@ -352,6 +361,12 @@ publishes the GitHub release, and updates the Homebrew cask. Put `#minor` or `#m
 in the first line of a commit message to bump that part instead; the rest of a message
 can mention the tokens freely. To pick the bump by hand, run the CI workflow from the
 Actions tab on `main`.
+
+## Feedback
+
+Bugs, ideas and requests for other agents go in
+[issues](https://github.com/SadriShehu/hive/issues/new/choose). For a bug, the output of
+`hive --version` and `hive doctor` says most of what's needed.
 
 ## License
 
