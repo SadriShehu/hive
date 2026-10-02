@@ -159,7 +159,7 @@ func hintInstall() {
 			missing = append(missing, a.Spec().Name)
 		}
 	}
-	if tmux.Available() && !tmux.BindingInstalled(tmux.ConfPath()) {
+	if tmux.Available() && tmux.PopupKey(tmux.ConfPath()) == "" {
 		missing = append(missing, "tmux (prefix+a)")
 	}
 	if len(missing) > 0 {

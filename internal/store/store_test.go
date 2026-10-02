@@ -242,3 +242,31 @@ func ids(list []Session) string {
 	}
 	return strings.Join(out, " ")
 }
+
+func TestInputsWaitForTheirAnswer(t *testing.T) {
+	st := open(t)
+	must(t, st.SetInput("%4", 100)) // typed into a pane before its agent named its session
+	must(t, st.MoveInput("%4", "opencode:a"))
+	if _, pending, _ := st.Input("%4"); pending {
+		t.Fatal("the pane kept the input after handing it over")
+	}
+	if at, pending, err := st.Input("opencode:a"); err != nil || !pending || at != 100 {
+		t.Fatalf("Input = %d, %v, %v; want 100, pending", at, pending, err)
+	}
+
+	must(t, st.AnswerInput("opencode:a", 99)) // a turn that ended before the message
+	if _, pending, _ := st.Input("opencode:a"); !pending {
+		t.Fatal("an older turn answered a newer message")
+	}
+	must(t, st.AnswerInput("opencode:a", 100))
+	if _, pending, _ := st.Input("opencode:a"); pending {
+		t.Fatal("a turn ending with the message didn't answer it")
+	}
+
+	must(t, st.Upsert(Session{ID: "claude:b", Tool: "claude", NativeID: "b", CreatedAt: 1, UpdatedAt: 1}))
+	must(t, st.SetInput("claude:b", 5))
+	must(t, st.Purge("claude:b", 10))
+	if _, pending, _ := st.Input("claude:b"); pending {
+		t.Fatal("deleting a session for good kept its input")
+	}
+}

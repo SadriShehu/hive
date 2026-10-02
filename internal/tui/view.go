@@ -11,6 +11,7 @@ import (
 
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/tracker"
 )
 
 func (m Model) bodyHeight() int { return max(1, m.height-3-max(0, m.sendRows()-1)) }
@@ -75,8 +76,11 @@ func (m Model) headerLine() string {
 		}
 	}
 	left := sBadge.Render("hive") + "  " +
-		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live)) +
-		sDim.Render(fmt.Sprintf("  ·  %d sessions", total))
+		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live))
+	if n := len(tracker.NeedsYou(m.sessions)); n > 0 {
+		left += sDim.Render("  ·  ") + lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n))
+	}
+	left += sDim.Render(fmt.Sprintf("  ·  %d sessions", total))
 	if len(m.trashed) > 0 {
 		left += sDim.Render(fmt.Sprintf("  ·  %d in the trash", len(m.trashed)))
 	}

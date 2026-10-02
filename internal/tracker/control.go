@@ -66,6 +66,7 @@ func (t *Tracker) Launch(o LaunchOptions) (Launched, error) {
 	if o.ParentID != "" {
 		env[ParentEnv] = o.ParentID
 	}
+	started := t.World.Now()
 	pane, err := tmux.NewWindow(tmux.Window{Session: o.Session, Name: windowName(o.Tool, cwd),
 		Dir: cwd, Env: env, Argv: argv, Detached: o.Detached})
 	if err != nil {
@@ -76,6 +77,16 @@ func (t *Tracker) Launch(o LaunchOptions) (Launched, error) {
 		return Launched{}, err
 	}
 	out := Launched{Pane: pane.ID}
+	if o.Prompt != "" {
+		// Until the agent names its session, its pane holds the prompt.
+		key := pane.ID
+		if native != "" {
+			key = store.ID(o.Tool, native)
+		}
+		if err := t.Store.SetInput(key, started); err != nil {
+			return out, err
+		}
+	}
 	if native != "" {
 		// The session exists before its first hook arrives.
 		out.SessionID = store.ID(o.Tool, native)
@@ -125,17 +136,23 @@ func (t *Tracker) Resume(s store.Session, prompt string, o LaunchOptions) (Launc
 	if err != nil {
 		cwd = paths.Home() // the project folder is gone; the tool will say what it can
 	}
+	started := t.World.Now()
 	pane, err := tmux.NewWindow(tmux.Window{Session: o.Session, Name: windowName(s.Tool, cwd),
 		Dir: cwd, Argv: argv, Detached: o.Detached})
 	if err != nil {
 		return Launched{}, err
 	}
 	now := t.World.Now()
+	input := t.Store.ClearInput(s.ID) // whatever the last run left unanswered
+	if prompt != "" {
+		input = t.Store.SetInput(s.ID, started)
+	}
 	err = errors.Join(
 		// If the tool continues under a new session ID, it lands in the same place.
 		t.Store.PutLaunch(store.Launch{Pane: pane.ID, Tool: s.Tool, ParentID: s.ParentID, Cwd: cwd, CreatedAt: now}),
 		t.Store.Attach(s.ID, pane.PID, pane.ID, store.KindInteractive),
 		t.Store.SetStatus(s.ID, startStatus(prompt), now),
+		input,
 	)
 	return Launched{Pane: pane.ID, SessionID: s.ID}, err
 }
@@ -147,7 +164,13 @@ func (t *Tracker) Send(s store.Session, text string, o LaunchOptions) (string, e
 		return "", errors.New("nothing to send")
 	}
 	if s.Pane != "" && tmux.PaneExists(s.Pane) {
+		// Recorded before typing: the agent may answer before Paste returns.
+		key := inputKey(s)
+		if err := t.Store.SetInput(key, t.World.Now()); err != nil {
+			return "", err
+		}
 		if err := tmux.Paste(s.Pane, text); err != nil {
+			t.Store.ClearInput(key)
 			return "", err
 		}
 		return "sent", nil

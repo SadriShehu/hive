@@ -151,6 +151,13 @@ var migrations = []string{
 		id TEXT PRIMARY KEY,
 		at INTEGER NOT NULL
 	);`,
+	// inputs holds the last message hive gave each session that its agent
+	// hasn't answered yet, so `hive wait` doesn't take the agent for done
+	// before it has started. Like the trash, it can run twice.
+	`CREATE TABLE IF NOT EXISTS inputs (
+		id TEXT PRIMARY KEY,
+		at INTEGER NOT NULL
+	);`,
 }
 
 // Open opens (creating if needed) the database at path.
@@ -377,6 +384,7 @@ func (s *Store) Purge(id string, at int64) error {
 		`DELETE FROM trash WHERE id = ?`,
 		`DELETE FROM spawn_hints WHERE parent_id = ?`,
 		`DELETE FROM launches WHERE parent_id = ?`,
+		`DELETE FROM inputs WHERE id = ?`,
 	} {
 		if _, err := tx.Exec(q, id); err != nil {
 			return err
@@ -502,6 +510,47 @@ func (s *Store) TakeLaunch(pane string, since int64) (Launch, bool, error) {
 		return Launch{}, false, err
 	}
 	return l, l.CreatedAt >= since, nil
+}
+
+// Inputs are keyed by session ID, or by tmux pane for an agent hive started
+// there that hasn't said which session it runs yet; MoveInput hands the
+// pane's over once it does.
+
+// SetInput records that hive gave key a message at at, replacing any
+// earlier one.
+func (s *Store) SetInput(key string, at int64) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO inputs (id, at) VALUES (?, ?)`, key, at)
+	return err
+}
+
+// Input returns when hive gave key the message its agent hasn't answered
+// yet, if there is one.
+func (s *Store) Input(key string) (int64, bool, error) {
+	var at int64
+	err := s.db.QueryRow(`SELECT at FROM inputs WHERE id = ?`, key).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	return at, err == nil, err
+}
+
+// AnswerInput records that key's agent ended a turn at at, which answers a
+// message given at or before then.
+func (s *Store) AnswerInput(key string, at int64) error {
+	_, err := s.db.Exec(`DELETE FROM inputs WHERE id = ? AND at <= ?`, key, at)
+	return err
+}
+
+// ClearInput forgets key's unanswered message.
+func (s *Store) ClearInput(key string) error {
+	_, err := s.db.Exec(`DELETE FROM inputs WHERE id = ?`, key)
+	return err
+}
+
+// MoveInput hands from's unanswered message to to.
+func (s *Store) MoveInput(from, to string) error {
+	_, err := s.db.Exec(`UPDATE OR REPLACE inputs SET id = ? WHERE id = ?`, to, from)
+	return err
 }
 
 // SetParent links id to parent, unless id already has a parent.

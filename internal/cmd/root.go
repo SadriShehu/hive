@@ -26,7 +26,7 @@ func Execute() {
 	}
 	root.AddCommand(newHookCmd(), newInstallCmd(), newUninstallCmd(), newLsCmd(), newSyncCmd(),
 		newPopupCmd(), newUICmd(), newNewCmd(), newJumpCmd(), newResumeCmd(), newSendCmd(),
-		newTailCmd(), newKillCmd(), newRmCmd(), newTrashCmd(), newDoctorCmd())
+		newTailCmd(), newWaitCmd(), newKillCmd(), newRmCmd(), newTrashCmd(), newStatusCmd(), newDoctorCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

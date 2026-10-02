@@ -36,11 +36,11 @@ var toolName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // says what is wrong with it.
 func Load(path string) ([]agent.Adapter, error) {
 	all := Builtin()
-	agents, err := readConfig(path)
+	cfg, err := readConfig(path)
 	if err != nil {
 		return all, err
 	}
-	for _, c := range agents {
+	for _, c := range cfg.Agent {
 		i := slices.IndexFunc(all, func(a agent.Adapter) bool { return a.Spec().Name == c.Name })
 		if i < 0 {
 			all = append(all, custom{c.apply(agent.Spec{Name: c.Name})})
@@ -51,31 +51,53 @@ func Load(path string) ([]agent.Adapter, error) {
 	return all, nil
 }
 
-func readConfig(path string) ([]Agent, error) {
-	var cfg struct {
-		Agent []Agent `toml:"agent"`
+// Alerts is the [alerts] table of config.toml: how hive tells you that an
+// agent needs you.
+type Alerts struct {
+	Tmux    bool `toml:"tmux"`    // a message on every tmux client not looking at it; on unless set false
+	Desktop bool `toml:"desktop"` // a desktop notification too
+}
+
+// LoadAlerts returns the [alerts] settings in the config file at path. A file
+// with mistakes leaves the defaults, as Load does, and says what is wrong.
+func LoadAlerts(path string) (Alerts, error) {
+	cfg, err := readConfig(path)
+	if err != nil {
+		return defaults().Alerts, err
 	}
+	return cfg.Alerts, nil
+}
+
+type config struct {
+	Agent  []Agent `toml:"agent"`
+	Alerts Alerts  `toml:"alerts"`
+}
+
+func defaults() config { return config{Alerts: Alerts{Tmux: true}} }
+
+func readConfig(path string) (config, error) {
+	cfg := defaults()
 	md, err := toml.DecodeFile(path, &cfg)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return defaults(), nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return defaults(), fmt.Errorf("%s: %w", path, err)
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
-		return nil, fmt.Errorf("%s: unknown setting %q", path, keys[0].String())
+		return defaults(), fmt.Errorf("%s: unknown setting %q", path, keys[0].String())
 	}
 	seen := map[string]bool{}
 	for _, c := range cfg.Agent {
 		switch {
 		case !toolName.MatchString(c.Name):
-			return nil, fmt.Errorf("%s: agent name %q must be lowercase letters, digits, - or _", path, c.Name)
+			return defaults(), fmt.Errorf("%s: agent name %q must be lowercase letters, digits, - or _", path, c.Name)
 		case seen[c.Name]:
-			return nil, fmt.Errorf("%s: agent %q is defined twice", path, c.Name)
+			return defaults(), fmt.Errorf("%s: agent %q is defined twice", path, c.Name)
 		}
 		seen[c.Name] = true
 	}
-	return cfg.Agent, nil
+	return cfg, nil
 }
 
 // apply returns spec with the fields c sets.

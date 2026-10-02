@@ -16,7 +16,7 @@ import (
 )
 
 func newInstallCmd() *cobra.Command {
-	var bin, key string
+	var bin, key, nextKey string
 	cmd := &cobra.Command{
 		Use:   "install [claude|opencode|copilot|codex|tmux ...]",
 		Short: "Connect agents and tmux to hive; safe to rerun",
@@ -24,7 +24,8 @@ func newInstallCmd() *cobra.Command {
 			"every agent found on PATH, and tmux when it is installed.\n\n" +
 			"Claude Code gets hooks in its settings.json (backed up to settings.json.bak-hive);\n" +
 			"opencode gets a plugin file; Copilot CLI and Codex get a backed-up user-level hook file;\n" +
-			"tmux gets prefix+a (see --key) opening the tree in a popup. `hive uninstall` removes exactly these.",
+			"tmux gets prefix+a (see --key) opening the tree in a popup, and prefix+A (see --next-key)\n" +
+			"jumping to the agent that needs you. `hive uninstall` removes exactly these.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hiveBin, err := resolveBin(bin)
 			if err != nil {
@@ -41,16 +42,32 @@ func newInstallCmd() *cobra.Command {
 				errs = append(errs, err)
 			}
 			if withTmux {
-				msg, err := tmux.InstallBinding(tmux.ConfPath(), key, hiveBin)
+				msg, err := tmux.InstallBindings(tmux.ConfPath(),
+					tmux.PopupBinding(key, hiveBin), tmux.NextBinding(nextKey, hiveBin))
 				report("tmux", msg, err)
 				errs = append(errs, err)
+				if err == nil && !inStatusLine() {
+					report("", "to count the agents that need you in tmux's status line, add to "+tmux.ConfPath()+":\n"+
+						"          set -ag status-right ' #("+hiveBin+" status --tmux)'", nil)
+				}
 			}
 			return errors.Join(errs...)
 		},
 	}
 	cmd.Flags().StringVar(&bin, "bin", "", "hive binary the integrations should call (default: this one)")
 	cmd.Flags().StringVar(&key, "key", "a", "tmux key that, after the prefix, opens the tree")
+	cmd.Flags().StringVar(&nextKey, "next-key", "A", "tmux key that, after the prefix, jumps to the agent that needs you")
 	return cmd
+}
+
+// inStatusLine reports whether tmux's status line already runs `hive status`.
+func inStatusLine() bool {
+	for _, side := range []string{"status-left", "status-right"} {
+		if v, err := tmux.Run("show-options", "-gv", side); err == nil && strings.Contains(v, " status") && strings.Contains(v, "hive") {
+			return true
+		}
+	}
+	return false
 }
 
 func newUninstallCmd() *cobra.Command {
@@ -69,7 +86,7 @@ func newUninstallCmd() *cobra.Command {
 				errs = append(errs, err)
 			}
 			if withTmux {
-				msg, err := tmux.UninstallBinding(tmux.ConfPath())
+				msg, err := tmux.UninstallBindings(tmux.ConfPath())
 				report("tmux", msg, err)
 				errs = append(errs, err)
 			}

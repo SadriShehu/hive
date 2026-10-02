@@ -95,34 +95,81 @@ func TestBindingRoundTrip(t *testing.T) {
 	isolated(t)
 	conf := filepath.Join(t.TempDir(), "tmux.conf")
 	os.WriteFile(conf, []byte("set -g mouse on\n"), 0o644)
+	bin := "/Users/me/go/bin/hive"
 
-	msg, err := InstallBinding(conf, "a", "/Users/me/go/bin/hive")
+	msg, err := InstallBindings(conf, PopupBinding("a", bin), NextBinding("A", bin))
 	if err != nil || !strings.Contains(msg, "active now") {
 		t.Fatalf("install: %q, %v", msg, err)
 	}
 	data, _ := os.ReadFile(conf)
-	want := "set -g mouse on\n\n" + bindingMarker + "\n" +
-		`bind-key a display-popup -E -w 90% -h 85% -T " hive " "/Users/me/go/bin/hive popup"` + "\n"
-	if string(data) != want {
+	popup := popupMarker + "\n" + `bind-key a display-popup -E -w 90% -h 85% -T " hive " "/Users/me/go/bin/hive popup"` + "\n"
+	next := nextMarker + "\n" + `bind-key A run-shell -b "/Users/me/go/bin/hive jump --next --client '#{client_name}'"` + "\n"
+	if want := "set -g mouse on\n\n" + popup + "\n" + next; string(data) != want {
 		t.Fatalf("conf =\n%s\nwant\n%s", data, want)
 	}
 	keys, _ := run("list-keys", "-T", "prefix")
-	if !strings.Contains(keys, `prefix a       display-popup`) || !strings.Contains(keys, "hive popup") {
-		t.Fatalf("live binding = %q", keys)
+	if !strings.Contains(keys, `prefix a       display-popup`) || !strings.Contains(keys, "hive popup") ||
+		!strings.Contains(keys, `prefix A       run-shell -b "/Users/me/go/bin/hive jump --next --client '#{client_name}'"`) {
+		t.Fatalf("live bindings = %q", keys)
+	}
+	if PopupKey(conf) != "a" || NextKey(conf) != "A" {
+		t.Fatalf("keys read back: %q, %q", PopupKey(conf), NextKey(conf))
 	}
 
-	// Rerunning with another binary replaces the line instead of adding one.
-	InstallBinding(conf, "a", "/opt/hive dir/hive")
+	// tmux reads the file back to the same bindings.
+	run("unbind-key", "a")
+	run("unbind-key", "A")
+	if _, err := run("source-file", conf); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := run("list-keys", "-T", "prefix"); again != keys {
+		t.Fatalf("after source-file:\n%s\nwant\n%s", again, keys)
+	}
+
+	// Rerunning with another binary replaces the lines instead of adding any.
+	InstallBindings(conf, PopupBinding("a", "/opt/hive dir/hive"), NextBinding("A", "/opt/hive dir/hive"))
 	data, _ = os.ReadFile(conf)
-	if strings.Count(string(data), "bind-key") != 1 || !strings.Contains(string(data), `"'/opt/hive dir/hive' popup"`) {
+	if strings.Count(string(data), "bind-key") != 2 || !strings.Contains(string(data), `"'/opt/hive dir/hive' popup"`) ||
+		!strings.Contains(string(data), `"'/opt/hive dir/hive' jump --next`) {
 		t.Fatalf("after reinstall:\n%s", data)
 	}
 
-	if _, err := UninstallBinding(conf); err != nil {
+	if _, err := UninstallBindings(conf); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(conf); string(data) != "set -g mouse on\n" {
 		t.Fatalf("after uninstall = %q", data)
+	}
+	if keys, _ := run("list-keys", "-T", "prefix"); strings.Contains(keys, "hive") {
+		t.Fatalf("bindings left after uninstall: %q", keys)
+	}
+}
+
+func TestInstallAddsTheNextKeyToAnOlderInstall(t *testing.T) {
+	isolated(t)
+	conf := filepath.Join(t.TempDir(), "tmux.conf")
+	old := "set -g mouse on\n\n" + popupMarker + "\n" + PopupBinding("a", "/bin/hive").line() + "\n"
+	os.WriteFile(conf, []byte(old), 0o644)
+
+	InstallBindings(conf, PopupBinding("a", "/bin/hive"), NextBinding("A", "/bin/hive"))
+	data, _ := os.ReadFile(conf)
+	if !strings.HasPrefix(string(data), old) || NextKey(conf) != "A" || strings.Count(string(data), "bind-key") != 2 {
+		t.Fatalf("conf =\n%s", data)
+	}
+}
+
+func TestNotifyEscapesFormats(t *testing.T) {
+	isolated(t)
+	if got := literal("fix #1 #{pane_id} #(touch x)"); got != "fix ##1 ##{pane_id} ##(touch x)" {
+		t.Fatalf("literal = %q", got)
+	}
+	if out, _ := run("display-message", "-p", literal("#(echo ran) #{session_name}")); out != "#(echo ran) #{session_name}" {
+		t.Fatalf("tmux showed %q: a title could run commands", out)
+	}
+	// Nobody is attached to the test server: nobody to tell, and no error.
+	panes, _ := Panes()
+	if err := Notify("hive: claude ‹x› needs you", panes[0].ID); err != nil {
+		t.Fatal(err)
 	}
 }
 

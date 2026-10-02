@@ -861,20 +861,10 @@ func (m *Model) resume(s store.Session, prompt string) tea.Cmd {
 // paneFor returns the pane showing s: its own, or the nearest ancestor's
 // for a subagent living inside its parent's process.
 func (m *Model) paneFor(s store.Session) string {
-	for range 32 {
-		if s.Pane != "" {
-			return s.Pane
-		}
-		if s.Kind != store.KindInternal {
-			return ""
-		}
-		parent, ok := m.byID[s.ParentID]
-		if !ok {
-			return ""
-		}
-		s = parent
-	}
-	return ""
+	return tracker.PaneFor(s, func(id string) (store.Session, bool) {
+		p, ok := m.byID[id]
+		return p, ok
+	})
 }
 
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {

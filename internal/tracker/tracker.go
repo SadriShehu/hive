@@ -81,6 +81,10 @@ type Tracker struct {
 	// Logf, when set, receives one line per decision, for debugging links.
 	Logf func(format string, args ...any)
 
+	// OnAttention, when set, is told when a session starts waiting on the
+	// user: a permission prompt or a question.
+	OnAttention func(s store.Session)
+
 	cwds map[string]string // process folders, by pid@start
 }
 
@@ -205,15 +209,46 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 			return err
 		}
 	}
+	// A prompt hive gave the agent in this pane before it named its session
+	// is this session's to answer.
+	if pane == "" && exists {
+		pane = cur.Pane
+	}
+	if pane != "" {
+		if err := t.Store.MoveInput(pane, id); err != nil {
+			return err
+		}
+	}
 	if status := statusOf(ev.Type); status != "" {
 		if err := t.Store.SetStatus(id, status, at); err != nil {
 			return err
+		}
+		// Ending a turn answers what hive gave the agent before it; starting
+		// up, even with a first prompt, doesn't.
+		if ev.Type != agent.Start && status != store.StatusWorking {
+			if err := t.Store.AnswerInput(id, at); err != nil {
+				return err
+			}
+		}
+		if status == store.StatusAttention && !(exists && cur.Status == store.StatusAttention) {
+			t.attention(id, at)
 		}
 	}
 	if ev.Type == agent.Start && ev.EnvFile != "" {
 		return exportParent(ev.EnvFile, id)
 	}
 	return nil
+}
+
+// attention tells OnAttention that id started waiting on the user at at,
+// unless a newer status was already recorded.
+func (t *Tracker) attention(id string, at int64) {
+	if t.OnAttention == nil {
+		return
+	}
+	if s, ok, err := t.Store.Get(id); err == nil && ok && s.Status == store.StatusAttention && s.StatusAt == at {
+		t.OnAttention(s)
+	}
 }
 
 func statusOf(e agent.EventType) string {

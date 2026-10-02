@@ -23,8 +23,9 @@ tools do, so recording it spends nothing; `docs/demo/record.sh` records it again
 hive                 # the tree, in the current pane or a `hive` tmux session
 ```
 
-With the popup bound (`hive install tmux`), **prefix + a** opens the tree over whatever
-you're doing and closes once you jump somewhere.
+With the keys bound (`hive install tmux`), **prefix + a** opens the tree over whatever
+you're doing and closes once you jump somewhere, and **prefix + A** jumps straight to the
+agent that needs you.
 
 ## Status
 
@@ -56,7 +57,7 @@ show as untracked, or are adopted as soon as they spawn another agent.
 Run `hive`. Inside tmux it opens in the current pane; outside tmux it attaches to a
 tmux session called `hive`, with the tree in its first window. With the popup key
 bound (`hive install tmux`), **prefix + a** opens the tree over whatever you're doing
-and closes once you jump somewhere.
+and closes once you jump somewhere. The header counts the agents that need you.
 
 ```
  hive  ● 3 live  ·  203 sessions                                           last 24h
@@ -90,6 +91,33 @@ linked under the selected session for `c`. Claude and Copilot CLI are given thei
 session IDs up front, so they are in the tree at once; opencode shows as a new session
 until its first message, and Codex reports in as soon as its TUI starts a thread.
 
+## When an agent needs you
+
+An agent needs you when it stops for a permission prompt or asks you a question (Claude
+Code, opencode and Codex say so; Copilot CLI has no hook for it). hive lets you know
+without the tree open:
+
+- **A message in tmux**, on every client not already looking at that agent:
+  `hive: claude ‹Admin phase 2› needs you · prefix A jumps there`.
+- **prefix + A** goes to the agent that has needed you longest; press it again there
+  for the next one. `hive jump --next` does the same from a shell.
+- **A count in tmux's status line**, if you add it: `◆2 ●3 ◉1` for 2 that need you, 3
+  working and 1 idle (nothing when no agent runs). `hive install tmux` prints the line:
+
+  ```tmux
+  set -ag status-right ' #(hive status --tmux)'
+  ```
+
+  tmux runs it every `status-interval` (15s unless set).
+- **A desktop notification**, if you ask for one in the config file:
+
+  ```toml
+  # ~/.config/hive/config.toml
+  [alerts]
+  desktop = true   # osascript on macOS, notify-send on Linux
+  tmux    = false  # to turn the tmux message off
+  ```
+
 ## Use from the shell
 
 ```sh
@@ -117,9 +145,12 @@ children, talk to them and check on them:
 
 ```sh
 hive new opencode -p "port the tests" --wait   # start it in its own tmux window; prints its ID
+hive wait <id>                                 # until it has answered: prints "<id> idle", "attention" or "exited"
 hive send <id> "now run them"                  # type into it; an ended one reopens with the message
 hive tail <id> -n 20                           # the end of its transcript (--json for agents)
 hive jump <id>                                 # go to its pane, reopening it if it has ended
+hive jump --next                               # go to the agent that needs you
+hive status                                    # one line: how many need you, work, are idle
 hive resume <id> -p "carry on"                 # reopen an ended session in the background
 hive kill <id>                                 # stop it; a window hive opened closes with it
 hive rm <id>                                   # move it and everything under it to the trash
@@ -135,6 +166,23 @@ reported in, so a `hive send` right after it isn't typed before the agent can re
 A tool that starts its session only with its first message (opencode without `-p`)
 gets a stand-in ID, `opencode:pid-N`, which the other commands accept and which
 names the session once it starts.
+
+`hive wait <id>...` returns once each agent is done with what it was given: its turn
+is over (idle), it stopped to ask you (attention), or it ended (exited). A message hive
+gave it (`new -p`, `send`, `resume -p`) counts only once the agent has answered it, so
+a `wait` straight after a `send` waits for the reply, not the turn before it. It prints
+each session as it gets there; `--any` returns at the first, and `--timeout` gives up
+(exit 1). A fan-out from inside an agent:
+
+```sh
+a=$(hive new claude -p "review the API" --wait)
+b=$(hive new codex -p "review the UI" --wait)
+hive wait "$a" "$b" && hive tail "$a" -n 5 && hive tail "$b" -n 5
+```
+
+An agent's shell tool may stop a long command (Claude Code's does after 2 minutes by
+default), so a long wait wants a `--timeout` under that limit in a loop, or the
+background.
 
 ### Deleting
 
@@ -221,8 +269,8 @@ first message, `{session}` an ID hive picks for it, `{id}` the session to reopen
 flag right before an empty placeholder is dropped with it. `process` names the tool's
 processes (by default, the program `new` runs); `headless`, `title_flags`,
 `session_flags` and `parent_env` help link past spawns, as in the built-in adapters.
-A new tool reports through `hive hook <name>`, below. A config with mistakes is
-ignored, and `hive doctor` says what is wrong with it.
+A new tool reports through `hive hook <name>`, below. The same file holds `[alerts]`
+(above). A config with mistakes is ignored, and `hive doctor` says what is wrong with it.
 
 ## Any tool can report
 
