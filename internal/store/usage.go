@@ -183,3 +183,27 @@ func scanUsage(rows *sql.Rows) ([]UsageRecord, error) {
 	}
 	return out, rows.Err()
 }
+
+// ModelsSeen returns, per tool, the models its sessions used, most used
+// first: what an account can run, as the tool itself reported it.
+func (s *Store) ModelsSeen() (map[string][]string, error) {
+	rows, err := s.db.Query(`SELECT sessions.tool, session_usage.model, COUNT(*) AS n
+		FROM session_usage JOIN sessions ON sessions.id = session_usage.id
+		WHERE session_usage.model != ''
+		GROUP BY sessions.tool, session_usage.model
+		ORDER BY sessions.tool, n DESC, session_usage.model`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var tool, model string
+		var n int
+		if err := rows.Scan(&tool, &model, &n); err != nil {
+			return nil, err
+		}
+		out[tool] = append(out[tool], model)
+	}
+	return out, rows.Err()
+}

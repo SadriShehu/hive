@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sadrishehu/hive/internal/adapters"
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
@@ -58,6 +59,7 @@ func newTracker(st *store.Store) *tracker.Tracker {
 	cfg := adapters.Current()
 	tr := tracker.New(st, cfg.Adapters, &tracker.System{})
 	tr.Models = cfg.Models
+	tr.Fusion = cfg.Fusion
 	return tr
 }
 
@@ -101,15 +103,19 @@ func goTo(pane string) error {
 const quietStart = 10 * time.Second
 
 func newNewCmd() *cobra.Command {
-	var cwd, prompt, parent string
-	var wait, focus bool
+	var cwd, prompt, parent, model, mode string
+	var wait, focus, dryRun bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
-		Use:   "new <tool>",
+		Use:   "new <tool|auto>",
 		Short: "Start an agent in its own tmux window and print its session ID",
 		Long: "Start an agent's own TUI in a new tmux window, in the background unless --focus.\n" +
 			"It is linked under the agent running this command (--parent auto), which can then\n" +
 			"`hive send` to it, `hive tail` it and check on it with `hive ls --json`.\n\n" +
+			"`hive new auto` picks the tool and the model for the prompt (--mode provider), or\n" +
+			"only the model inside one tool (--mode model; the [fusion] table in config.toml\n" +
+			"sets the default). `hive new <tool> --model auto` picks a model inside that tool,\n" +
+			"and --model <name> starts it with that model. --dry-run only says what would start.\n\n" +
 			"Claude and Copilot are given their session ID up front, so it prints at once. Other\n" +
 			"tools choose their own, which --wait waits for; --wait also waits until the agent\n" +
 			"is up, so a `hive send` right after it isn't typed before the agent can read it.\n" +
@@ -118,7 +124,11 @@ func newNewCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tool := args[0]
-			if !tmux.Available() {
+			pickMode, ok := fusion.ParseMode(mode)
+			if mode != "" && !ok {
+				return fmt.Errorf("--mode must be %s or %s", fusion.ModeProvider, fusion.ModeModel)
+			}
+			if !dryRun && !tmux.Available() {
 				return errors.New("hive opens agents in tmux, which isn't on PATH")
 			}
 			st, tr, sessions, err := openTracker()
@@ -143,11 +153,18 @@ func newNewCmd() *cobra.Command {
 					return err
 				}
 			}
+			opts := tracker.LaunchOptions{Tool: tool, Model: model, Mode: pickMode, Cwd: cwd, Prompt: prompt,
+				ParentID: parentID, Detached: !focus}
+			if dryRun {
+				return printDryRun(cmd.Context(), tr, opts)
+			}
 			before := time.Now().UnixMilli()
-			l, err := tr.Launch(tracker.LaunchOptions{Tool: tool, Cwd: cwd, Prompt: prompt,
-				ParentID: parentID, Detached: !focus})
+			l, err := tr.Launch(cmd.Context(), opts)
 			if err != nil {
 				return err
+			}
+			if l.Choice != nil {
+				fmt.Fprintln(os.Stderr, "picked "+l.Choice.Reason)
 			}
 			id := l.SessionID
 			if wait {
@@ -155,20 +172,20 @@ func newNewCmd() *cobra.Command {
 				if s, ok, _ := st.Get(id); ok {
 					after = s.StatusAt // registered by Launch; wait for the agent's own first event
 				}
-				s, err := tr.WaitForSession(tool, l.Pane, after, quietStart, timeout)
+				s, err := tr.WaitForSession(l.Tool, l.Pane, after, quietStart, timeout)
 				if err != nil {
 					return err
 				}
 				id = s.ID
 				if s.Synthetic() {
 					fmt.Fprintf(os.Stderr, "%s starts its session with its first message; until then it goes by %s, "+
-						"which hive send, jump and kill accept, and which then names the session\n", tool, id)
+						"which hive send, jump and kill accept, and which then names the session\n", l.Tool, id)
 				}
 			}
 			if id != "" {
 				fmt.Println(id)
 			} else {
-				fmt.Fprintf(os.Stderr, "started %s in tmux pane %s; its ID comes with its first event (use --wait)\n", tool, l.Pane)
+				fmt.Fprintf(os.Stderr, "started %s in tmux pane %s; its ID comes with its first event (use --wait)\n", l.Tool, l.Pane)
 			}
 			if focus {
 				return goTo(l.Pane)
@@ -181,10 +198,33 @@ func newNewCmd() *cobra.Command {
 	_ = cmd.MarkFlagDirname("cwd") // the shell completes folders
 	f.StringVarP(&prompt, "prompt", "p", "", "the agent's first message")
 	f.StringVar(&parent, "parent", "auto", "auto (the agent running this command), none, or a session ID")
+	f.StringVarP(&model, "model", "m", "", "the model, as the tool names it; auto picks one for the prompt")
+	f.StringVar(&mode, "mode", "", "what auto picks: provider (the tool too) or model (only the model, in one tool); the config decides without it")
+	f.BoolVar(&dryRun, "dry-run", false, "only print which tool and model would start, and why")
 	f.BoolVarP(&wait, "wait", "w", false, "wait until the agent is up, then print its session ID")
 	f.BoolVar(&focus, "focus", false, "switch to the new window")
 	f.DurationVar(&timeout, "timeout", time.Minute, "how long --wait waits")
 	return cmd
+}
+
+// printDryRun prints the tool and model `hive new` would start, one line on
+// stdout for scripts, and why on stderr.
+func printDryRun(ctx context.Context, tr *tracker.Tracker, o tracker.LaunchOptions) error {
+	pick := tracker.PickOptions{Tool: o.Tool, Model: o.Model, Mode: o.Mode, Prompt: o.Prompt, ParentID: o.ParentID}
+	if !pick.Wants() {
+		fmt.Println(strings.TrimSpace(o.Tool + " " + o.Model))
+		return nil
+	}
+	choice, err := tr.Pick(ctx, pick)
+	if err != nil {
+		return err
+	}
+	fmt.Println(choice.Tool, choice.ID)
+	fmt.Fprintln(os.Stderr, choice.Reason)
+	for _, cue := range choice.Need.Cues {
+		fmt.Fprintln(os.Stderr, "  "+cue)
+	}
+	return nil
 }
 
 func newJumpCmd() *cobra.Command {

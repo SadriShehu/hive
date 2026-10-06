@@ -91,3 +91,24 @@ func TestUsageEmpty(t *testing.T) {
 		t.Error("a row with tool calls is not empty")
 	}
 }
+
+func TestModelsSeenGroupsByToolMostUsedFirst(t *testing.T) {
+	st := open(t)
+	for _, s := range []Session{
+		{ID: "claude:A", Tool: "claude", NativeID: "A"}, {ID: "claude:B", Tool: "claude", NativeID: "B"},
+		{ID: "claude:C", Tool: "claude", NativeID: "C"}, {ID: "codex:D", Tool: "codex", NativeID: "D"},
+		{ID: "codex:E", Tool: "codex", NativeID: "E"},
+	} {
+		must(t, st.Upsert(s))
+	}
+	for id, model := range map[string]string{"claude:A": "claude-opus-5-5", "claude:B": "claude-fable-5-1",
+		"claude:C": "claude-opus-5-5", "codex:D": "gpt-6-luna", "codex:E": ""} {
+		must(t, st.UpsertUsage(UsageRecord{Usage: Usage{ID: id, Model: model}, Version: 1}))
+	}
+	seen, err := st.ModelsSeen()
+	must(t, err)
+	want := map[string][]string{"claude": {"claude-opus-5-5", "claude-fable-5-1"}, "codex": {"gpt-6-luna"}}
+	if !reflect.DeepEqual(seen, want) {
+		t.Errorf("ModelsSeen = %v, want %v", seen, want)
+	}
+}

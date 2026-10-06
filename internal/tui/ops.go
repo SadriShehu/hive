@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -33,7 +34,9 @@ type Ops interface {
 	Restore(s store.Session) ([]store.Session, error)
 	Purge(s store.Session) (tracker.Purged, error)
 	Copy(text string) error
-	Tools() []string // tools that can be started here
+	Tools() []string                      // tools that can be started here
+	Models(tool string) ([]string, error) // what tool can run, as it names them; may take a second
+	Fusion() fusion.Settings              // what auto means
 	Usages() (map[string]store.Usage, error)
 	Usage(ctx context.Context, s store.Session) (store.Usage, error)
 }
@@ -42,20 +45,23 @@ type liveOps struct {
 	st       *store.Store
 	adapters []agent.Adapter
 	models   usage.Catalog
+	fusion   fusion.Settings
 
 	mu        sync.Mutex
 	refresher *tracker.Tracker // long-lived: it remembers process folders
 }
 
 // NewLiveOps returns the Ops that act on this machine.
-func NewLiveOps(st *store.Store, adapters []agent.Adapter, models usage.Catalog) Ops {
-	return &liveOps{st: st, adapters: adapters, models: models, refresher: tracker.New(st, adapters, &tracker.System{})}
+func NewLiveOps(st *store.Store, adapters []agent.Adapter, models usage.Catalog, settings fusion.Settings) Ops {
+	return &liveOps{st: st, adapters: adapters, models: models, fusion: settings,
+		refresher: tracker.New(st, adapters, &tracker.System{})}
 }
 
 // tracker returns a tracker with a fresh view of processes and panes.
 func (o *liveOps) tracker() *tracker.Tracker {
 	tr := tracker.New(o.st, o.adapters, &tracker.System{})
 	tr.Models = o.models
+	tr.Fusion = o.fusion
 	return tr
 }
 
@@ -93,8 +99,18 @@ func (o *liveOps) Purge(s store.Session) (tracker.Purged, error) {
 }
 
 func (o *liveOps) Launch(opts tracker.LaunchOptions) (tracker.Launched, error) {
-	return o.tracker().Launch(opts)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return o.tracker().Launch(ctx, opts)
 }
+
+func (o *liveOps) Models(tool string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return o.tracker().ToolModels(ctx, tool)
+}
+
+func (o *liveOps) Fusion() fusion.Settings { return o.fusion }
 
 func (o *liveOps) Resume(s store.Session, prompt string) (tracker.Launched, error) {
 	return o.tracker().Resume(s, prompt, tracker.LaunchOptions{})
@@ -115,14 +131,4 @@ func (o *liveOps) Copy(text string) error {
 	return err
 }
 
-func (o *liveOps) Tools() []string {
-	var out []string
-	for _, a := range o.adapters {
-		if spec := a.Spec(); len(spec.New) > 0 {
-			if _, err := exec.LookPath(spec.New[0]); err == nil {
-				out = append(out, spec.Name)
-			}
-		}
-	}
-	return out
-}
+func (o *liveOps) Tools() []string { return o.tracker().InstalledTools() }

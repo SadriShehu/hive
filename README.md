@@ -38,7 +38,9 @@ hive                                # the tree
 ```
 
 Every agent you start from then on shows up in the tree, however it was started: by
-you, by another agent, or with `n` in the tree. Past sessions are imported too.
+you, by another agent, or with `n` in the tree. Past sessions are imported too. `hive new
+auto`, or tool `auto` in the tree's form, [picks the model](#picking-the-model-auto), and
+the tool, for the prompt.
 
 ## Install
 
@@ -90,7 +92,7 @@ transcript for a headless run, a subagent or a finished session.
 | --- | --- |
 | `↵` | jump to the session's pane (a subagent: its parent's); reopen it if it isn't running |
 | `s` | send a message: typed into its pane, or reopens it with the message |
-| `n` / `c` | start an agent / start one as a child of the selected session |
+| `n` / `c` | start an agent / start one as a child of the selected session; tool or model `auto` picks for the prompt |
 | `r` | reopen a finished session in its tool's own TUI |
 | `x` | stop it (asks first); a window hive opened closes with it |
 | `d` | move it and everything under it to the trash (asks first) |
@@ -101,9 +103,13 @@ transcript for a headless run, a subagent or a finished session.
 | `u` | show / hide what the session used: model, tokens, price, context, tools, skills |
 
 New agents open in a window of the current tmux session running the tool's real TUI,
-linked under the selected session for `c`. Claude and Copilot CLI are given their
-session IDs up front, so they are in the tree at once; opencode shows as a new session
-until its first message, and Codex reports in as soon as its TUI starts a thread.
+linked under the selected session for `c`. The form asks for the tool, the model, the
+folder and a first prompt. The model is the tool's own default unless you pick one of
+the models it runs, or `auto`, which picks one for the prompt; tool `auto` picks the
+tool too, or only the model inside one tool, as the form's mode says. Claude and
+Copilot CLI are given their session IDs up front, so they are in the tree at once;
+opencode shows as a new session until its first message, and Codex reports in as soon
+as its TUI starts a thread.
 
 ## When an agent needs you
 
@@ -163,10 +169,13 @@ children, talk to them and check on them:
 
 ```sh
 hive new opencode -p "port the tests" --wait   # start it in its own tmux window; prints its ID
+hive new auto -p "fix the flaky sync test"     # pick the tool and the model for the prompt, then start
+hive new claude --model auto -p "…"            # pick only the model, inside claude
 hive wait <id>                                 # until it has answered: prints "<id> idle", "attention" or "exited"
 hive send <id> "now run them"                  # type into it; an ended one reopens with the message
 hive tail <id> -n 20                           # the end of its transcript (--json for agents)
 hive usage <id>                                # model, tokens, price, tools, skills, context (--json)
+hive models                                    # what each tool can run, with the ratings auto picks by
 hive jump <id>                                 # go to its pane, reopening it if it has ended
 hive jump --next                               # go to the agent that needs you
 hive status                                    # one line: how many need you, work, are idle
@@ -180,7 +189,8 @@ hive doctor                                    # check tmux, the database and ev
 An `<id>` is the full ID (`claude:48873400-…`), the tool's own ID, or any unique
 prefix of either. `hive new` starts in the current folder (`--cwd` to change it), in
 the background (`--focus` to switch to it), linked under the agent running the command
-(`--parent none` or `--parent <id>` to change that). `--wait` returns once the agent has
+(`--parent none` or `--parent <id>` to change that), with the tool's default model
+(`--model <name>` to set one, as the tool names it; `--model auto` to pick one). `--wait` returns once the agent has
 reported in, so a `hive send` right after it isn't typed before the agent can read it.
 A tool that starts its session only with its first message (opencode without `-p`)
 gets a stand-in ID, `opencode:pid-N`, which the other commands accept and which
@@ -256,7 +266,7 @@ Where the numbers come from, per tool:
 
 ```toml
 # ~/.config/hive/config.toml
-[[model]]                   # USD per million tokens; a built-in Claude row with the same name is replaced
+[[model]]                   # USD per million tokens; a built-in row with the same name is replaced
 name           = "gpt-6-luna"
 input          = 1.25
 output         = 10
@@ -264,7 +274,77 @@ cache_read     = 0.125
 cache_write    = 1.5
 cache_write_1h = 2.5        # optional; cache_write applies to every write without it
 context_window = 258400
+tier           = "strong"   # how `hive new auto` rates it; see "Picking the model"
 ```
+
+## Picking the model: auto
+
+hive can choose the model for a new agent, and the tool too, the way Copilot's
+HydraFusion chooses between its models: it reads the prompt for the kinds of work it
+asks for and how hard it is, then starts the lightest model that meets that bar. An
+easy task doesn't spend a frontier model; a hard one doesn't get a fast one. The pick
+happens once, at launch; hive never changes a running agent's model.
+
+You choose how far a pick may reach:
+
+| Mode | What auto does | How to ask |
+| --- | --- | --- |
+| `provider` | picks the tool and the model: every installed tool's models compete | `hive new auto`, or tool `auto` in the form |
+| `model` | picks only the model, inside one tool | `hive new <tool> --model auto`, or model `auto` in the form; `hive new auto --mode model` uses the configured tool, else the parent's, else the first installed |
+
+```toml
+# ~/.config/hive/config.toml
+[fusion]
+mode = "model"     # what `auto` means without --mode: "provider" (the default) or "model"
+tool = "claude"    # the tool "model" mode picks inside; in "provider" mode, the tool that wins ties
+```
+
+`hive new … --dry-run` prints what would start and why, without starting it:
+
+```
+$ hive new auto -p "design the migration of every session to the new schema" --dry-run
+claude claude-opus-5-5
+claude · claude-opus-5-5: the lightest of 24 that meet reasoning 8, coding 8
+  hard: design, every, migration
+  reasoning: design, migration
+  coding: schema
+```
+
+**What a prompt needs.** hive looks for four kinds of work: reasoning (design, plan,
+review, security, performance…), coding (implement, add, refactor, write tests…),
+debugging (fix, crash, flaky, root cause…) and tool use (run, deploy, commit, lint…).
+Each kind found gets a level: 4 for a light task (typo, rename, quick…), 6 for a
+routine one, 8 when it is hard (architecture, across, every, carefully…), and more
+for a long prompt or one with three or more steps. A prompt with none of the cues
+counts as routine coding. Without a prompt, the session is open-ended and asks for a
+strong model on everything.
+
+**What a model offers.** Every model hive knows has a tier, which rates it the same
+on each kind of work and gives it a speed: `frontier` (10, speed 3), `strong` (8,
+speed 5), `balanced` (6, speed 7) and `fast` (4, speed 10). Claude, GPT, Gemini,
+DeepSeek and a few other families come rated; `hive models` shows them, and shows
+which models of a tool are unrated. The pick takes the models that meet every level
+the prompt asks for, and among them the lowest total rating, then the cheaper (when
+both have a price), then the faster, then one from the preferred tool. When nothing
+meets the bar, the closest to it wins, and `--dry-run` says so.
+
+These are hive's starting ratings, not measurements. Change them, or rate a model
+hive doesn't know, in `config.toml`; a rating set by hand replaces the tier's:
+
+```toml
+[[model]]
+name      = "gpt-6-luna"
+tier      = "strong"
+debugging = 9          # reasoning, coding, debugging, tool_use, speed: 1 to 10
+```
+
+**What a tool can run.** hive asks each tool: opencode lists its models
+(`opencode models`); Claude Code, Copilot CLI and Codex have the lists hive ships
+with, plus every model their past sessions used, as the tool itself reported it. A
+tool from config lists its models with `models = [...]` in its `[[agent]]` table,
+which also replaces a built-in tool's list. Only a tool whose start command has a
+`{model}` placeholder can be given a model; the built-in ones have it, and a `new`
+you set in config needs it too.
 
 ## How linking works
 
@@ -324,16 +404,19 @@ headless = ["--message"]
 
 [[agent]]  # a built-in tool: only the fields given change
 name = "opencode"
-new  = ["opencode", "-m", "deepseek/deepseek-v4-pro", "--prompt", "{prompt}"]
+new  = ["opencode", "--model", "{model}", "--prompt", "{prompt}"]
+models = ["deepseek/deepseek-v4-pro", "deepseek/deepseek-flash"]
 ```
 
 `new` and `resume` are the commands that start and reopen a session: `{prompt}` is the
-first message, `{session}` an ID hive picks for it, `{id}` the session to reopen, and a
-flag right before an empty placeholder is dropped with it. `process` names the tool's
-processes (by default, the program `new` runs); `headless`, `title_flags`,
-`session_flags` and `parent_env` help link past spawns, as in the built-in adapters.
-A new tool reports through `hive hook <name>`, below. The same file holds `[alerts]`
-(above). A config with mistakes is ignored, and `hive doctor` says what is wrong with it.
+first message, `{session}` an ID hive picks for it, `{id}` the session to reopen,
+`{model}` the model to start with, and a flag right before an empty placeholder is
+dropped with it. `process` names the tool's processes (by default, the program `new`
+runs); `headless`, `title_flags`, `session_flags` and `parent_env` help link past
+spawns, as in the built-in adapters; `models` lists the models the tool runs, for
+`auto` to pick from. A new tool reports through `hive hook <name>`, below. The same
+file holds `[alerts]` (above) and `[fusion]`. A config with mistakes is ignored, and
+`hive doctor` says what is wrong with it.
 
 ## Any tool can report
 

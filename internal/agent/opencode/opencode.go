@@ -39,7 +39,7 @@ func New() *Adapter { return &Adapter{} }
 func (a *Adapter) Spec() agent.Spec {
 	return agent.Spec{
 		Name:     name,
-		New:      []string{"opencode", "--prompt", "{prompt}"},
+		New:      []string{"opencode", "--model", "{model}", "--prompt", "{prompt}"},
 		Resume:   []string{"opencode", "--session", "{id}", "--prompt", "{prompt}"},
 		Process:  []string{"opencode"},
 		Headless: []string{"run"},
