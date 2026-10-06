@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tracker"
 	"github.com/sadrishehu/hive/internal/tree"
@@ -32,7 +33,7 @@ const (
 	previewLines = 80 // transcript entries fetched for the preview
 
 	promptAreaRows = 200
-	formChromeRows = 7
+	formChromeRows = 8
 )
 
 type mode int
@@ -151,17 +152,87 @@ func belowText(below int) string {
 	return fmt.Sprintf(" and the %d sessions under it", below)
 }
 
+// The new-agent form's fields, in tab order.
+const (
+	fieldTool = iota
+	fieldModel
+	fieldFolder
+	fieldPrompt
+	formFields
+)
+
+// modelDefault is the model field's first choice: the tool's own default.
+const modelDefault = "default"
+
 // form is the new-agent form.
 type form struct {
 	parent store.Session // zero for a top-level agent
-	tools  []string
+	tools  []string      // auto, then the tools that can start here
 	tool   int
-	field  int // 0 tool, 1 folder, 2 prompt
+	models map[string][]string // what each tool runs, once loaded; nil while loading
+	model  int                 // into modelChoices
+	mode   fusion.Mode         // what auto does, when the tool is auto
+	inside string              // the tool that fusion.ModeModel picks inside
+	field  int
 	folder textinput.Model
 	prompt textarea.Model
 
 	folders []string // suggestions that complete the folder being typed
 	pick    int      // the highlighted one; -1 keeps what's typed
+}
+
+func (f *form) toolName() string { return f.tools[f.tool] }
+
+// modelChoices lists what the model field cycles through for the tool: its
+// own default, auto, then the models it runs. Nothing when the tool is auto.
+func (f *form) modelChoices() []string {
+	if f.toolName() == fusion.Auto {
+		return nil
+	}
+	return append([]string{modelDefault, fusion.Auto}, f.models[f.toolName()]...)
+}
+
+// selectedModel is the model to start with: "" for the tool's default.
+func (f *form) selectedModel() string {
+	choices := f.modelChoices()
+	if len(choices) == 0 || choices[min(f.model, len(choices)-1)] == modelDefault {
+		return ""
+	}
+	return choices[min(f.model, len(choices)-1)]
+}
+
+func (f *form) loadingModels() bool {
+	models, asked := f.models[f.toolName()]
+	return asked && models == nil
+}
+
+// cycle moves the choice of the focused tool or model field by step.
+func (f *form) cycle(step int) {
+	switch f.field {
+	case fieldTool:
+		f.tool = (f.tool + step + len(f.tools)) % len(f.tools)
+		f.model = 0
+	case fieldModel:
+		if f.toolName() == fusion.Auto {
+			f.mode = map[fusion.Mode]fusion.Mode{fusion.ModeProvider: fusion.ModeModel, fusion.ModeModel: fusion.ModeProvider}[f.mode]
+			return
+		}
+		if n := len(f.modelChoices()); n > 0 {
+			f.model = (f.model + step + n) % n
+		}
+	}
+}
+
+// launchOptions is what the form asks hive to start.
+func (f *form) launchOptions() tracker.LaunchOptions {
+	o := tracker.LaunchOptions{
+		Tool: f.toolName(), Model: f.selectedModel(), Cwd: strings.TrimSpace(f.folder.Value()),
+		Prompt: strings.TrimSpace(f.prompt.Value()), ParentID: f.parent.ID,
+	}
+	if o.Tool == fusion.Auto {
+		o.Mode = f.mode
+	}
+	return o
 }
 
 // suggest lists the folders that complete the folder field, none highlighted.
@@ -189,7 +260,7 @@ func (f *form) keyFolders(msg tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		f.folder.SetValue(f.folders[f.pick])
 		f.folder.CursorEnd()
-		return f.focus(2), true
+		return f.focus(fieldPrompt), true
 	case "esc":
 		f.folders = nil
 	default:
@@ -264,6 +335,11 @@ type (
 		screen  []string
 		entries []agent.Line
 		err     error
+	}
+	modelsMsg struct {
+		tool   string
+		models []string
+		err    error
 	}
 	doneMsg struct {
 		text string
@@ -501,6 +577,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.preview = preview{id: msg.id, screen: msg.screen, entries: msg.entries}
 			if msg.err != nil {
 				m.preview.err = msg.err.Error()
+			}
+		}
+		return m, nil
+
+	case modelsMsg:
+		if m.mode == modeNew {
+			m.form.models[msg.tool] = append([]string{}, msg.models...)
+			if msg.err != nil {
+				m.setFlash("can't list "+msg.tool+" models: "+msg.err.Error(), true)
 			}
 		}
 		return m, nil
@@ -810,7 +895,18 @@ func (m Model) openForm(parent store.Session) (tea.Model, tea.Cmd) {
 		m.setFlash("no agent found on PATH", true)
 		return m, nil
 	}
-	f := form{parent: parent, tools: tools, field: 1}
+	settings := m.ops.Fusion()
+	f := form{parent: parent, tools: append([]string{fusion.Auto}, tools...), models: map[string][]string{},
+		field: fieldFolder, mode: settings.Mode, inside: settings.Tool}
+	if f.mode == "" {
+		f.mode = fusion.ModeProvider
+	}
+	if f.inside == "" {
+		f.inside = parent.Tool
+	}
+	if f.inside == "" {
+		f.inside = tools[0]
+	}
 	f.folder = newInput("", "folder")
 	f.prompt = newPromptArea("first prompt (optional)")
 	f.layout(m.formWidth())
@@ -823,19 +919,35 @@ func (m Model) openForm(parent store.Session) (tea.Model, tea.Cmd) {
 	}
 	f.folder.SetValue(dir)
 	f.folder.CursorEnd()
-	for i, t := range tools {
-		if t == parent.Tool || (parent.Tool == "" && i == 0) {
+	f.tool = 1
+	for i, t := range f.tools {
+		if t == parent.Tool {
 			f.tool = i
 		}
 	}
 	m.form = f
 	m.mode = modeNew
-	return m, m.form.folder.Focus()
+	return m, tea.Batch(m.form.folder.Focus(), m.modelsCmd())
+}
+
+// modelsCmd loads what the form's tool can run, once per tool: a tool that
+// lists its own models takes a moment, so the form doesn't wait for it.
+func (m *Model) modelsCmd() tea.Cmd {
+	tool := m.form.toolName()
+	if _, asked := m.form.models[tool]; asked || tool == fusion.Auto {
+		return nil
+	}
+	m.form.models[tool] = nil
+	ops := m.ops
+	return func() tea.Msg {
+		models, err := ops.Models(tool)
+		return modelsMsg{tool: tool, models: models, err: err}
+	}
 }
 
 func (m Model) keyNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	f := &m.form
-	if f.field == 1 && len(f.folders) > 0 {
+	if f.field == fieldFolder && len(f.folders) > 0 {
 		if cmd, ok := f.keyFolders(msg); ok {
 			return m, cmd
 		}
@@ -845,45 +957,59 @@ func (m Model) keyNew(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		return m, nil
 	case "tab", "down":
-		return m, f.focus((f.field + 1) % 3)
+		return m, f.focus((f.field + 1) % formFields)
 	case "shift+tab", "up":
-		return m, f.focus((f.field + 2) % 3)
+		return m, f.focus((f.field + formFields - 1) % formFields)
 	case "left", "right":
-		if f.field == 0 {
+		if f.field == fieldTool || f.field == fieldModel {
 			step := 1
 			if msg.String() == "left" {
-				step = len(f.tools) - 1
+				step = -1
 			}
-			f.tool = (f.tool + step) % len(f.tools)
-			return m, nil
+			f.cycle(step)
+			return m, m.modelsCmd()
 		}
 	case "enter":
-		if f.field < 2 {
+		if f.field < fieldPrompt {
 			return m, f.focus(f.field + 1)
 		}
 		m.mode = modeNormal
-		opts := tracker.LaunchOptions{
-			Tool: f.tools[f.tool], Cwd: strings.TrimSpace(f.folder.Value()),
-			Prompt: strings.TrimSpace(f.prompt.Value()), ParentID: f.parent.ID,
-		}
+		opts := f.launchOptions()
 		ops, quit := m.ops, m.popup
 		return m, func() tea.Msg {
-			_, err := ops.Launch(opts)
-			return doneMsg{text: "started " + opts.Tool + " in " + shortPath(opts.Cwd), err: err, quit: quit && err == nil}
+			l, err := ops.Launch(opts)
+			return doneMsg{text: startedText(opts, l), err: err, quit: quit && err == nil}
 		}
 	}
 	var cmd tea.Cmd
 	switch f.field {
-	case 1:
+	case fieldFolder:
 		typed := f.folder.Value()
 		f.folder, cmd = f.folder.Update(msg)
 		if f.folder.Value() != typed {
 			f.suggest()
 		}
-	case 2:
+	case fieldPrompt:
 		f.prompt, cmd = f.prompt.Update(msg)
 	}
 	return m, cmd
+}
+
+// startedText says what started: the tool, the model when one was set,
+// what the prompt needed when hive picked, and the folder.
+func startedText(o tracker.LaunchOptions, l tracker.Launched) string {
+	tool, model := l.Tool, l.Model
+	if tool == "" {
+		tool, model = o.Tool, o.Model
+	}
+	text := "started " + tool
+	if model != "" {
+		text += " · " + model
+	}
+	if l.Choice != nil {
+		text += " (" + l.Choice.Need.String() + ")"
+	}
+	return text + " in " + shortPath(o.Cwd)
 }
 
 func (f *form) focus(field int) tea.Cmd {
@@ -892,9 +1018,9 @@ func (f *form) focus(field int) tea.Cmd {
 	f.folder.Blur()
 	f.prompt.Blur()
 	switch field {
-	case 1:
+	case fieldFolder:
 		return f.folder.Focus()
-	case 2:
+	case fieldPrompt:
 		return f.prompt.Focus()
 	}
 	return nil

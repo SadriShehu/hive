@@ -70,6 +70,8 @@ func TestExpand(t *testing.T) {
 		{[]string{"opencode", "--prompt", "{prompt}"}, nil, "opencode"},
 		{[]string{"opencode", "--prompt", "{prompt}"}, map[string]string{"prompt": "fix it"}, "opencode --prompt fix it"},
 		{[]string{"claude", "--session-id", "{session}", "{prompt}"}, map[string]string{"session": "u1"}, "claude --session-id u1"},
+		{[]string{"claude", "--model", "{model}", "--session-id", "{session}", "{prompt}"}, map[string]string{"session": "u1"}, "claude --session-id u1"},
+		{[]string{"claude", "--model", "{model}", "--session-id", "{session}", "{prompt}"}, map[string]string{"session": "u1", "model": "opus"}, "claude --model opus --session-id u1"},
 		{[]string{"claude", "--resume", "{id}", "{prompt}"}, map[string]string{"id": "abc", "prompt": "go on"}, "claude --resume abc go on"},
 		{[]string{"opencode", "--session", "{id}", "--prompt", "{prompt}"}, map[string]string{"id": "ses_1"}, "opencode --session ses_1"},
 		{[]string{"tool", "--name=job-{id}"}, map[string]string{"id": "7"}, "tool --name=job-7"},
@@ -79,5 +81,13 @@ func TestExpand(t *testing.T) {
 		if got := strings.Join(Expand(tt.tmpl, tt.vars), " "); got != tt.want {
 			t.Errorf("Expand(%v, %v) = %q, want %q", tt.tmpl, tt.vars, got, tt.want)
 		}
+	}
+}
+
+func TestTakesModel(t *testing.T) {
+	with := Spec{New: []string{"claude", "--model", "{model}", "{prompt}"}}
+	without := Spec{New: []string{"opencode", "-m", "deepseek/deepseek-v4-pro", "--prompt", "{prompt}"}}
+	if !with.TakesModel() || without.TakesModel() {
+		t.Error("TakesModel looks for a {model} placeholder in the start command")
 	}
 }

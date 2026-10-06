@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/fusion"
 )
 
 func writeConfig(t *testing.T, text string) string {
@@ -173,5 +174,61 @@ func TestAlerts(t *testing.T) {
 	}
 	if _, err := Load(writeConfig(t, "[alerts]\ndesktop = true\n\n[[agent]]\nname = \"aider\"\nnew = [\"aider\"]\n")); err != nil {
 		t.Fatalf("alerts next to agents: %v", err)
+	}
+}
+
+func TestLoadConfigFusion(t *testing.T) {
+	cfg, err := LoadConfig(writeConfig(t, `
+[fusion]
+mode = "model"
+tool = "claude"
+
+[[agent]]
+name   = "codex"
+models = ["gpt-6-pro"]
+
+[[model]]
+name = "gpt-6-pro"
+tier = "frontier"
+coding = 9
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Fusion != (fusion.Settings{Mode: fusion.ModeModel, Tool: "claude"}) {
+		t.Errorf("fusion = %+v", cfg.Fusion)
+	}
+	if spec := find(t, cfg.Adapters, "codex").Spec(); !slices.Equal(spec.Models, []string{"gpt-6-pro"}) || !spec.TakesModel() {
+		t.Errorf("codex spec = %+v", spec)
+	}
+	if m, ok := cfg.Models.Match("gpt-6-pro"); !ok || m.Rating("coding") != 9 || m.Rating("reasoning") != 10 {
+		t.Errorf("gpt-6-pro = %+v, %v", m, ok)
+	}
+	if _, ok := find(t, cfg.Adapters, "opencode").(agent.ModelLister); !ok {
+		t.Error("opencode is no longer a ModelLister")
+	}
+}
+
+func TestLoadConfigFusionDefaultsToProviderMode(t *testing.T) {
+	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil || cfg.Fusion.Mode != fusion.ModeProvider || cfg.Fusion.Tool != "" {
+		t.Errorf("fusion = %+v, %v", cfg.Fusion, err)
+	}
+}
+
+func TestLoadRejectsFusionMistakes(t *testing.T) {
+	for name, text := range map[string]string{
+		"mode":  "[fusion]\nmode = \"both\"\n",
+		"tool":  "[fusion]\ntool = \"My Tool\"\n",
+		"tier":  "[[model]]\nname = \"x\"\ntier = \"huge\"\n",
+		"scale": "[[model]]\nname = \"x\"\nspeed = 12\n",
+	} {
+		cfg, err := LoadConfig(writeConfig(t, text))
+		if err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		if cfg.Fusion.Mode != fusion.ModeProvider {
+			t.Errorf("%s: a bad config changed the fusion mode", name)
+		}
 	}
 }
