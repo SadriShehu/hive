@@ -12,6 +12,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/usage"
@@ -28,6 +29,14 @@ type Agent struct {
 	TitleFlags   []string `toml:"title_flags"`
 	SessionFlags []string `toml:"session_flags"`
 	ParentEnv    string   `toml:"parent_env"`
+	Models       []string `toml:"models"`
+}
+
+// Fusion is the [fusion] table of config.toml: what `auto` means when
+// hive picks the model for a new agent.
+type Fusion struct {
+	Mode string `toml:"mode"`
+	Tool string `toml:"tool"`
 }
 
 var toolName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -36,6 +45,7 @@ type Config struct {
 	Adapters []agent.Adapter
 	Models   usage.Catalog
 	Alerts   Alerts
+	Fusion   fusion.Settings
 }
 
 // Load returns the built-in adapters with the config file at path applied.
@@ -50,11 +60,16 @@ func Load(path string) ([]agent.Adapter, error) {
 // defaults. A file with mistakes changes nothing, and LoadConfig says what is
 // wrong with it.
 func LoadConfig(path string) (Config, error) {
-	cfg := Config{Adapters: Builtin(), Models: usage.Builtin(), Alerts: defaultAlerts}
+	cfg := Config{Adapters: Builtin(), Models: usage.Builtin(), Alerts: defaultAlerts,
+		Fusion: fusion.Settings{Mode: fusion.ModeProvider}}
 	file, err := readConfig(path)
 	if err != nil {
 		return cfg, err
 	}
+	if mode, ok := fusion.ParseMode(file.Fusion.Mode); ok {
+		cfg.Fusion.Mode = mode
+	}
+	cfg.Fusion.Tool = file.Fusion.Tool
 	for _, c := range file.Agent {
 		i := slices.IndexFunc(cfg.Adapters, func(a agent.Adapter) bool { return a.Spec().Name == c.Name })
 		if i < 0 {
@@ -81,6 +96,7 @@ type configFile struct {
 	Agent  []Agent       `toml:"agent"`
 	Model  []usage.Model `toml:"model"`
 	Alerts Alerts        `toml:"alerts"`
+	Fusion Fusion        `toml:"fusion"`
 }
 
 func readConfig(path string) (configFile, error) {
@@ -108,6 +124,12 @@ func readConfig(path string) (configFile, error) {
 	if err := usage.Validate(cfg.Model); err != nil {
 		return configFile{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if _, ok := fusion.ParseMode(cfg.Fusion.Mode); cfg.Fusion.Mode != "" && !ok {
+		return configFile{}, fmt.Errorf("%s: fusion mode %q must be %q or %q", path, cfg.Fusion.Mode, fusion.ModeProvider, fusion.ModeModel)
+	}
+	if cfg.Fusion.Tool != "" && !toolName.MatchString(cfg.Fusion.Tool) {
+		return configFile{}, fmt.Errorf("%s: fusion tool %q must be lowercase letters, digits, - or _", path, cfg.Fusion.Tool)
+	}
 	return cfg, nil
 }
 
@@ -124,6 +146,7 @@ func (c Agent) apply(spec agent.Spec) agent.Spec {
 	set(&spec.Headless, c.Headless)
 	set(&spec.TitleFlags, c.TitleFlags)
 	set(&spec.SessionFlags, c.SessionFlags)
+	set(&spec.Models, c.Models)
 	if c.ParentEnv != "" {
 		spec.ParentEnv = c.ParentEnv
 	}
@@ -194,6 +217,13 @@ func (o overridden) Purge(ctx context.Context, s store.Session) error {
 		return p.Purge(ctx, s)
 	}
 	return fmt.Errorf("hive can't delete %s sessions", o.spec.Name)
+}
+
+func (o overridden) ListModels(ctx context.Context) ([]string, error) {
+	if l, ok := o.Adapter.(agent.ModelLister); ok {
+		return l.ListModels(ctx)
+	}
+	return nil, nil
 }
 
 func (o overridden) ReadUsage(ctx context.Context, s store.Session, prev store.Usage, cursor string) (store.Usage, string, error) {

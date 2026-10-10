@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/human"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
@@ -309,14 +310,6 @@ func (m Model) formLines(w, h int) []string {
 		heading += sDim.Render("  child of " + label(f.parent))
 	}
 	out = append(out, sBold.Render(heading), "")
-	var tools []string
-	for i, t := range f.tools {
-		if i == f.tool {
-			tools = append(tools, toolStyle(t).Bold(true).Render("‹ "+t+" ›"))
-		} else {
-			tools = append(tools, sDim.Render(t))
-		}
-	}
 	field := func(i int, name, value string) string {
 		mark := "  "
 		if f.field == i {
@@ -327,26 +320,68 @@ func (m Model) formLines(w, h int) []string {
 	folders := f.folderLines(h - formChromeRows - 1)
 	prompt := visibleRows(f.prompt, h-formChromeRows-len(folders))
 	out = append(out,
-		field(0, "tool", strings.Join(tools, "  ")),
-		field(1, "folder", f.folder.View()),
+		field(fieldTool, "tool", choices(f.tools, f.tool, func(t string) lipgloss.Style { return toolStyle(t) })),
+		field(fieldModel, "model", f.modelLine()),
+		field(fieldFolder, "folder", f.folder.View()),
 	)
 	out = append(out, folders...)
-	out = append(out, field(2, "prompt", prompt[0]))
+	out = append(out, field(fieldPrompt, "prompt", prompt[0]))
 	for _, line := range prompt[1:] {
 		out = append(out, strings.Repeat(" ", 9)+line)
 	}
-	out = append(out, "", sDim.Render("It opens in a new tmux window, running the tool's own TUI."))
+	out = append(out, "", sDim.Render(f.explain()))
 	if f.parent.ID != "" {
 		out = append(out, sDim.Render("hive links it under the selected session."))
 	}
 	return fit(out, w, h)
 }
 
+// choices draws a row of choices with the selected one in brackets.
+func choices(items []string, selected int, style func(string) lipgloss.Style) string {
+	var parts []string
+	for i, item := range items {
+		if i == selected {
+			parts = append(parts, style(item).Bold(true).Render("‹ "+item+" ›"))
+		} else {
+			parts = append(parts, sDim.Render(item))
+		}
+	}
+	return strings.Join(parts, "  ")
+}
+
+// modelLine draws the model field: for a tool, its choices; for auto, the
+// mode, which ←/→ flips.
+func (f form) modelLine() string {
+	if f.toolName() == fusion.Auto {
+		what := "picks the tool and the model for the prompt"
+		if f.mode == fusion.ModeModel {
+			what = "picks only the model, inside " + f.inside
+		}
+		return sAccent.Bold(true).Render("‹ "+string(f.mode)+" ›") + "  " + sDim.Render(what+" · ←/→ changes the mode")
+	}
+	line := choices(f.modelChoices(), min(f.model, len(f.modelChoices())-1), func(string) lipgloss.Style { return sAccent })
+	if f.loadingModels() {
+		line += "  " + sDim.Render("loading what it runs…")
+	}
+	return line
+}
+
+// explain says what starts, under the form.
+func (f form) explain() string {
+	switch {
+	case f.toolName() == fusion.Auto:
+		return "hive picks for the prompt, then opens the tool's own TUI in a new tmux window."
+	case f.selectedModel() == fusion.Auto:
+		return "hive picks " + f.toolName() + "'s model for the prompt and opens its TUI in a new tmux window."
+	}
+	return "It opens in a new tmux window, running the tool's own TUI."
+}
+
 // folderLines draws the folder suggestions under the folder field in at most
 // rows lines, keeping the highlighted one in view.
 func (f form) folderLines(rows int) []string {
 	n := len(f.folders)
-	if f.field != 1 {
+	if f.field != fieldFolder {
 		return nil
 	}
 	shown := min(n, shownFolders, rows)
@@ -399,10 +434,10 @@ func (m Model) hintLine() string {
 		}
 		return sError.Render(question) + keys("y", "yes", "any other key", "no")
 	case modeNew:
-		if f := m.form; f.field == 1 && len(f.folders) > 0 {
+		if f := m.form; f.field == fieldFolder && len(f.folders) > 0 {
 			return keys("tab", "fill in", "↑/↓", "pick", "↵", "next", "esc", "hide list")
 		}
-		return keys("↵", "next / start", "tab", "field", "←/→", "tool", "esc", "cancel")
+		return keys("↵", "next / start", "tab", "field", "←/→", "tool / model", "esc", "cancel")
 	case modeHelp:
 		return keys("any key", "close")
 	}
@@ -436,7 +471,7 @@ func helpLines() []string {
 	rows := [][2]string{
 		{"↵", "jump to the session's pane; reopen it if it isn't running"},
 		{"s", "send a message: typed into its pane, or reopens it with the message"},
-		{"n / c", "start a new agent / a new agent as a child of the selected one"},
+		{"n / c", "start a new agent / a new agent as a child of the selected one; tool or model auto picks for the prompt"},
 		{"r", "reopen a finished session in its tool's own TUI"},
 		{"x", "stop the session's process (asks first)"},
 		{"d", "move the session and everything under it to the trash (asks first)"},

@@ -30,7 +30,7 @@ func New() *Adapter { return &Adapter{} }
 func (a *Adapter) Spec() agent.Spec {
 	return agent.Spec{
 		Name:      name,
-		New:       []string{"claude", "--session-id", "{session}", "{prompt}"},
+		New:       []string{"claude", "--model", "{model}", "--session-id", "{session}", "{prompt}"},
 		Resume:    []string{"claude", "--resume", "{id}", "{prompt}"},
 		Process:   []string{"claude"},
 		Headless:  []string{"-p", "--print"},
@@ -47,6 +47,9 @@ func (a *Adapter) Spec() agent.Spec {
 
 		TitleFlags:   []string{"-n", "--name"},
 		SessionFlags: []string{"-r", "--resume", "--session-id"},
+
+		// The current generation; history adds what else an account ran.
+		Models: []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"},
 	}
 }
 

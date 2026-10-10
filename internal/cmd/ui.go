@@ -52,7 +52,7 @@ func runUI(popup bool) error {
 	}
 	defer st.Close()
 	cfg := adapters.Current()
-	return tui.Run(tui.NewLiveOps(st, cfg.Adapters, cfg.Models), popup)
+	return tui.Run(tui.NewLiveOps(st, cfg.Adapters, cfg.Models, cfg.Fusion), popup)
 }
 
 // openInTmux attaches to the "hive" session, with the tree in a window of

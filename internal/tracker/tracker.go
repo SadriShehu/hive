@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
@@ -87,6 +88,7 @@ type Tracker struct {
 	OnAttention func(s store.Session)
 
 	Models usage.Catalog
+	Fusion fusion.Settings // what `auto` means when picking a model
 
 	cwds map[string]string // process folders, by pid@start
 }

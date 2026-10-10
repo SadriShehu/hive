@@ -82,11 +82,11 @@ func TestNewFormSuggestsFolders(t *testing.T) {
 
 	// Nothing is picked yet: tab takes the first and lists what's inside it.
 	m = press(t, m, "tab")
-	if got := m.form.folder.Value(); got != root+"/api/" || m.form.field != 1 || len(m.form.folders) != 2 {
+	if got := m.form.folder.Value(); got != root+"/api/" || m.form.field != fieldFolder || len(m.form.folders) != 2 {
 		t.Fatalf("after tab: folder %q, field %d, suggestions %q", got, m.form.field, m.form.folders)
 	}
 	m = press(t, m, "down", "down", "down", "enter")
-	if got := m.form.folder.Value(); got != root+"/api/v2" || m.form.field != 2 || m.form.folders != nil {
+	if got := m.form.folder.Value(); got != root+"/api/v2" || m.form.field != fieldPrompt || m.form.folders != nil {
 		t.Fatalf("after picking: folder %q, field %d, suggestions %q", got, m.form.field, m.form.folders)
 	}
 	press(t, m, "enter")
@@ -104,13 +104,13 @@ func TestFolderListKeepsWhatIsTyped(t *testing.T) {
 	}
 	// ↑ from the first goes back to what's typed, which enter keeps.
 	m = press(t, m, "down", "up", "enter")
-	if got := m.form.folder.Value(); got != root+"/api" || m.form.field != 2 {
+	if got := m.form.folder.Value(); got != root+"/api" || m.form.field != fieldPrompt {
 		t.Fatalf("folder %q, field %d; want what was typed and the prompt", got, m.form.field)
 	}
 
 	// Coming back lists nothing until the folder changes.
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if m.form.field != 1 || m.form.folders != nil {
+	if m.form.field != fieldFolder || m.form.folders != nil {
 		t.Fatalf("back in folder: field %d, suggestions %q", m.form.field, m.form.folders)
 	}
 	m = press(t, m, "/")

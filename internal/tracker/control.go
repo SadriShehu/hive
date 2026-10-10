@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
@@ -21,7 +22,9 @@ import (
 
 // LaunchOptions describes where and how to start an agent's TUI.
 type LaunchOptions struct {
-	Tool     string
+	Tool     string      // a tool, or fusion.Auto to pick one for the prompt
+	Model    string      // a model as the tool names it, fusion.Auto to pick one, or "" for the tool's default
+	Mode     fusion.Mode // what auto means; "" takes the configured mode
 	Cwd      string
 	Prompt   string
 	ParentID string // the session this one is a child of; "" for a top-level agent
@@ -29,10 +32,13 @@ type LaunchOptions struct {
 	Detached bool   // open the window without switching to it
 }
 
-// Launched is where an agent now runs.
+// Launched is where an agent now runs, and as what.
 type Launched struct {
 	Pane      string
 	SessionID string // known right away when the tool takes a pre-assigned ID
+	Tool      string
+	Model     string         // the model it was started with; "" for the tool's default
+	Choice    *fusion.Choice // set when hive picked the tool or the model
 }
 
 func (t *Tracker) adapter(tool string) agent.Adapter {
@@ -44,12 +50,26 @@ func (t *Tracker) adapter(tool string) agent.Adapter {
 	return nil
 }
 
-// Launch starts a new interactive agent in its own tmux window.
-func (t *Tracker) Launch(o LaunchOptions) (Launched, error) {
-	spec := t.spec(o.Tool)
-	if len(spec.New) == 0 {
-		return Launched{}, fmt.Errorf("hive doesn't know how to start %q", o.Tool)
+// Launch starts a new interactive agent in its own tmux window, picking
+// the tool or the model first when asked to.
+func (t *Tracker) Launch(ctx context.Context, o LaunchOptions) (Launched, error) {
+	var out Launched
+	if (PickOptions{Tool: o.Tool, Model: o.Model}).Wants() {
+		choice, err := t.Pick(ctx, PickOptions{Tool: o.Tool, Model: o.Model, Mode: o.Mode, Prompt: o.Prompt, ParentID: o.ParentID})
+		if err != nil {
+			return Launched{}, err
+		}
+		o.Tool, o.Model = choice.Tool, choice.ID
+		out.Choice = &choice
 	}
+	spec := t.spec(o.Tool)
+	switch {
+	case len(spec.New) == 0:
+		return Launched{}, fmt.Errorf("hive doesn't know how to start %q", o.Tool)
+	case o.Model != "" && !spec.TakesModel():
+		return Launched{}, fmt.Errorf("hive can't set the model for %s: its start command has no {model}; add one in config.toml", o.Tool)
+	}
+	out.Tool, out.Model = o.Tool, o.Model
 	cwd, err := folder(o.Cwd)
 	if err != nil {
 		return Launched{}, err
@@ -58,7 +78,7 @@ func (t *Tracker) Launch(o LaunchOptions) (Launched, error) {
 	if slices.ContainsFunc(spec.New, func(a string) bool { return strings.Contains(a, "{session}") }) {
 		native = newUUID()
 	}
-	argv, err := resolve(agent.Expand(spec.New, map[string]string{"prompt": o.Prompt, "session": native}))
+	argv, err := resolve(agent.Expand(spec.New, map[string]string{"prompt": o.Prompt, "session": native, "model": o.Model}))
 	if err != nil {
 		return Launched{}, err
 	}
@@ -76,7 +96,7 @@ func (t *Tracker) Launch(o LaunchOptions) (Launched, error) {
 	if err := t.Store.PutLaunch(store.Launch{Pane: pane.ID, Tool: o.Tool, ParentID: o.ParentID, Cwd: cwd, CreatedAt: now}); err != nil {
 		return Launched{}, err
 	}
-	out := Launched{Pane: pane.ID}
+	out.Pane = pane.ID
 	if o.Prompt != "" {
 		// Until the agent names its session, its pane holds the prompt.
 		key := pane.ID

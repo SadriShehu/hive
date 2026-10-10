@@ -101,9 +101,26 @@ type Spec struct {
 	// ResumeSubagents reports whether the tool can reopen one of its own
 	// subagents' sessions on its own (opencode can; Claude can't).
 	ResumeSubagents bool
+
+	// Models lists the models the tool is known to run, spelled the way its
+	// model flag takes them. A ModelLister adds what the tool offers right
+	// now, and history adds what its sessions used.
+	Models []string
 }
 
-// Expand fills an argv template: {prompt}, {session}, {id}. An argument that
+// TakesModel reports whether the start command has a {model} placeholder,
+// so hive can pick the model it starts with.
+func (s Spec) TakesModel() bool {
+	return slices.ContainsFunc(s.New, func(a string) bool { return strings.Contains(a, "{model}") })
+}
+
+// ModelLister is implemented by tools that can list the models they offer
+// right now (`opencode models`), which no fixed list follows.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]string, error)
+}
+
+// Expand fills an argv template: {prompt}, {session}, {id}, {model}. An argument that
 // is only a placeholder with nothing to fill is dropped, together with the
 // flag right before it: ["opencode", "--prompt", "{prompt}"] with no prompt
 // is just ["opencode"].

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tracker"
 )
@@ -35,6 +36,9 @@ type fakeOps struct {
 
 	usages     map[string]store.Usage
 	usageAsked []string
+
+	fusion      fusion.Settings
+	modelsAsked []string
 }
 
 func (f *fakeOps) Refresh() ([]store.Session, error) { return f.sessions, nil }
@@ -47,7 +51,13 @@ func (f *fakeOps) Capture(pane string) (string, error) { return "screen of " + p
 func (f *fakeOps) Focus(pane string) error             { f.focused = append(f.focused, pane); return nil }
 func (f *fakeOps) Launch(o tracker.LaunchOptions) (tracker.Launched, error) {
 	f.launched = append(f.launched, o)
-	return tracker.Launched{Pane: "%9"}, nil
+	l := tracker.Launched{Pane: "%9", Tool: o.Tool, Model: o.Model}
+	if o.Tool == fusion.Auto || o.Model == fusion.Auto {
+		need := fusion.Assess(o.Prompt)
+		l.Tool, l.Model = "claude", "claude-sonnet-5-5"
+		l.Choice = &fusion.Choice{Candidate: fusion.Candidate{Tool: l.Tool, ID: l.Model}, Need: need}
+	}
+	return l, nil
 }
 func (f *fakeOps) CanResume(s store.Session) error {
 	if s.Live() {
@@ -77,8 +87,16 @@ func (f *fakeOps) Purge(s store.Session) (tracker.Purged, error) {
 	f.purged = append(f.purged, s.ID)
 	return tracker.Purged{Sessions: append([]store.Session{s}, under(f.trash, s.ID)...)}, nil
 }
-func (f *fakeOps) Copy(text string) error { f.copied = append(f.copied, text); return nil }
-func (f *fakeOps) Tools() []string        { return []string{"claude", "opencode"} }
+func (f *fakeOps) Copy(text string) error  { f.copied = append(f.copied, text); return nil }
+func (f *fakeOps) Tools() []string         { return []string{"claude", "opencode"} }
+func (f *fakeOps) Fusion() fusion.Settings { return f.fusion }
+func (f *fakeOps) Models(tool string) ([]string, error) {
+	f.modelsAsked = append(f.modelsAsked, tool)
+	return map[string][]string{
+		"claude":   {"claude-fable-5-1", "claude-opus-5-5"},
+		"opencode": {"deepseek/deepseek-v4-pro"},
+	}[tool], nil
+}
 func (f *fakeOps) Usages() (map[string]store.Usage, error) {
 	return f.usages, nil
 }
@@ -207,6 +225,12 @@ func press(t *testing.T, m Model, ks ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyUp}
 		case "tab":
 			msg = tea.KeyMsg{Type: tea.KeyTab}
+		case "shift+tab":
+			msg = tea.KeyMsg{Type: tea.KeyShiftTab}
+		case "left":
+			msg = tea.KeyMsg{Type: tea.KeyLeft}
+		case "right":
+			msg = tea.KeyMsg{Type: tea.KeyRight}
 		case "space":
 			msg = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
 		default:
@@ -316,12 +340,15 @@ func TestSendNewChildAndStop(t *testing.T) {
 	}
 	m = press(t, m, "tab", "tab") // folder → prompt → tool
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyRight})
-	m = press(t, m, "tab", "tab", "g", "o", "enter")
+	m = press(t, m, "tab", "tab", "tab", "g", "o", "enter") // model → folder → prompt
 	if len(ops.launched) != 1 {
 		t.Fatalf("launched = %+v", ops.launched)
 	}
-	if l := ops.launched[0]; l.Tool != "opencode" || l.ParentID != "claude:A" || l.Cwd != "/src/app" || l.Prompt != "go" {
+	if l := ops.launched[0]; l.Tool != "opencode" || l.Model != "" || l.ParentID != "claude:A" || l.Cwd != "/src/app" || l.Prompt != "go" {
 		t.Errorf("launch = %+v", l)
+	}
+	if !strings.Contains(m.flash, "started opencode in /src/app") {
+		t.Errorf("flash = %q", m.flash)
 	}
 
 	m = press(t, m, "x", "n")
@@ -648,5 +675,73 @@ func TestHeaderCountsWhoNeedsYou(t *testing.T) {
 	m = step(t, m, refreshedMsg{sessions: ops.sessions})
 	if header := strings.Split(ansi.Strip(m.View()), "\n")[0]; !strings.Contains(header, "◆ 1 need you") {
 		t.Fatalf("header = %q", header)
+	}
+}
+
+func TestNewFormOffersTheToolsModelsAndAuto(t *testing.T) {
+	m, ops := setup(t, false)
+	m = press(t, m, "n")
+	if m.form.toolName() != "claude" || strings.Join(ops.modelsAsked, ",") != "claude" {
+		t.Fatalf("form opened on %s, asked models of %v", m.form.toolName(), ops.modelsAsked)
+	}
+	if got := strings.Join(m.form.modelChoices(), " "); got != "default auto claude-fable-5-1 claude-opus-5-5" {
+		t.Errorf("model choices = %q", got)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "‹ default ›  auto  claude-fable-5-1  claude-opus-5-5") {
+		t.Errorf("model field not drawn:\n%s", view)
+	}
+
+	m = press(t, m, "shift+tab", "right", "right", "right") // model: default → auto → fable → opus
+	m = press(t, m, "enter", "enter", "f", "i", "x", " ", "i", "t", "enter")
+	if l := ops.launched[len(ops.launched)-1]; l.Tool != "claude" || l.Model != "claude-opus-5-5" || l.Prompt != "fix it" {
+		t.Errorf("launch = %+v", l)
+	}
+	if !strings.Contains(m.flash, "started claude · claude-opus-5-5 in") {
+		t.Errorf("flash = %q", m.flash)
+	}
+
+	m = press(t, m, "n", "shift+tab", "right") // model: auto
+	m = press(t, m, "enter", "enter", "f", "i", "x", " ", "i", "t", "enter")
+	if l := ops.launched[len(ops.launched)-1]; l.Tool != "claude" || l.Model != fusion.Auto || l.Mode != "" {
+		t.Errorf("launch = %+v", l)
+	}
+	if !strings.Contains(m.flash, "started claude · claude-sonnet-5-5 (debugging 6) in") {
+		t.Errorf("flash = %q", m.flash)
+	}
+}
+
+func TestNewFormAutoToolFlipsTheMode(t *testing.T) {
+	m, ops := setup(t, false)
+	m = press(t, m, "n", "shift+tab", "shift+tab", "left") // tool: claude → auto
+	if m.form.toolName() != fusion.Auto || m.form.mode != fusion.ModeProvider {
+		t.Fatalf("tool %s, mode %s", m.form.toolName(), m.form.mode)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "‹ provider ›  picks the tool and the model") {
+		t.Errorf("mode not drawn:\n%s", view)
+	}
+	m = press(t, m, "tab", "right") // the model field flips the mode
+	if m.form.mode != fusion.ModeModel || !strings.Contains(ansi.Strip(m.View()), "picks only the model, inside claude") {
+		t.Errorf("mode %s:\n%s", m.form.mode, ansi.Strip(m.View()))
+	}
+	m = press(t, m, "enter", "enter", "g", "o", "enter")
+	if l := ops.launched[len(ops.launched)-1]; l.Tool != fusion.Auto || l.Model != "" || l.Mode != fusion.ModeModel {
+		t.Errorf("launch = %+v", l)
+	}
+	if ops.modelsAsked[len(ops.modelsAsked)-1] != "claude" || len(ops.modelsAsked) != 1 {
+		t.Errorf("models asked for %v; auto needs none and a tool is asked once", ops.modelsAsked)
+	}
+}
+
+func TestNewFormTakesTheConfiguredModeAndTool(t *testing.T) {
+	ops := &fakeOps{sessions: sample(), usages: sampleUsage(), fusion: fusion.Settings{Mode: fusion.ModeModel, Tool: "opencode"}}
+	m := New(ops, false)
+	m.now = func() time.Time { return now }
+	m = step(t, m, tea.WindowSizeMsg{Width: 160, Height: 30})
+	m = step(t, m, refreshedMsg{sessions: ops.sessions})
+	m = press(t, m, "n", "shift+tab", "shift+tab", "left")
+	if m.form.mode != fusion.ModeModel || m.form.inside != "opencode" {
+		t.Errorf("mode %s inside %s", m.form.mode, m.form.inside)
 	}
 }

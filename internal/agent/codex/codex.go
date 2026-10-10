@@ -32,7 +32,7 @@ func New() *Adapter { return &Adapter{} }
 func (a *Adapter) Spec() agent.Spec {
 	return agent.Spec{
 		Name:    name,
-		New:     []string{"codex", "{prompt}"},
+		New:     []string{"codex", "--model", "{model}", "{prompt}"},
 		Resume:  []string{"codex", "resume", "{id}", "{prompt}"},
 		Process: []string{"codex"},
 		HelperSubcommands: []string{
@@ -43,6 +43,10 @@ func (a *Adapter) Spec() agent.Spec {
 		Headless:     []string{"exec", "e", "review"},
 		ParentEnv:    "CODEX_THREAD_ID",
 		SessionFlags: []string{"resume"},
+
+		// The presets built into codex 0.160; history adds what an account ran.
+		Models: []string{"gpt-6-pro", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-luna",
+			"gpt-5.5", "gpt-5.1-codex-max"},
 	}
 }
 

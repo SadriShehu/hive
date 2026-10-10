@@ -10,7 +10,7 @@ import (
 func close(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 
 func TestCostSplitsCacheWritesByTTL(t *testing.T) {
-	m := anthropic("claude-fable-5-1", 10, 50, 0.25)
+	m := anthropic("claude-fable-5-1", TierFrontier, 10, 50, 0.25)
 	tokens := store.Tokens{Input: 1e6, Output: 1e6, CacheRead: 1e6, CacheWrite: 2e6, CacheWrite1h: 1e6}
 	if got := m.Cost(tokens); !close(got, 10+50+0.25+12.5+20) {
 		t.Errorf("cost = %v", got)
@@ -35,7 +35,7 @@ func TestLookupNormalizesIDs(t *testing.T) {
 			t.Errorf("Lookup(%q) = %q, %v; want %q", id, m.Name, ok, want)
 		}
 	}
-	if _, ok := c.Lookup("gpt-6-luna"); ok {
+	if _, ok := c.Lookup("mystery-9"); ok {
 		t.Error("an unknown model was found")
 	}
 }
@@ -94,6 +94,61 @@ func TestBuiltinRowsArePriced(t *testing.T) {
 	for _, m := range anthropicModels {
 		if !m.Priced() || m.CacheRead <= 0 || m.CacheWrite <= m.Input || m.CacheWrite1h <= m.CacheWrite {
 			t.Errorf("%s = %+v", m.Name, m)
+		}
+	}
+}
+
+func TestMatchTakesToolSpellings(t *testing.T) {
+	c := Builtin()
+	for id, want := range map[string]string{
+		"google-vertex-anthropic/claude-opus-5-5@default": "claude-opus-5-5",
+		"google-vertex/claude-haiku-4-5@20251001":         "claude-haiku-4-5",
+		"claude-opus-4.6":            "claude-opus-4-6",
+		"gpt-5.5":                    "gpt-5-5",
+		"gpt-6-luna":                 "gpt-6-luna",
+		"deepseek/deepseek-v4-pro":   "deepseek-v4-pro",
+		"google-vertex/xai/grok-4.6": "grok-4-6",
+	} {
+		if m, ok := c.Match(id); !ok || m.Name != want {
+			t.Errorf("Match(%q) = %q, %v; want %q", id, m.Name, ok, want)
+		}
+	}
+	for _, id := range []string{"claude-opus-4.6-fast", "gemini-2.5-flash-image", "mystery-9"} {
+		if m, ok := c.Match(id); ok {
+			t.Errorf("Match(%q) = %q; a variant hive doesn't know must stay unrated", id, m.Name)
+		}
+	}
+}
+
+func TestRatingsComeFromTheTierUnlessSet(t *testing.T) {
+	m := Model{Name: "x", Tier: TierStrong, Debugging: 10, Speed: 2}
+	if m.Rating(Reasoning) != 8 || m.Rating(Debugging) != 10 || m.SpeedRating() != 2 || m.Power() != 34 {
+		t.Errorf("ratings = %d %d %d %d", m.Rating(Reasoning), m.Rating(Debugging), m.SpeedRating(), m.Power())
+	}
+	if (Model{Name: "y"}).Rated() || !(Model{Name: "z", Coding: 5}).Rated() {
+		t.Error("a model is rated once it has a tier or a rating")
+	}
+	if got := (Model{Name: "w", Tier: TierFast}).Rating(ToolUse); got != 4 {
+		t.Errorf("fast tier rating = %d", got)
+	}
+}
+
+func TestValidateRatings(t *testing.T) {
+	if err := Validate([]Model{{Name: "x", Tier: "huge"}}); err == nil {
+		t.Error("an unknown tier passed")
+	}
+	if err := Validate([]Model{{Name: "x", Coding: 11}}); err == nil {
+		t.Error("a rating over 10 passed")
+	}
+	if err := Validate([]Model{{Name: "x", Tier: TierFast, Coding: 7, Speed: 9}}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestBuiltinRowsAreRated(t *testing.T) {
+	for _, m := range Builtin().All() {
+		if !m.Rated() {
+			t.Errorf("%s has no tier", m.Name)
 		}
 	}
 }

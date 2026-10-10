@@ -32,13 +32,18 @@ func New() *Adapter { return &Adapter{} }
 func (a *Adapter) Spec() agent.Spec {
 	return agent.Spec{
 		Name:     name,
-		New:      []string{"copilot", "--session-id", "{session}", "--interactive", "{prompt}"},
+		New:      []string{"copilot", "--model", "{model}", "--session-id", "{session}", "--interactive", "{prompt}"},
 		Resume:   []string{"copilot", "--resume", "{id}", "--interactive", "{prompt}"},
 		Process:  []string{"copilot"},
 		Headless: []string{"-p", "--prompt"},
 
 		TitleFlags:   []string{"-n", "--name"},
 		SessionFlags: []string{"-r", "--resume", "--session-id"},
+
+		// What `copilot help config` lists for its model setting (1.0.43).
+		Models: []string{"claude-opus-4.7", "claude-opus-4.6", "claude-opus-4.6-fast", "claude-opus-4.5",
+			"claude-sonnet-4.6", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5",
+			"gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.2", "gpt-5.1", "gpt-5.4-mini", "gpt-5-mini", "gpt-4.1"},
 	}
 }
 
