@@ -5,6 +5,9 @@ a real Claude Code, Codex, opencode or Copilot CLI session in its own tmux windo
 every hive session is today. hive holds what the team shares: who is on it, the goal,
 the task board and the messages between members. Nothing new runs in the background.
 
+You follow a team the way you follow a channel: members post their progress to a
+shared feed, hive adds the events it sees, and you answer in the same place.
+
 This is the plan. The [README](README.md) describes what ships; DESIGN.md gets a
 section when the code lands.
 
@@ -28,8 +31,9 @@ native, and the team lives in one place: hive's database and the tree.
 | --- | --- |
 | team | a name, a goal, a folder, a workspace mode, members, tasks and messages |
 | member | a role name (`lead`, `backend`, `reviewer`) that points at one session. The role is the address: messages go to roles, not session IDs, so a member resumed under a new session keeps its mail |
-| lead | the member that plans and integrates: an agent hive starts, the agent that created the team (`--lead self`), or nobody (`--lead none`: you lead from the tree) |
+| lead | the member that plans and integrates: an agent hive starts (the default), the agent that created the team (`--lead self`), or nobody (`--lead none`: you lead from the tree). You can take over or hand back at any time with `hive team lead` |
 | brief | the first prompt hive composes for a member: the goal, its part, the roster, and how to use `hive team` |
+| channel | the team's feed: member posts, hive's own event posts and your replies, newest last. The mailbox is how a post reaches a pane; the channel is how you read the team |
 | mailbox | messages between members, stored by hive and typed into the recipient's pane when the recipient is idle |
 | board | one view of the team: goal, members with status, tasks, latest messages. `hive team board` for agents, the preview pane for you |
 | task | a numbered unit of work with an owner, a status and the tasks it waits for |
@@ -58,7 +62,12 @@ native, and the team lives in one place: hive's database and the tree.
    next prompt and answers with `hive team say`.
 7. `hive team task done 4 --note "…"` closes a task. hive posts a system message to the
    lead and to the owners of tasks that are now ready, so work moves on without polling.
-8. The lead runs `hive team done api-v2` when the goal is met. The team stays in the tree,
+8. Members post progress with `hive team post "…"` at milestones. hive adds its own posts
+   for task claimed, done and blocked, a member joining or stopping, and a member that
+   needs you. You read the feed in the tree and answer in it.
+9. `hive team pause` stops all mail delivery and task claims until `hive team resume`, so
+   you can steer without the agents running ahead.
+10. The lead runs `hive team done api-v2` when the goal is met. The team stays in the tree,
    folded and dimmed, with its history; `d` trashes it with its members.
 
 ## What it looks like
@@ -105,12 +114,55 @@ Keys on a team node:
 | `↵` | jump to the member that needs you, else the lead, else the first live member |
 | `s` | message everyone (`you → all`), through the mailbox |
 | `x` | stop every member (asks first) |
+| `p` | pause or resume the team: no mail delivered, no tasks claimed |
+| `L` | take over the lead, or hand it to an agent |
+| `m` | show or hide hive's own posts in the channel |
 | `d` | trash the team and its members (asks first; refused while a member runs) |
 | `←` / `→` | fold and unfold the members |
 
 Keys on a member row work as on any session. `s` goes through the mailbox (`you →
 backend`), so the message is in the team's log and is typed only when the member is idle.
 `T` opens the new-team form anywhere.
+
+### The channel
+
+Selecting a team node shows the channel in the preview pane, with the board as a strip on
+top. Every post is a line: time, who, text.
+
+```
+⬡ api-v2 · add the admin API…     3/7 tasks · ● lead ● backend ◆ frontend ◉ reviewer
+──────────────────────────────────────────────────────────────────────────────────
+10:02  you → lead         start with the schema
+10:03  lead               Plan: 7 tasks up. backend takes #1–#4, frontend #5.
+10:09  backend            ✓ #1 schema for admin users — added users.role, indexed email
+10:21  backend → frontend the list endpoint is GET /admin/users?page=
+10:22  hive               #3 done by backend. Open now: #4 handlers, #5 table view.
+10:26  frontend           ◆ blocked on #5: unsure if the table paginates server-side
+       ▸ waiting on you
+10:27  you → frontend     yes, server-side, 50 per page
+──────────────────────────────────────────────────────────────────────────────────
+ › message the team…                              @role to address · enter sends
+```
+
+Three kinds of post:
+
+- **Member posts.** `hive team post "…"` writes to the channel. The brief asks for a post
+  when a task starts, finishes or blocks, and for a finding the others need; not for
+  every step.
+- **hive posts.** Task events, joins, stops, and a member that needs you (with its
+  question). They come from hooks and task commands, so they cost no tokens, and the
+  feed is never empty even if an agent forgets to post.
+- **Your posts.** The input line. Plain text goes to the whole team; `@backend …` to one
+  member. They follow the delivery rules below, so nothing is typed into a prompt.
+
+A post to the channel is logged for you and typed into no pane. A member is woken only by
+a message addressed to it (`say <role>`, or `@role` in a post). Otherwise every update
+would interrupt every agent. Members read the channel when they choose, with
+`hive team log -n 20`. `say <role> --private` keeps a message out of the feed you read.
+
+The team node shows a count of unread posts, and the header a total. `m` hides hive's own
+posts. `p` pauses and resumes the team (a `⏸` marks it); `L` hands the lead to you or
+back to an agent.
 
 ### The new-team form
 
@@ -167,7 +219,10 @@ the tasks and the latest messages.
 - Messages: `hive team say <role> "text"` writes to one teammate; `hive team say all "text"`
   to everyone. Messages to you arrive here as lines that start with [api-v2 · from <role>].
   Answer them with `hive team say`, not here.
-- When a task is done or you are blocked, say so with `hive team say`, then end your turn.
+- Progress: `hive team post "text"` writes to the team channel, which the human reads. Post
+  when a task starts, finishes or blocks, or when you learn something the others need. Not
+  every step. `hive team log -n 20` shows the channel.
+- When a task is done or you are blocked, say so with `hive team post`, then end your turn.
   hive wakes you here when someone writes to you.
 - Everyone works in the same folder. Pull before a task; commit small.
 Start with `hive team board`, then claim your first task.
@@ -198,7 +253,10 @@ messages go in one paste, one line each, with one Enter at the end.
 | `hive team new <name> [--goal text\|-] [--cwd dir] [--lead tool[:model]\|self\|none] [--member role=tool[:model]]... [--worktrees] [--from template] [--wait]` | create the team and start its members; print the roster |
 | `hive team ls [--json]` | the teams, with members, status and task counts |
 | `hive team board [<team>] [--json]` | goal, members with status, tasks, latest messages. Inside a member, the team is implied |
-| `hive team say <role\|all> [text\|-]` | message a teammate or everyone, as the calling member (or `you` from a shell; `--as <role>` for scripts) |
+| `hive team say <role\|all> [text\|-] [--private]` | message a teammate or everyone, as the calling member (or `you` from a shell; `--as <role>` for scripts) |
+| `hive team post <text\|->` | post to the channel as the calling member (`you` from a shell). Logged, typed into no pane unless it has an `@role` |
+| `hive team pause <team>` · `resume <team>` | pause or resume delivery and task claims for the whole team |
+| `hive team lead <team> <role\|none>` | change who leads; `none` means you |
 | `hive team inbox [--wait] [--timeout d]` | print the calling member's undelivered messages, and mark them delivered; `--wait` blocks for the next one |
 | `hive team wait [--task n] [--from role] [--any] [--timeout d]` | block until a task closes, a message arrives, or anything changes on the board; print what happened |
 | `hive team task add <title> [--body text] [--owner role] [--after n,...]` | add a task; hive messages the owner when the task is ready |
@@ -227,6 +285,8 @@ CREATE TABLE IF NOT EXISTS teams (
   workspace   TEXT NOT NULL DEFAULT 'shared',   -- shared | worktrees
   created_by  TEXT NOT NULL DEFAULT '',         -- the session that ran `hive team new`, if an agent did
   status      TEXT NOT NULL DEFAULT 'active',   -- active | done
+  paused      INTEGER NOT NULL DEFAULT 0,       -- 1: no delivery, no claims
+  lead_role   TEXT NOT NULL DEFAULT '',         -- '' when you lead
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
@@ -248,6 +308,8 @@ CREATE TABLE IF NOT EXISTS team_messages (
   team_id     TEXT NOT NULL,
   from_role   TEXT NOT NULL,                    -- a role, 'you', or 'hive'
   to_role     TEXT NOT NULL,                    -- a role, or 'all'
+  kind        TEXT NOT NULL DEFAULT 'post',     -- post | say | system
+  private     INTEGER NOT NULL DEFAULT 0,       -- 1: left out of the feed you read
   body        TEXT NOT NULL,
   created_at  INTEGER NOT NULL
 );
@@ -294,6 +356,8 @@ rules, in order:
 | waiting on you (attention) | queues it. Typing into a permission prompt would answer the prompt |
 | of unknown status (a tool without turn hooks), in a pane | types it now and marks the delivery blind; the board shows the mark |
 | exited | reopens it with the queued messages as the next prompt, as `hive send` does, unless the member was retired with `hive team rm` |
+| the team is paused | queues it; `resume` delivers what waits |
+| a post with no `@role` | logged for the channel; delivered to nobody |
 | the sender | refused: a member cannot message itself; `all` leaves the sender out |
 
 `hive hook` never waits on delivery: it starts `hive team deliver` detached and returns,
@@ -326,7 +390,7 @@ while it was down.
 | `internal/tracker` | `team.go`: start members through `Launch` with team and role; resolve the calling member (`Caller` plus the parent walk); `say`, `deliver`, `task done` with its system messages; `Ingest` writes the membership when a launch record is taken, and calls `OnDeliverable` on `idle` and `start` when mail waits |
 | `internal/cmd` | `team.go`: the `hive team` commands; `hook.go` sets `OnDeliverable` to start `hive team deliver` detached; `ls.go` adds `team` and `role` |
 | `internal/tree` | `Build` takes the teams: a team node per active team, members as its children, the node under the creator's session or at the root |
-| `internal/tui` | `team.go`: the board preview, the new-team form (`T`), keys on team nodes, `s` through the mailbox for members; the header count; rows for team nodes |
+| `internal/tui` | `team.go`: the channel feed and board strip, the new-team form (`T`), keys on team nodes (`p`, `L`, `m`), `s` and the input line through the mailbox; unread counts; the header count; rows for team nodes. Phase 2 adds a full-screen channel view |
 | `internal/adapters` | `[[team]]` templates in config.toml, with `[[team.member]]` rows |
 | `docs/demo/agent` | scripts that run `hive team …` and answer delivered mail, for live tests and the demo |
 | README, DESIGN.md | a "Teams" section each |
@@ -338,7 +402,7 @@ while it was down.
 Scope: the tables; `hive team new`, `ls`, `board`, `say`, `inbox`, `add`, `rm`, `stop`,
 `deliver`; the brief; membership through launch records and `HIVE_TEAM`/`HIVE_ROLE`;
 delivery by the rules above; the team node with the board preview; the one-line `T`
-form; `s` through the mailbox; `hive ls --json` fields.
+form; `s` through the mailbox; `hive team post` and `lead`; the channel feed in the preview pane with `@role` addressing, hive's own posts and unread counts; `hive team pause`/`resume` and `p`; `hive ls --json` fields.
 
 Tests: store round trips; `team` (parsing, brief, envelope, delivery decisions) as table
 tests; tracker with the fake world (a member linked from a launch record; `idle` with
@@ -350,7 +414,7 @@ tmux server: say, deliver at idle, resume with mail.
 
 Scope: `hive team task …` with owners and `--after`; system messages on done and ready;
 `hive team wait`; the member row shows its task; `hive team log`; `[[team]]` templates;
-the full form with one row per member.
+the full form with one row per member; the full-screen channel view (`↵` on the team opens it, a live input line, `esc` returns to the tree); task editing from the tree.
 
 Tests: readiness and the messages `done` sends; `wait` against a fake clock; templates
 in config round trip; the form in the TUI model.
@@ -359,20 +423,20 @@ in config round trip; the form in the TUI model.
 
 Scope: `--worktrees` (a `git worktree` and branch `hive/<team>/<role>` per member, under
 `~/.local/share/hive/worktrees/<team>/<role>`); `hive team done [--clean]`; teams in the
-trash, restore and purge; `hive team mute`; filter by team; a team in the README demo;
+trash, restore and purge; `hive team mute`; `--private`; filter by team; a team in the README demo;
 the DESIGN.md section.
 
 Tests: worktree creation and cleanup in a scratch git repo; trash and purge of a team
 with the fake tools.
 
-## Decisions to confirm
+## Decisions
 
-Each has a default this plan takes. Say if you want the other.
-
-| Question | Default here | The other way |
-| --- | --- | --- |
-| A message to a working member | wait for its `idle` hook, then type it | type it at once and rely on each tool to queue it. Faster, but Codex, opencode and Copilot queue differently, and a prompt open at that moment takes the text |
-| Where members work | the same folder | a worktree per member from day one. Cleaner diffs, but the lead must merge before anything is tested together |
-| Who leads | an agent hive starts (`--lead claude`) | you (`--lead none`): fewer tokens, and you dispatch from the tree |
-| How the tree shows a team | a team node with the members flat under it | plain parent links: members under the lead. No new node type, but a team without a lead agent has no root, and a member spawned by another member nests oddly |
-| Where team messages are typed from | the sender's process, else the recipient's `idle` hook | a `hive team deliver` loop you keep running. Simpler rules, but it is a daemon |
+| Question | Decision |
+| --- | --- |
+| A message to a working member | waits for its `idle` hook, then is typed as one paste |
+| Where members work | the same folder by default; `--worktrees` is opt-in |
+| Who leads | an agent hive starts by default, and you can interfere at any point: message anyone, edit tasks from the tree, take over with `hive team lead none` / `L`, or `pause` the whole team |
+| How the tree shows a team | a team node with the members flat under it; its preview is the channel |
+| How queued messages are delivered | the sender's process if the recipient is idle, else the recipient's `idle` hook starts a detached `hive team deliver`. No daemon |
+| How you follow progress | a channel: members and hive post, you reply in the same feed. Posts reach a pane only when addressed to it |
+| Channel view | the feed in the preview pane in phase 1; a full-screen view in phase 2 |
