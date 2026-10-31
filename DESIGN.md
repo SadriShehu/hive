@@ -28,6 +28,7 @@ Settled before coding started; the Copilot adapter and the config format came la
 | Copilot CLI | Added beyond the first plan | Tracked live through user-level hooks; it has no permission hook, so it never shows "needs you" |
 | Config | TOML, `[[agent]]` tables | New tools without Go code; built-in tools changed field by field |
 | Deleting | A trash first, then deleting for good through each tool | Nothing is lost by one key press; what is deleted for good goes the way its tool would delete it, so the tool's own lists stay consistent |
+| Picking the model | Once, at launch, from cue words in the prompt and hive's own ratings | A running agent keeps its model; a pick costs nothing and says why; config.toml corrects the ratings |
 
 ## Architecture
 
@@ -300,6 +301,96 @@ Claude Code's idle reminder counts as idle, and Copilot CLI has no hook for eith
   `hive ls` does (one `ps`, one `tmux list-panes`, about 50 ms).
 - The tree's header shows the same count.
 
+## Picking the model
+
+`hive new auto`, `--model auto`, `auto` in the new-agent form, and a team member started
+with `auto` let hive choose the model for a new agent, and in provider mode the tool
+too. hive reads the prompt for the kinds of work it asks for and how hard it is, then
+starts the lightest model that meets that bar: an easy task doesn't spend a frontier
+model, and a hard one doesn't get a fast one. The idea is Copilot's HydraFusion. The pick
+happens once, at launch: hive never wraps an agent, so it can't change a running one's
+model.
+
+### Decisions
+
+| Question | Decision |
+| --- | --- |
+| How a prompt is read | cue words, its length and its steps; no model call, so a pick is instant, free, and can say exactly why |
+| What a model offers | a tier per model, refined by optional per-signal ratings: hive's starting ratings, not measurements, which config.toml corrects |
+| What "lightest" means | the lowest total rating that meets every level the prompt asks for, then the cheaper, then the faster, then the preferred tool |
+| How far a pick reaches | a mode: `provider` (the tool and the model; the default) or `model` (the model, inside one tool) |
+| What a tool can run | its adapter's list, what it lists itself (opencode), and the models its past sessions used, as it reported them |
+
+### What a prompt needs
+
+`fusion.Assess` turns a prompt into a level from 4 to 10 for each kind of work it asks
+for, with the cues that set them:
+
+- **Four kinds of work**, each with its cue words: reasoning (design, plan, review,
+  security, performance, migration…), coding (implement, add, refactor, write tests…),
+  debugging (fix, crash, flaky, root cause…) and tool use (run, deploy, commit, lint…).
+  The prompt is lowered to its words first, so a cue matches whole words and punctuation
+  can't hide it.
+- **One difficulty for the prompt**, given to every kind it shows: 6 for routine work; 8
+  with a hard cue (architecture, across, every, concurrency, carefully…); 4 with a light
+  cue (typo, rename, quick…) in a prompt under 40 words. A prompt over 60 words adds 1,
+  and one over 150 words or with three or more steps (list items, "then") adds 2. The
+  result stays between 4 and 10.
+- A prompt without a cue for any kind counts as routine coding. No prompt means an open
+  session, which asks for 8 on everything.
+
+### What a model offers
+
+- **Tiers.** Every model in the catalog has a tier, which gives it the same rating on
+  each kind of work and a speed: `frontier` 10 (speed 3), `strong` 8 (5), `balanced` 6
+  (7), `fast` 4 (10). A per-kind rating or a speed, 1 to 10, replaces the tier's where it
+  is set. A model's power is the sum of its four ratings.
+- **Built-in rows.** Claude models with their list prices; GPT, Gemini, DeepSeek, Grok
+  and GLM models rated, without prices.
+- **`[[model]]` rows** in config.toml lie over the built-in ones. Their prices and
+  context window replace the row's, so a row without prices takes the price away; a tier
+  or rating they don't set stays the built-in one, so a row written for its price keeps
+  the model rated. A family row (`gpt-6`) prices the models under it that have no price
+  of their own, as the built-in rated rows carry none.
+- **Matching a tool's name** for a model: `Catalog.Match` drops a provider in front
+  (`deepseek/deepseek-v4-pro`), a version after `@` (`claude-opus-5-5@default`) and dots
+  in the version (`gpt-5.5` is `gpt-5-5`). Unlike the price lookup it takes no prefix, so
+  a variant hive doesn't know stays unrated instead of borrowing a sibling's ratings.
+
+### What a tool can run
+
+`Tracker.ToolModels` merges, in order: the adapter's list (Claude Code, Copilot CLI and
+Codex ship one; `models = [...]` in an `[[agent]]` table replaces it), what the tool lists
+itself right now (`opencode models`, through `agent.ModelLister`), and, for a tool that
+can't list, every model its past sessions used, from `session_usage`. Only rated models
+compete, and a model a tool offers under two names (two providers in opencode) counts
+once. Only a tool whose start command has a `{model}` placeholder can be given a model;
+the built-in ones have it.
+
+### The pick
+
+- **Scope.** In `provider` mode every installed tool that takes a model competes, and
+  ties go to `[fusion] tool`, else the parent session's tool. In `model` mode the models
+  of one tool compete: the one named, else `[fusion] tool`, else the parent's, else the
+  first installed. Naming a tool with model `auto` is always `model` mode.
+- **Order.** Among the models that meet every level: the lowest power, then the cheaper
+  by what a million tokens in and out cost (only when both have a price), then the
+  faster, then one from the preferred tool. When none meets the bar, the smallest
+  shortfall wins, then the most power, and the reason says that nothing met it.
+- **The reason** names the model, how many met the bar, and the levels:
+  `claude · claude-opus-5-5: the lightest of 24 that meet reasoning 8, coding 8`.
+  `--dry-run` prints it with the cues; `hive new` and `hive team new` print it with what
+  started, and the tree's flash names the model and the levels.
+- **Team members** started with `auto` are rated on the team's goal and their own part,
+  not on the brief, which is the same for everyone; one `hive team new` asks each tool
+  for its models once.
+
+`hive models [tool] [--json]` lists what each installed tool can run, with the ratings,
+and which of its models are unrated. The new-agent form has a model field (the tool's
+default, `auto`, or one it runs, loaded without blocking the form) and, for tool `auto`,
+the mode, which ←/→ flips. `[fusion] mode` and `tool`, and the `[[model]]` ratings, are
+checked when config.toml loads, like the rest of it.
+
 ## CLI
 
 Every tree action is also a command, so agents can run agents of their own. A session is
@@ -311,7 +402,8 @@ seen yet triggers a history import and one retry.
 | `hive` | the tree; outside tmux it starts or attaches the `hive` tmux session |
 | `hive popup` | the tree in a tmux popup; quits after a jump |
 | `hive ls [--all \| --live] [--json] [--no-sync]` | print the tree; `--json` is a flat list with depth, for agents |
-| `hive new <tool> [-p text] [--cwd dir] [--parent auto\|none\|<id>] [--wait] [--focus]` | start an agent in a background tmux window, linked under the calling agent; print its ID |
+| `hive new <tool\|auto> [-p text] [--model name\|auto] [--mode provider\|model] [--dry-run] [--cwd dir] [--parent auto\|none\|<id>] [--wait] [--focus]` | start an agent in a background tmux window, linked under the calling agent; print its ID. `auto` [picks the model](#picking-the-model), and the tool too |
+| `hive models [tool] [--json]` | what each installed tool can run, with the ratings `auto` picks by |
 | `hive send <id> [text \| -]` | type into its pane and press Enter; an ended session reopens with the message |
 | `hive tail <id> [-n 40] [--json]` | print the end of its transcript |
 | `hive wait <id>... [--any] [--timeout d]` | block until each has answered what hive gave it and is idle, needs you, or has ended; print `<id> <idle\|attention\|exited>` as each gets there |
@@ -328,6 +420,7 @@ seen yet triggers a history import and one retry.
 | `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a] [--next-key A]` | connect tools and bind the popup and needs-you keys; idempotent, backs up first |
 | `hive uninstall [...]` | remove exactly what install added |
 | `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and hook errors from the last day |
+| `hive team …` | [teams](#teams): start one, follow its channel, write to its members |
 | `hive hook <tool>` | for integrations only; prints nothing, always exits 0 |
 
 **Interactive children from inside an agent.** Claude runs
@@ -570,6 +663,8 @@ internal/
   tracker/      linking, liveness, sync, launch/resume/send/stop, trash and purge, lookup, who needs you, wait, teams
   store/        SQLite: sessions, trash, launches, spawn hints, import state, inputs, teams
   team/         the rules of teams that need no database: roles, the brief, the envelope, when to deliver
+  fusion/       what a prompt needs, and the pick
+  usage/        token counts and prices, the model catalog and its ratings
   spawn/        finds agent commands in shell history
   proc/         the process table
   tmux/         windows, panes, paste, capture, messages, the key bindings
