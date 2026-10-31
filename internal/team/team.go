@@ -110,7 +110,7 @@ func Roster(members []store.Member) string {
 // how to work through hive. It is the one place hive talks to an agent.
 func Brief(t store.Team, m store.Member, members []store.Member) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are %s on the hive team %s (%s), in %s.\n\n", m.Role, t.Name, Roster(members), t.Cwd)
+	fmt.Fprintf(&b, "You are %s on the hive team %s (%s), in %s.\n\n", m.Role, t.Name, Roster(members), Folder(t, m))
 	if t.Goal != "" {
 		fmt.Fprintf(&b, "Goal: %s\n", t.Goal)
 	}
@@ -129,8 +129,8 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 		"  everyone. Messages to you arrive here as lines that start with [" + t.Name + " · from <role>].\n" +
 		"  Answer them with `hive team say` or `hive team post`, not here.\n" +
 		"- When you are done or blocked, say so with `hive team post`, then end your turn. hive wakes\n" +
-		"  you here when someone writes to you.\n" +
-		"- Everyone works in the same folder. Pull before you start; commit small.\n")
+		"  you here when someone writes to you.\n")
+	b.WriteString(workLine(t, m, members))
 	switch {
 	case m.Role == t.LeadRole:
 		b.WriteString("\nYou lead. Turn the goal into tasks, each with an owner and the tasks it waits for: " +

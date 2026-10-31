@@ -35,7 +35,7 @@ func newTeamCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newTeamNewCmd(), newTeamLsCmd(), newTeamBoardCmd(), newTeamSayCmd(), newTeamPostCmd(),
 		newTeamLogCmd(), newTeamInboxCmd(), newTeamAddCmd(), newTeamRmCmd(), newTeamStopCmd(),
-		newTeamPauseCmd(true), newTeamPauseCmd(false), newTeamLeadCmd(), newTeamDeliverCmd())
+		newTeamPauseCmd(true), newTeamPauseCmd(false), newTeamLeadCmd(), newTeamDeliverCmd(), newTeamDoneCmd())
 	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd())
 	return cmd
 }
@@ -88,6 +88,9 @@ func (e *teamEnv) team(ref string) (store.Team, error) {
 	}
 	switch len(active) {
 	case 0:
+		if len(teams) > 0 { // all done
+			return store.Team{}, errors.New("no team is active; name one: " + teamNames(teams))
+		}
 		return store.Team{}, errors.New("there is no team; `hive team new` starts one")
 	case 1:
 		return active[0], nil
@@ -137,6 +140,7 @@ func (e *teamEnv) session(m store.Member) (store.Session, bool) {
 func newTeamNewCmd() *cobra.Command {
 	var goal, cwd, lead string
 	var members []string
+	var worktrees bool
 	cmd := &cobra.Command{
 		Use:   "new <name>",
 		Short: "Start a team: its members open in their own tmux windows",
@@ -144,7 +148,9 @@ func newTeamNewCmd() *cobra.Command {
 			"its part, the roster and how to use `hive team`.\n\n" +
 			"--lead picks who leads: a tool (claude, claude:auto, codex:gpt-…), self (the agent running\n" +
 			"this command) or none (you lead from the tree). A member is role=tool or role=tool:model;\n" +
-			"the model can be auto. --goal - reads the goal from stdin.",
+			"the model can be auto. --goal - reads the goal from stdin.\n\n" +
+			"--worktrees gives each member a git worktree and branch of its own, hive/<team>/<role>,\n" +
+			"made from the folder's HEAD; the lead works in the folder itself and merges them.",
 		Example: "  hive team new api-v2 --goal \"add the admin API\" --lead claude \\\n" +
 			"    --member backend=claude:auto --member frontend=codex --member reviewer=opencode",
 		Args: cobra.ExactArgs(1),
@@ -177,7 +183,7 @@ func newTeamNewCmd() *cobra.Command {
 					return err
 				}
 			}
-			o := tracker.TeamOptions{Name: args[0], Goal: goal, Cwd: cwd, Members: specs, CreatedBy: e.caller}
+			o := tracker.TeamOptions{Name: args[0], Goal: goal, Cwd: cwd, Members: specs, CreatedBy: e.caller, Worktrees: worktrees}
 			switch lead {
 			case "none":
 			case "self":
@@ -204,6 +210,7 @@ func newTeamNewCmd() *cobra.Command {
 	_ = cmd.MarkFlagDirname("cwd")
 	f.StringVar(&lead, "lead", "claude", "who leads: a tool[:model], self, or none (you lead from the tree)")
 	f.StringArrayVar(&members, "member", nil, "a member: role=tool[:model]; repeat for each")
+	f.BoolVar(&worktrees, "worktrees", false, "a git worktree and branch per member; the lead works in the folder and merges")
 	return cmd
 }
 
@@ -215,6 +222,7 @@ func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
 		}
 	}
 	fmt.Printf("team %s: %d of %d members started in %s\n", tm.Name, started, len(launched), homePath(tm.Cwd))
+	printWorkspace(tm)
 	for _, l := range launched {
 		m := l.Member
 		var note string
@@ -354,15 +362,17 @@ func newTeamBoardCmd() *cobra.Command {
 				s, ok := e.session(m)
 				rows = append(rows, memberRow{m, tracker.MemberState(m, s, ok), counts[m.Role], m.Role == tm.LeadRole})
 			}
+			worktrees := teamWorktrees(e.tr, tm)
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
 				return enc.Encode(struct {
 					store.Team
-					Members  []memberRow     `json:"members"`
-					Tasks    []taskRow       `json:"tasks"`
-					Messages []store.Message `json:"messages"`
-				}{tm, rows, taskRows(tasks), msgs})
+					Members   []memberRow     `json:"members"`
+					Tasks     []taskRow       `json:"tasks"`
+					Messages  []store.Message `json:"messages"`
+					Worktrees *worktreeBoard  `json:"worktrees,omitempty"`
+				}{tm, rows, taskRows(tasks), msgs, worktrees})
 			}
 			state := tm.Status
 			if tm.Paused {
@@ -389,6 +399,7 @@ func newTeamBoardCmd() *cobra.Command {
 			}
 			fmt.Println("\ntasks")
 			printTasks(tasks, false)
+			worktrees.print()
 			fmt.Println("\nchannel")
 			printMessages(msgs)
 			return nil

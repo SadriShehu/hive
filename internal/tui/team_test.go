@@ -240,6 +240,7 @@ func TestNewTeamForm(t *testing.T) {
 	}
 	m = typ(m, "docs")
 	m = press(t, m, "enter") // folder keeps its default
+	m = press(t, m, "enter") // work keeps the shared folder
 	m = press(t, m, "enter") // lead keeps claude
 	m = press(t, m, "enter") // members
 	m = typ(m, "writer=codex bad role")
@@ -260,11 +261,25 @@ func TestNewTeamForm(t *testing.T) {
 	}
 	o := ops.started[0]
 	if o.Name != "docs" || o.Goal != "write the docs" || o.Lead == nil || o.Lead.Tool != "claude" ||
-		len(o.Members) != 2 || o.Members[1].Model != "auto" {
+		len(o.Members) != 2 || o.Members[1].Model != "auto" || o.Worktrees {
 		t.Errorf("options = %+v", o)
 	}
 	if m.mode != modeNormal {
 		t.Errorf("mode = %v after starting", m.mode)
+	}
+
+	// ←/→ on the work row gives each member a worktree.
+	m = press(t, m, "T")
+	m = typ(m, "web")
+	m = press(t, m, "enter", "enter", "right")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "‹ a worktree per member ›") || !strings.Contains(view, "merges") {
+		t.Fatalf("the work row didn't flip:\n%s", view)
+	}
+	m.teamForm.members.SetValue("writer=codex")
+	m.teamForm.focus(tfGoal)
+	m = press(t, m, "enter")
+	if len(ops.started) != 2 || !ops.started[1].Worktrees {
+		t.Fatalf("started = %+v, want worktrees", ops.started)
 	}
 }
 

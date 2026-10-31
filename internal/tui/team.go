@@ -164,6 +164,10 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.hideSystem = !m.hideSystem
 		return m, nil, true
 	case "s":
+		if isDone(&tm) {
+			m.setFlash(tm.Name+" is done; it takes no more messages", true)
+			return m, nil, true
+		}
 		m.mode = modeSend
 		m.input.Reset()
 		if isTeam {
@@ -283,6 +287,7 @@ func (m Model) mailbox(text string) tea.Cmd {
 const (
 	tfName = iota
 	tfFolder
+	tfWork
 	tfLead
 	tfMembers
 	tfGoal
@@ -292,6 +297,7 @@ const (
 type teamForm struct {
 	leads   []string // the tools that can lead, then "none"
 	lead    int
+	work    bool // a worktree per member, not the shared folder
 	field   int
 	name    textinput.Model
 	folder  textinput.Model
@@ -359,7 +365,7 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 // options is what the form asks hive to start, or why it can't.
 func (f teamForm) options() (tracker.TeamOptions, error) {
 	o := tracker.TeamOptions{Name: strings.TrimSpace(f.name.Value()), Goal: strings.TrimSpace(f.goal.Value()),
-		Cwd: strings.TrimSpace(f.folder.Value())}
+		Cwd: strings.TrimSpace(f.folder.Value()), Worktrees: f.work}
 	if err := team.ValidName(o.Name); err != nil {
 		return o, err
 	}
@@ -401,6 +407,10 @@ func (m Model) keyTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				step = -1
 			}
 			f.lead = (f.lead + step + len(f.leads)) % len(f.leads)
+			return m, nil
+		}
+		if f.field == tfWork {
+			f.work = !f.work
 			return m, nil
 		}
 	case "enter":
@@ -446,10 +456,11 @@ func (m Model) teamFormLines(w, h int) []string {
 	if f.leads[f.lead] == "none" {
 		leadLine += "  " + sDim.Render("you lead from the tree")
 	}
-	goal := visibleRows(f.goal, h-formChromeRows)
+	goal := visibleRows(f.goal, h-formChromeRows-1)
 	out := []string{sBold.Render("New team"), "",
 		field(tfName, "name", f.name.View()),
 		field(tfFolder, "folder", f.folder.View()),
+		field(tfWork, "work", f.workLine()),
 		field(tfLead, "lead", leadLine),
 		field(tfMembers, "members", f.members.View()),
 		field(tfGoal, "goal", goal[0]),
@@ -466,7 +477,7 @@ func (m Model) teamFormLines(w, h int) []string {
 
 // teamGlyph marks a team node by the most pressing status of its members.
 func teamGlyph(n *tree.Node) (string, lipgloss.Style) {
-	if !n.Live {
+	if !n.Live || isDone(n.Team) {
 		return "⬡", sDim
 	}
 	switch n.Status {
@@ -505,6 +516,10 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	if t.Paused {
 		right = "⏸ paused · " + right
 	}
+	nameStyle := sBold
+	if isDone(&t) {
+		right, nameStyle = "✓ done · "+fmt.Sprintf("%d members", len(m.members(t.ID))), sDim
+	}
 	if u := m.snap.Unread[t.ID]; u > 0 {
 		right += fmt.Sprintf(" · %d new", u)
 	}
@@ -515,7 +530,7 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	avail := max(1, w-lead-tail)
 	name := ansi.Truncate(t.Name, avail, "…")
 	goalW := avail - ansi.StringWidth(name) - 2
-	line := on(sDim).Render(r.prefix+fold) + on(gs).Render(g) + sp + on(sBold).Render(name)
+	line := on(sDim).Render(r.prefix+fold) + on(gs).Render(g) + sp + on(nameStyle).Render(name)
 	if goalW >= 6 && t.Goal != "" {
 		line += on(sDim).Render("  " + pad(ansi.Truncate(oneLine.Replace(t.Goal), goalW, "…"), goalW))
 	} else {
@@ -540,12 +555,18 @@ func (m Model) teamPreviewLines(n *tree.Node, w, h int) []string {
 	if t.LeadRole != "" {
 		led = t.LeadRole
 	}
+	where := shortPath(t.Cwd)
+	if t.Workspace == store.WorkspaceWorktrees {
+		where += " · a worktree per member"
+	}
 	head := []string{
 		sAccent.Bold(true).Render("⬡ "+t.Name) + sDim.Render(" · "+ansi.Truncate(oneLine.Replace(t.Goal), max(1, w-len(t.Name)-5), "…")),
 		sDim.Render(ansi.Truncate(fmt.Sprintf("%d members · led by %s · %s · started %s ago",
-			len(members), led, shortPath(t.Cwd), age(m.now(), t.CreatedAt)), w, "…")),
+			len(members), led, where, age(m.now(), t.CreatedAt)), w, "…")),
 	}
-	if t.Paused {
+	if isDone(&t) {
+		head = append(head, sDim.Render("✓ done: the goal is met; the team takes no more messages"))
+	} else if t.Paused {
 		head = append(head, sError.Render("⏸ paused: no mail is delivered · p resumes"))
 	}
 	var roster []string

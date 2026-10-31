@@ -82,6 +82,8 @@ type Model struct {
 	feed       feed         // the selected team's channel
 	hideSystem bool         // leave hive's own posts out of the channel
 
+	foldedDone map[string]bool // done teams the tree has folded once; the user may unfold them
+
 	showPreview bool
 	preview     preview
 
@@ -556,6 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, s := range append(slices.Clip(msg.trashed), msg.sessions...) {
 			m.byID[s.ID] = s
 		}
+		m.foldDone()
 		m.rebuild()
 		if first {
 			return m, m.previewCmd()
