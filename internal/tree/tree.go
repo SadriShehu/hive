@@ -193,6 +193,27 @@ func Filter(nodes []*Node, keep func(*Node) bool) []*Node {
 	return out
 }
 
+// FilterTeams keeps the team nodes for which keep is true, with their whole
+// subtree, plus the ancestors that lead to them. A team's members' children
+// don't carry the TeamID, so Filter would drop a member's subagents; this
+// keeps everything under a matching team however deep it goes.
+func FilterTeams(nodes []*Node, keep func(*Node) bool) []*Node {
+	var visit func(nodes []*Node, within bool) []*Node
+	visit = func(nodes []*Node, within bool) []*Node {
+		var out []*Node
+		for _, n := range nodes {
+			mine := within || (n.Team != nil && keep(n))
+			c := *n
+			c.Children = visit(n.Children, mine)
+			if mine || len(c.Children) > 0 {
+				out = append(out, &c)
+			}
+		}
+		return out
+	}
+	return visit(nodes, false)
+}
+
 // Walk visits nodes depth-first, passing the box-drawing prefix that places
 // each one in the tree ("├─ ", "│  └─ ", …).
 func Walk(roots []*Node, fn func(n *Node, prefix string)) {

@@ -117,7 +117,15 @@ func (m Model) headerLine() string {
 		scope = "all history"
 	}
 	if q := m.filter.Value(); q != "" {
-		scope = "matching “" + q + "”"
+		if ts, ok := teamFilter(strings.ToLower(strings.TrimSpace(q))); ok {
+			if ts == "" {
+				scope = "all teams"
+			} else {
+				scope = "team “" + ts + "”"
+			}
+		} else {
+			scope = "matching “" + q + "”"
+		}
 	}
 	if m.hideSubs {
 		scope += " · subagents hidden"
@@ -520,7 +528,7 @@ func helpLines() []string {
 		{"x", "stop the session's process (asks first)"},
 		{"d", "move the session and everything under it to the trash (asks first)"},
 		{"t", "show the trash: r restores, d deletes for good, from its tool too (asks first)"},
-		{"/", "filter by title, folder or ID (searches all history)"},
+		{"/", "filter by title, folder or ID (searches all history); team:<name or ID> shows a team's subtree"},
 		{"a", "show all history / only the last 24h"},
 		{"i", "hide / show subagents"},
 		{"←/→ space", "fold and unfold; ← on a leaf goes to its parent"},
