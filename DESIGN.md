@@ -638,7 +638,7 @@ no preview.
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |
 | `d` · `t` | move the team and its members to the trash (asks first, refused while a member runs) · show the trash |
-| `T` | start a team: name, folder, work (the shared folder or a worktree per member), lead, members as `role=tool[:model]`, goal |
+| `T` | start a team: a template to fill it, name, folder, work (the shared folder or a worktree per member), lead, a row per member (role, tool, model, its part), goal; `+` adds a row and `ctrl+d` removes one |
 
 A done team is folded the first time the tree shows it done, and dimmed, with `✓ done`
 on its row; unfolded, it stays so. Its channel stays, and `s` on it says it is done.
@@ -733,8 +733,7 @@ Tables in migrations that can run twice, as the trash's can:
 
 **The rest of phase 2.** The task board is built; left are:
 
-- The new-team form gets one row per member (role, tool, model, the member's part), with
-  `+` to add one and templates to fill them. Tasks can be edited from the tree.
+- Tasks can be edited from the tree.
 
 **The rest of phase 3.** A worktree per member, `hive team done`, the trash, mute,
 `hive team new --wait` and filtering the tree by team are built; left is:

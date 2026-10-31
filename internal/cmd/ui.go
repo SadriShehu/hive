@@ -52,7 +52,21 @@ func runUI(popup bool) error {
 	}
 	defer st.Close()
 	cfg := adapters.Current()
-	return tui.Run(tui.NewLiveOps(st, cfg.Adapters, cfg.Models, cfg.Fusion), popup)
+	return tui.Run(tui.NewLiveOps(st, cfg.Adapters, cfg.Models, cfg.Fusion, teamTemplates(cfg.Teams)), popup)
+}
+
+// teamTemplates turns the config's [[team]] tables into what the form fills
+// itself from.
+func teamTemplates(ts []adapters.Team) []tui.TeamTemplate {
+	out := make([]tui.TeamTemplate, len(ts))
+	for i, t := range ts {
+		members := make([]tui.TeamTemplateMember, len(t.Members))
+		for j, m := range t.Members {
+			members[j] = tui.TeamTemplateMember{Role: m.Role, Tool: m.Tool, Model: m.Model, Prompt: m.Prompt}
+		}
+		out[i] = tui.TeamTemplate{Name: t.Name, Goal: t.Goal, Lead: t.Lead, Cwd: t.Cwd, Worktrees: t.Worktrees, Members: members}
+	}
+	return out
 }
 
 // openInTmux attaches to the "hive" session, with the tree in a window of
