@@ -116,6 +116,7 @@ type Catalog struct {
 	configured map[string]bool
 }
 
+// NewCatalog lays the [[model]] rows of config.toml over the built-in ones.
 func NewCatalog(builtin Catalog, overrides []Model) Catalog {
 	c := Catalog{models: map[string]Model{}, configured: map[string]bool{}}
 	for name, m := range builtin.models {
@@ -124,10 +125,27 @@ func NewCatalog(builtin Catalog, overrides []Model) Catalog {
 	for _, m := range overrides {
 		name := Normalize(m.Name)
 		m.Name = name
+		if base, ok := c.models[name]; ok {
+			m = overlay(base, m)
+		}
 		c.models[name] = m
 		c.configured[name] = true
 	}
 	return c
+}
+
+// overlay lays the user's row m over a built-in row. m's prices and context
+// window replace the built-in ones, so a row without prices takes the price
+// away; a rating m leaves out stays the built-in one, so a row that sets only
+// a price keeps the model rated.
+func overlay(base, m Model) Model {
+	m.Tier = cmp.Or(m.Tier, base.Tier)
+	m.Reasoning = cmp.Or(m.Reasoning, base.Reasoning)
+	m.Coding = cmp.Or(m.Coding, base.Coding)
+	m.Debugging = cmp.Or(m.Debugging, base.Debugging)
+	m.ToolUse = cmp.Or(m.ToolUse, base.ToolUse)
+	m.Speed = cmp.Or(m.Speed, base.Speed)
+	return m
 }
 
 func Validate(models []Model) error {
@@ -172,18 +190,27 @@ func Normalize(id string) string {
 }
 
 func (c Catalog) Lookup(model string) (Model, bool) {
+	return c.lookup(model, func(Model) bool { return true })
+}
+
+// lookup is Lookup that passes over a built-in row without what has asks
+// for, like one with a tier and no price, so that a family row from
+// config.toml applies (gpt-6 for gpt-6-luna). A row from config.toml is
+// never passed over: one without a price takes the price away.
+func (c Catalog) lookup(model string, has func(Model) bool) (Model, bool) {
+	usable := func(m Model) bool { return has(m) || c.configured[m.Name] }
 	id := Normalize(model)
-	if m, ok := c.models[id]; ok {
+	if m, ok := c.models[id]; ok && usable(m) {
 		return m, true
 	}
 	if i := strings.LastIndex(id, "/"); i >= 0 {
-		if m, ok := c.models[id[i+1:]]; ok {
+		if m, ok := c.models[id[i+1:]]; ok && usable(m) {
 			return m, true
 		}
 	}
 	var best Model
 	for name, m := range c.models {
-		if strings.HasPrefix(id, name+"-") && len(name) > len(best.Name) {
+		if usable(m) && strings.HasPrefix(id, name+"-") && len(name) > len(best.Name) {
 			best = m
 		}
 	}
@@ -225,7 +252,8 @@ func (c Catalog) Apply(u store.Usage) store.Usage {
 			u.CostUSD, u.CostSource = cost, store.CostConfig
 		}
 	}
-	if m, ok := c.Lookup(u.Model); ok && m.ContextWindow > 0 && (u.ContextWindow == 0 || c.configured[m.Name]) {
+	hasWindow := func(m Model) bool { return m.ContextWindow > 0 }
+	if m, ok := c.lookup(u.Model, hasWindow); ok && m.ContextWindow > 0 && (u.ContextWindow == 0 || c.configured[m.Name]) {
 		u.ContextWindow = m.ContextWindow
 	}
 	return u
@@ -237,7 +265,7 @@ func (c Catalog) cost(models map[string]store.Tokens) (float64, bool) {
 	}
 	total := 0.0
 	for name, tokens := range models {
-		m, ok := c.Lookup(name)
+		m, ok := c.lookup(name, Model.Priced)
 		if !ok || !m.Priced() {
 			return 0, false
 		}
