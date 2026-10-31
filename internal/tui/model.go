@@ -45,7 +45,8 @@ const (
 	modeNew
 	modeConfirm
 	modeHelp
-	modeTeam // the new-team form
+	modeTeam    // the new-team form
+	modeChannel // a team's channel, full screen
 )
 
 // Model is the TUI state.
@@ -78,9 +79,12 @@ type Model struct {
 	confirm   confirmation
 	sendTo    sendTarget // where the send prompt's message goes, when through a team's mailbox
 
-	snap       TeamSnapshot // the teams, who is on them, what is unread
-	feed       feed         // the selected team's channel
-	hideSystem bool         // leave hive's own posts out of the channel
+	snap          TeamSnapshot // the teams, who is on them, what is unread
+	feed          feed         // the selected team's channel
+	channelTeam   string       // the team whose channel is open
+	channelInput  textinput.Model
+	channelScroll int  // lines scrolled back from the newest post
+	hideSystem    bool // leave hive's own posts out of the channel
 
 	foldedDone map[string]bool // done teams the tree has folded once; the user may unfold them
 
@@ -368,7 +372,22 @@ func New(ops Ops, popup bool) Model {
 	m := Model{ops: ops, popup: popup, now: time.Now, collapsed: map[string]bool{}, showPreview: true}
 	m.filter = newInput("/ ", "filter by title, folder or ID")
 	m.input = newPromptArea("message")
+	m.channelInput = newChannelInput()
 	return m
+}
+
+// layoutChannel fits the channel's live line to the screen, naming the team
+// it writes to.
+func (m *Model) layoutChannel() {
+	label := "message "
+	if t, ok := m.teamByID(m.channelTeam); ok {
+		label += t.Name + " (@role for one)"
+	} else {
+		label += "the team (@role for one)"
+	}
+	label += " › "
+	m.channelInput.Prompt = label
+	m.channelInput.Width = max(10, m.width-ansi.StringWidth(label)-1)
 }
 
 func (m *Model) layoutSend() {
@@ -394,6 +413,15 @@ func newInput(prompt, placeholder string) textinput.Model {
 	in := textinput.New()
 	in.Prompt = prompt
 	in.Placeholder = placeholder
+	in.PromptStyle = sAccent
+	in.PlaceholderStyle = sDim
+	in.CharLimit = 16000
+	return in
+}
+
+func newChannelInput() textinput.Model {
+	in := textinput.New()
+	in.Placeholder = "type a message · ↵ sends · esc goes back"
 	in.PromptStyle = sAccent
 	in.PlaceholderStyle = sDim
 	in.CharLimit = 16000
@@ -493,10 +521,18 @@ func (m *Model) usageCmd() tea.Cmd {
 // previewCmd loads what the selected session shows: its pane's screen when
 // it runs in one, else the end of its transcript; and its usage.
 func (m *Model) previewCmd() tea.Cmd {
+	if m.mode == modeChannel {
+		return m.contentCmd()
+	}
 	return tea.Batch(m.contentCmd(), m.usageCmd())
 }
 
 func (m *Model) contentCmd() tea.Cmd {
+	// The channel keeps loading for its own team, even if the row under it
+	// moves or the preview pane is hidden.
+	if m.mode == modeChannel && m.channelTeam != "" {
+		return m.feedCmd(m.channelTeam)
+	}
 	s, ok := m.selected()
 	if !ok {
 		return nil
@@ -531,6 +567,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.mode == modeSend {
 			m.layoutSend()
+		}
+		if m.mode == modeChannel {
+			m.layoutChannel()
 		}
 		return m, nil
 
@@ -643,6 +682,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.keyNew(msg)
 		case modeTeam:
 			return m.keyTeamForm(msg)
+		case modeChannel:
+			return m.keyChannel(msg)
 		case modeConfirm:
 			return m.keyConfirm(msg)
 		case modeHelp:

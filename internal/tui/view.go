@@ -21,7 +21,8 @@ func (m Model) bodyHeight() int { return max(1, m.height-3-max(0, m.sendRows()-1
 func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
 
 func (m Model) usageTakesTheBody() bool {
-	return m.showUsage && m.showPreview && !m.previewVisible() && m.mode != modeNew && m.mode != modeHelp
+	return m.showUsage && m.showPreview && !m.previewVisible() &&
+		m.mode != modeNew && m.mode != modeHelp && m.mode != modeChannel
 }
 
 func (m Model) treeWidth() int {
@@ -48,6 +49,8 @@ func (m Model) View() string {
 	switch {
 	case m.mode == modeHelp:
 		body = fit(helpLines(), m.width, h)
+	case m.mode == modeChannel:
+		body = m.channelLines(m.width, h)
 	case m.usageTakesTheBody():
 		body = m.previewLines(m.width, h)
 	case m.previewVisible():
@@ -434,6 +437,9 @@ func (f form) folderLines(rows int) []string {
 }
 
 func (m Model) hintLines() []string {
+	if m.mode == modeChannel {
+		return []string{ansi.Truncate(m.channelInput.View(), m.width, "")}
+	}
 	if m.mode != modeSend {
 		return []string{ansi.Truncate(m.hintLine(), m.width, "…")}
 	}
@@ -520,7 +526,8 @@ func helpLines() []string {
 		{"←/→ space", "fold and unfold; ← on a leaf goes to its parent"},
 		{"y", "copy the session ID"},
 		{"T", "start a team: agents that work on one goal and report to a channel"},
-		{"on a team", "↵ jumps to the member that needs you · s messages everyone (@role for one) · p pauses · L takes or hands over the lead · x stops all · m hides hive's own posts"},
+		{"on a team", "↵ opens its channel · s messages everyone (@role for one) · p pauses · L takes or hands over the lead · x stops all · m hides hive's own posts"},
+		{"in a channel", "type to write to everyone (@role for one) · ↵ sends · esc goes back to the tree · ↑/↓ scrolls the feed"},
 		{"S", "sync history now (it also runs every 30s)"},
 		{"tab", "hide / show the preview"},
 		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills"},

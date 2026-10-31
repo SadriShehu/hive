@@ -465,7 +465,7 @@ core); and from phase 3, a worktree per member, `hive team done`, teams in the t
 | How work is split | numbered tasks with an owner and the tasks each waits for. hive tells an owner when its task is ready, so nobody polls |
 | Where members work | one shared folder by default. `--worktrees` gives each member a worktree and branch of its own; the lead stays in the folder and merges |
 | When a team is done | when someone runs `hive team done`, you by default: the lead posts that the goal is met. done stops nobody |
-| Channel view | the feed in the preview pane; a full-screen view comes in phase 2 |
+| Channel view | the feed in the preview pane; `↵` on a team opens it full screen with a live input line |
 
 ### Members and roles
 
@@ -543,15 +543,17 @@ happens to be called `lead`: who leads goes by the team's lead role alone.
 ### The channel and the mailbox
 
 - **Posts.** `hive team post` writes to the channel, which you read in the team node's
-  preview. A post reaches a pane only when it names a teammate with `@role`, a whole role:
-  `@dev` isn't in `@dev-ops`. Otherwise every update would interrupt every agent.
+  preview or full screen. A post reaches a pane only when it names a teammate with
+  `@role`, a whole role: `@dev` isn't in `@dev-ops`. Otherwise every update would
+  interrupt every agent.
 - **hive's posts.** A member started, needs you, stopped, continues as another session or
   left; the team paused or resumed; who leads. They come from hooks and commands, so they
   cost no tokens, and the feed has news even when an agent forgets to post. `m` hides
   them.
 - **Messages.** `hive team say <role|all>` writes to teammates; `all` leaves the sender
   out, and a member can't write to itself. `--private` keeps one out of your feed. What
-  you write with `s` in the tree goes through the same mailbox.
+  you write with `s` in the tree, or on the channel's live line, goes through the same
+  mailbox.
 - **Unread.** `team_reads` keeps the last message you have seen per team; the node shows
   what others wrote since.
 
@@ -622,9 +624,15 @@ tasks done. Its preview is the board and the channel, under a strip of the membe
 board takes at most half, folding the done tasks first. A member's row is titled by the
 task it holds (`backend · #4 handlers…`), else by what its session does.
 
+`↵` on a team opens its channel full screen: the team's name, goal, roster and state, the
+task board and the feed, with a live line at the bottom. Typing writes to everyone
+(`@role` for one), `↵` sends through the same mailbox as `s`, `esc` goes back to the tree,
+and `↑/↓` scrolls the feed. The channel marks its team read while it is open, preview or
+no preview.
+
 | Key, on a team | Does |
 | --- | --- |
-| `↵` | jump to the member that needs you, else the lead, else the first running |
+| `↵` | open the team's channel full screen; on a member row, jump to that member |
 | `s` | write to everyone (`@role` for one); on a member, to that member |
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |
@@ -726,8 +734,6 @@ Tables in migrations that can run twice, as the trash's can:
 
 - The new-team form gets one row per member (role, tool, model, the member's part), with
   `+` to add one and templates to fill them. Tasks can be edited from the tree.
-- A full-screen channel view: `↵` on a team opens it, with a live input line; `esc` goes
-  back to the tree.
 
 **The rest of phase 3.** A worktree per member, `hive team done`, the trash, mute and
 `hive team new --wait` are built; left is:

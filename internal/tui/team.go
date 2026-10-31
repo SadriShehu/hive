@@ -109,9 +109,15 @@ func (m *Model) feedCmd(teamID string) tea.Cmd {
 }
 
 // onFeed takes a loaded channel, and tells the store the user has read it
-// when it is on screen.
+// when it is on screen: in the preview, or in the full-screen channel, even
+// when the preview is hidden or the window is too narrow for it.
 func (m *Model) onFeed(msg feedMsg) tea.Cmd {
-	if n := m.selectedNode(); n == nil || n.Team == nil || n.Team.ID != msg.teamID {
+	open := m.mode == modeChannel && m.channelTeam == msg.teamID
+	selected := false
+	if n := m.selectedNode(); n != nil && n.Team != nil && n.Team.ID == msg.teamID {
+		selected = true
+	}
+	if !open && !selected {
 		return nil
 	}
 	m.feed = feed{teamID: msg.teamID, msgs: msg.msgs}
@@ -119,7 +125,10 @@ func (m *Model) onFeed(msg feedMsg) tea.Cmd {
 		m.feed.err = msg.err.Error()
 		return nil
 	}
-	if !m.previewVisible() || len(msg.msgs) == 0 || m.snap.Unread[msg.teamID] == 0 {
+	if !open && !m.previewVisible() {
+		return nil
+	}
+	if len(msg.msgs) == 0 || m.snap.Unread[msg.teamID] == 0 {
 		return nil
 	}
 	delete(m.snap.Unread, msg.teamID)
@@ -185,7 +194,8 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 	switch msg.String() {
 	case "enter":
-		return m, m.jumpTeam(tm.ID), true
+		m, cmd := m.openChannel(tm.ID)
+		return m, cmd, true
 	case "x":
 		live := 0
 		for _, mem := range m.members(tm.ID) {
@@ -214,6 +224,73 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	return m, nil, true
+}
+
+// openChannel shows a team's channel full screen, with its live input line.
+func (m Model) openChannel(teamID string) (Model, tea.Cmd) {
+	m.mode = modeChannel
+	m.channelTeam = teamID
+	m.channelScroll = 0
+	m.channelInput.Reset()
+	m.layoutChannel()
+	cmd := m.channelInput.Focus()
+	return m, tea.Batch(cmd, m.feedCmd(teamID))
+}
+
+// keyChannel handles the channel: typing goes into the live line, ↵ sends it
+// through the mailbox, esc goes back to the tree, and the arrows scroll the
+// feed.
+func (m Model) keyChannel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeNormal
+		m.channelInput.Blur()
+		return m, nil
+	case "enter":
+		text := m.channelInput.Value()
+		if strings.TrimSpace(text) == "" {
+			m.channelInput.Reset()
+			return m, nil
+		}
+		tm, ok := m.teamByID(m.channelTeam)
+		if !ok {
+			m.setFlash("this team is gone; esc goes back", true)
+			return m, nil
+		}
+		if isDone(&tm) {
+			m.setFlash(tm.Name+" is done; it takes no more messages", true)
+			return m, nil
+		}
+		m.channelInput.Reset()
+		m.sendTo = sendTarget{team: m.channelTeam, to: store.ToAll}
+		return m, tea.Batch(m.mailbox(text), m.feedCmd(m.channelTeam))
+	case "up", "pgup", "ctrl+u":
+		step := 1
+		if msg.String() != "up" {
+			step = max(1, m.bodyHeight()/2)
+		}
+		m.channelScroll = min(m.channelMaxScroll(), m.channelScroll+step)
+		return m, nil
+	case "down", "pgdown", "ctrl+d":
+		step := 1
+		if msg.String() != "down" {
+			step = max(1, m.bodyHeight()/2)
+		}
+		m.channelScroll = max(0, m.channelScroll-step)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.channelInput, cmd = m.channelInput.Update(msg)
+	return m, cmd
+}
+
+// channelMaxScroll is how far back the feed can scroll.
+func (m Model) channelMaxScroll() int {
+	t, ok := m.teamByID(m.channelTeam)
+	if !ok {
+		return 0
+	}
+	return max(0, len(m.feedLines(t, m.width))-1)
 }
 
 // agentLead picks the member that takes the lead back from the user: the one
@@ -261,7 +338,8 @@ func (m *Model) jumpTeam(teamID string) tea.Cmd {
 	return nil
 }
 
-// jumpNode is Enter on a row: a team goes to the member that needs you.
+// jumpNode is a double-click on a row: a team goes to the member that needs
+// you, as it did before ↵ opened its channel.
 func (m *Model) jumpNode(n *tree.Node) tea.Cmd {
 	if n.Team != nil {
 		return m.jumpTeam(n.Team.ID)
@@ -553,9 +631,9 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	return ansi.Truncate(line, w, "")
 }
 
-// teamPreviewLines shows the team and its channel.
-func (m Model) teamPreviewLines(n *tree.Node, w, h int) []string {
-	t := *n.Team
+// teamHead draws who a team is: its name and goal, how it runs, its state and
+// its roster.
+func (m Model) teamHead(t store.Team, w int) []string {
 	members := m.members(t.ID)
 	led := "you"
 	if t.LeadRole != "" {
@@ -578,7 +656,6 @@ func (m Model) teamPreviewLines(n *tree.Node, w, h int) []string {
 		head = append(head, sError.Render("⏸ paused: no mail is delivered · p resumes"))
 	}
 	var roster []string
-	var waiting []string
 	for _, mem := range members {
 		s, ok := m.memberSession(mem)
 		g, gs := "◌", sDim
@@ -586,13 +663,25 @@ func (m Model) teamPreviewLines(n *tree.Node, w, h int) []string {
 			g, gs = glyph(s)
 		}
 		roster = append(roster, gs.Render(g)+" "+sText.Render(mem.Role))
-		if ok && s.Live() && s.Status == store.StatusAttention {
-			waiting = append(waiting, mem.Role)
-		}
 	}
 	if len(roster) > 0 {
 		head = append(head, strings.Join(roster, "  "))
 	}
+	return head
+}
+
+// teamPreviewLines shows the team and its channel.
+func (m Model) teamPreviewLines(n *tree.Node, w, h int) []string {
+	t := *n.Team
+	members := m.members(t.ID)
+	var waiting []string
+	for _, mem := range members {
+		s, ok := m.memberSession(mem)
+		if ok && s.Live() && s.Status == store.StatusAttention {
+			waiting = append(waiting, mem.Role)
+		}
+	}
+	head := m.teamHead(t, w)
 	head = append(head, sRule.Render(strings.Repeat("─", w)))
 	// The board takes up to half of what is left; the channel the rest.
 	if tasks := m.taskLines(t.ID, w, max(2, (h-len(head))/2)); len(tasks) > 0 {
@@ -610,11 +699,50 @@ func (m Model) teamPreviewLines(n *tree.Node, w, h int) []string {
 		body = m.feedLines(t, w)
 	}
 	if len(waiting) > 0 && room > 0 {
-		note := sError.Render("▸ " + strings.Join(waiting, ", ") + " waits on you · ↵ jumps there")
+		note := sError.Render("▸ " + strings.Join(waiting, ", ") + " waits on you · its row's ↵ jumps there")
 		body = append(body, note)
 	}
 	if len(body) > room {
 		body = body[len(body)-room:]
+	}
+	return fit(append(head, body...), w, h)
+}
+
+// channelLines draws the full-screen channel: who the team is, its board and
+// then the feed, scrolled back from the newest post with ↑/↓.
+func (m Model) channelLines(w, h int) []string {
+	t, ok := m.teamByID(m.channelTeam)
+	if !ok {
+		return fit([]string{sDim.Render("this team is gone; esc goes back to the tree")}, w, h)
+	}
+	head := m.teamHead(t, w)
+	head = append(head, sRule.Render(strings.Repeat("─", w)))
+	// The board takes up to a third of the room; the feed the rest.
+	room := max(0, h-len(head))
+	if room > 1 {
+		if tasks := m.taskLines(t.ID, w, max(1, room/3)); len(tasks) > 0 {
+			head = append(head, tasks...)
+			head = append(head, sRule.Render(strings.Repeat("─", w)))
+		}
+	}
+	room = max(0, h-len(head))
+	var body []string
+	switch {
+	case m.feed.teamID != t.ID:
+		body = []string{sDim.Render("…")}
+	case m.feed.err != "":
+		body = []string{sDim.Render(ansi.Wrap(m.feed.err, w, ""))}
+	default:
+		body = m.feedLines(t, w)
+	}
+	if len(body) > room {
+		if m.channelScroll > 0 {
+			end := max(0, len(body)-m.channelScroll)
+			start := max(0, end-room)
+			body = body[start:end]
+		} else {
+			body = body[len(body)-room:]
+		}
 	}
 	return fit(append(head, body...), w, h)
 }
@@ -679,7 +807,7 @@ func (m Model) teamHints() (string, bool) {
 		return "", false
 	}
 	if n.Team != nil {
-		return keys("↵", "jump", "s", "message", "p", "pause", "L", "lead", "x", "stop", "m", "system", "T", "new team", "?", "help", "q", "quit"), true
+		return keys("↵", "channel", "s", "message", "p", "pause", "L", "lead", "x", "stop", "m", "system", "T", "new team", "?", "help", "q", "quit"), true
 	}
 	return keys("↵", "jump", "s", "message", "p", "pause", "L", "lead", "r", "reopen", "x", "stop", "T", "new team", "?", "help", "q", "quit"), true
 }
