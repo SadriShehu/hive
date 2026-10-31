@@ -30,6 +30,18 @@ type teamOps struct {
 	trashedTeams  []string
 	restoredTeams []string
 	purgedTeams   []string
+
+	taskAdded   []taskCall
+	taskEdited  []taskCall
+	taskDone    []taskCall
+	taskBlocked []taskCall
+}
+
+// taskCall records what the task editor asked of the board.
+type taskCall struct {
+	team, title, body, owner, note string
+	n                              int
+	after                          []int
 }
 
 func (f *teamOps) Teams() (TeamSnapshot, error)  { return f.snap, nil }
@@ -70,6 +82,56 @@ func (f *teamOps) RestoreTeam(tm store.Team) ([]store.Session, error) {
 func (f *teamOps) PurgeTeam(tm store.Team) (tracker.Purged, error) {
 	f.purgedTeams = append(f.purgedTeams, tm.ID)
 	return tracker.Purged{}, nil
+}
+
+func (f *teamOps) TeamTaskAdd(team, title, body, owner string, after []int) (store.Task, error) {
+	f.taskAdded = append(f.taskAdded, taskCall{team: team, title: title, body: body, owner: owner, after: after})
+	n := 1
+	for _, t := range f.snap.Tasks {
+		if t.TeamID == team && t.N >= n {
+			n = t.N + 1
+		}
+	}
+	task := store.Task{TeamID: team, N: n, Title: title, Body: body, Owner: owner, After: after, Status: store.TaskOpen}
+	f.snap.Tasks = append(f.snap.Tasks, task)
+	return task, nil
+}
+
+func (f *teamOps) TeamTaskEdit(team string, n int, title, body, owner string, after []int) (store.Task, error) {
+	f.taskEdited = append(f.taskEdited, taskCall{team: team, n: n, title: title, body: body, owner: owner, after: after})
+	task := store.Task{TeamID: team, N: n, Title: title, Body: body, Owner: owner, After: after, Status: store.TaskOpen}
+	for i := range f.snap.Tasks {
+		if f.snap.Tasks[i].TeamID == team && f.snap.Tasks[i].N == n {
+			f.snap.Tasks[i].Title, f.snap.Tasks[i].Body = title, body
+			f.snap.Tasks[i].Owner, f.snap.Tasks[i].After = owner, after
+			task = f.snap.Tasks[i]
+		}
+	}
+	return task, nil
+}
+
+func (f *teamOps) TeamTaskDone(team string, n int, note string) (store.Task, error) {
+	f.taskDone = append(f.taskDone, taskCall{team: team, n: n, note: note})
+	task := store.Task{TeamID: team, N: n, Status: store.TaskDone, Note: note}
+	for i := range f.snap.Tasks {
+		if f.snap.Tasks[i].TeamID == team && f.snap.Tasks[i].N == n {
+			f.snap.Tasks[i].Status, f.snap.Tasks[i].Note = store.TaskDone, note
+			task = f.snap.Tasks[i]
+		}
+	}
+	return task, nil
+}
+
+func (f *teamOps) TeamTaskBlock(team string, n int, why string) (store.Task, error) {
+	f.taskBlocked = append(f.taskBlocked, taskCall{team: team, n: n, note: why})
+	task := store.Task{TeamID: team, N: n, Status: store.TaskBlocked, Note: why}
+	for i := range f.snap.Tasks {
+		if f.snap.Tasks[i].TeamID == team && f.snap.Tasks[i].N == n {
+			f.snap.Tasks[i].Status, f.snap.Tasks[i].Note = store.TaskBlocked, why
+			task = f.snap.Tasks[i]
+		}
+	}
+	return task, nil
 }
 
 // teamSessions is a lead at work, an idle backend and a frontend that needs

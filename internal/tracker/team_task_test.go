@@ -67,6 +67,39 @@ func TestAReadyTaskIsToldToItsOwnerAsItIsAdded(t *testing.T) {
 	}
 }
 
+func TestEditTaskChangesItsFieldsAndChecksTheBoard(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	addTask(t, tr, "schema", "backend")
+	addTask(t, tr, "handlers", "", 1)
+	tm := theTeam(t, tr)
+
+	task, err := tr.EditTask(tm, 2, "handlers v2", "the admin endpoints", "frontend", []int{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Title != "handlers v2" || task.Body != "the admin endpoints" || task.Owner != "frontend" {
+		t.Fatalf("EditTask = %+v", task)
+	}
+	got, _ := tr.Store.Task("t1", 2)
+	if got.Title != "handlers v2" || got.Body != "the admin endpoints" || got.Owner != "frontend" ||
+		len(got.After) != 1 || got.After[0] != 1 || got.Status != store.TaskOpen {
+		t.Errorf("#2 = %+v, want the edit kept", got)
+	}
+
+	if _, err := tr.EditTask(tm, 2, "x", "", "nobody", nil); err == nil || !strings.Contains(err.Error(), "roles:") {
+		t.Errorf("an owner off the team = %v, want the roles named", err)
+	}
+	if _, err := tr.EditTask(tm, 2, "x", "", "", []int{7}); err == nil || !strings.Contains(err.Error(), "#7") {
+		t.Errorf("waiting for a task that isn't there = %v", err)
+	}
+	if _, err := tr.EditTask(tm, 2, "x", "", "", []int{2}); err == nil || !strings.Contains(err.Error(), "itself") {
+		t.Errorf("waiting for itself = %v, want it refused", err)
+	}
+	if _, err := tr.EditTask(tm, 2, " ", "", "", nil); err == nil {
+		t.Error("an empty title was kept")
+	}
+}
+
 func TestDoneTellsTheLeadAndTheOwnersOfReadyTasks(t *testing.T) {
 	tr, w, sent := newTeamWorld(t)
 	backendUp(t, tr, w)

@@ -196,6 +196,9 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	case "enter":
 		m, cmd := m.openChannel(tm.ID)
 		return m, cmd, true
+	case "e":
+		m, cmd := m.openTaskEditor(tm)
+		return m, cmd, true
 	case "x":
 		live := 0
 		for _, mem := range m.members(tm.ID) {
