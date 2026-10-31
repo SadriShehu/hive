@@ -45,6 +45,7 @@ type Ops interface {
 	// Teams. The user writes to a team as "you", through the same mailbox
 	// the members use.
 	Teams() (TeamSnapshot, error)
+	TeamTemplates() []TeamTemplate // the [[team]] templates the config holds, for the new-team form
 	TeamFeed(teamID string, n int) ([]store.Message, error)
 	TeamSay(teamID, to, text string) (string, error) // to: a role or "all"; says what happened to each
 	TeamPause(teamID string, paused bool) error
@@ -67,19 +68,39 @@ type TeamSnapshot struct {
 	Tasks   []store.Task // every team's board
 }
 
+// TeamTemplate is a [[team]] table of config.toml, as the new-team form fills
+// itself from it. It is TUI-facing so the form needn't know about adapters.
+type TeamTemplate struct {
+	Name      string
+	Goal      string
+	Lead      string // a tool[:model], or none
+	Cwd       string
+	Worktrees bool
+	Members   []TeamTemplateMember
+}
+
+// TeamTemplateMember is one member of a TeamTemplate.
+type TeamTemplateMember struct {
+	Role   string
+	Tool   string
+	Model  string
+	Prompt string
+}
+
 type liveOps struct {
-	st       *store.Store
-	adapters []agent.Adapter
-	models   usage.Catalog
-	fusion   fusion.Settings
+	st        *store.Store
+	adapters  []agent.Adapter
+	models    usage.Catalog
+	fusion    fusion.Settings
+	templates []TeamTemplate
 
 	mu        sync.Mutex
 	refresher *tracker.Tracker // long-lived: it remembers process folders
 }
 
 // NewLiveOps returns the Ops that act on this machine.
-func NewLiveOps(st *store.Store, adapters []agent.Adapter, models usage.Catalog, settings fusion.Settings) Ops {
-	return &liveOps{st: st, adapters: adapters, models: models, fusion: settings,
+func NewLiveOps(st *store.Store, adapters []agent.Adapter, models usage.Catalog, settings fusion.Settings, templates []TeamTemplate) Ops {
+	return &liveOps{st: st, adapters: adapters, models: models, fusion: settings, templates: templates,
 		refresher: tracker.New(st, adapters, &tracker.System{})}
 }
 
@@ -158,6 +179,8 @@ func (o *liveOps) Copy(text string) error {
 }
 
 func (o *liveOps) Tools() []string { return o.tracker().InstalledTools() }
+
+func (o *liveOps) TeamTemplates() []TeamTemplate { return o.templates }
 
 func (o *liveOps) Teams() (TeamSnapshot, error) {
 	var snap TeamSnapshot
