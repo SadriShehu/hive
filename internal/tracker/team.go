@@ -654,14 +654,21 @@ func (t *Tracker) deliver(id string, roles []Role) (string, error) {
 	why := "nothing waits"
 	for _, r := range roles {
 		pending, err := t.Store.HasPending(r.Team.ID, r.Member.Role)
-		switch {
-		case err != nil:
+		if err != nil {
 			return "", err
+		}
+		muted, err := t.Store.Muted(r.Team.ID, r.Member.Role)
+		if err != nil {
+			return "", err
+		}
+		switch {
 		case !pending:
 		case !r.Member.Active():
 			why = "queued; it left the team"
 		case r.Team.Paused:
 			why = "queued; the team is paused"
+		case muted:
+			why = "queued; it is muted"
 		default:
 			ready = append(ready, r)
 		}
@@ -688,6 +695,7 @@ func (t *Tracker) deliver(id string, roles []Role) (string, error) {
 		return "queued; it is " + status, nil
 	}
 	type claim struct {
+		team store.Team
 		role string
 		msgs []store.Message
 	}
@@ -706,7 +714,7 @@ func (t *Tracker) deliver(id string, roles []Role) (string, error) {
 			return "", errors.Join(err, unclaim())
 		}
 		if len(msgs) > 0 {
-			claims = append(claims, claim{r.Member.Role, msgs})
+			claims = append(claims, claim{r.Team, r.Member.Role, msgs})
 			text = append(text, team.Paste(r.Team.Name, msgs))
 		}
 	}
@@ -719,6 +727,11 @@ func (t *Tracker) deliver(id string, roles []Role) (string, error) {
 	}
 	if d == team.Blind {
 		how += " (blind: it doesn't report its turns)"
+	}
+	if d == team.Reopen { // no hook says it started again
+		for _, c := range claims {
+			t.system(c.team, c.role+" reopened with its mail")
+		}
 	}
 	return how, nil
 }
@@ -757,6 +770,23 @@ func (t *Tracker) Inbox(teamID, role string) ([]store.Message, error) {
 		return nil, err
 	}
 	return t.Store.ClaimPending(tm.ID, role, t.World.Now())
+}
+
+// MuteMember stops hive from typing a member's queued mail into its pane, or
+// lets it again. The mail still queues, and `hive team inbox` still reads it.
+func (t *Tracker) MuteMember(tm store.Team, role string, on bool) error {
+	role = strings.TrimPrefix(strings.TrimSpace(role), "@")
+	members, err := t.Store.Members(tm.ID)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(members, func(m store.Member) bool { return m.Active() && m.Role == role }) {
+		return fmt.Errorf("the team has no %s; roles: %s", role, team.Roster(members))
+	}
+	if on {
+		return t.Store.Mute(tm.ID, role, t.World.Now())
+	}
+	return t.Store.Unmute(tm.ID, role)
 }
 
 // MemberState says what a member is doing: its session's status, or that it

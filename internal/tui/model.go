@@ -121,7 +121,9 @@ const (
 	actTrash = "trash"
 	actPurge = "purge"
 
-	actStopTeam = "stop team"
+	actStopTeam  = "stop team"
+	actTrashTeam = "trash team"
+	actPurgeTeam = "purge team"
 )
 
 // confirmation is an action waiting for y.
@@ -803,6 +805,7 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // and filtering work as in the tree.
 func (m Model) keyTrash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s, ok := m.selected()
+	n := m.selectedNode()
 	switch msg.String() {
 	case "esc":
 		if m.filter.Value() != "" {
@@ -813,6 +816,13 @@ func (m Model) keyTrash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.showTrash(false)
 	case "r":
 		if ok {
+			if tm, isTeam := m.trashedTeamOf(n); isTeam {
+				ops, count := m.ops, len(m.members(tm.ID))
+				return m, func() tea.Msg {
+					_, err := ops.RestoreTeam(tm)
+					return doneMsg{text: "restored team " + tm.Name + " and its " + membersText(count), err: err}
+				}
+			}
 			ops := m.ops
 			return m, func() tea.Msg {
 				family, err := ops.Restore(s)
@@ -821,6 +831,10 @@ func (m Model) keyTrash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "d":
 		if ok {
+			if tm, isTeam := m.trashedTeamOf(n); isTeam {
+				m.mode, m.confirm = modeConfirm, confirmation{action: actPurgeTeam, team: tm, session: s, below: len(m.members(tm.ID))}
+				return m, nil
+			}
 			m.mode, m.confirm = modeConfirm, confirmation{action: actPurge, session: s, below: len(under(m.trashed, s.ID))}
 		}
 	case "enter", "s", "n", "c", "x", "a":
@@ -921,6 +935,26 @@ func (m Model) keyConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return doneMsg{err: err}
 			}
 			text := "deleted " + name + belowText(len(purged.Sessions)-1) + " for good"
+			if len(purged.Kept) > 0 {
+				text += "; hive can't delete " + strings.Join(purged.Kept, ", ") + " sessions, whose own copies stay"
+			}
+			return doneMsg{text: text}
+		}
+	case actTrashTeam:
+		return m, func() tea.Msg {
+			_, err := ops.TrashTeam(c.team)
+			return doneMsg{text: "moved team " + c.team.Name + " and its " + membersText(c.below) + " to the trash; t shows it", err: err}
+		}
+	case actPurgeTeam:
+		return m, func() tea.Msg {
+			purged, err := ops.PurgeTeam(c.team)
+			if err != nil {
+				if n := len(purged.Sessions); n > 0 {
+					err = fmt.Errorf("deleted %d sessions, then stopped: %w", n, err)
+				}
+				return doneMsg{err: err}
+			}
+			text := "deleted team " + c.team.Name + " and its " + membersText(c.below) + " for good"
 			if len(purged.Kept) > 0 {
 				text += "; hive can't delete " + strings.Join(purged.Kept, ", ") + " sessions, whose own copies stay"
 			}
@@ -1178,7 +1212,7 @@ func (m *Model) rebuild() {
 	var roots []*tree.Node
 	switch {
 	case m.trash:
-		roots = tree.Build(m.trashed)
+		roots = tree.BuildTeams(m.trashed, m.snap.Trashed, m.snap.Members)
 	case !m.showAll && query == "":
 		roots = tree.Recent(tree.DropEmpty(tree.BuildTeams(m.sessions, m.snap.Teams, m.snap.Members)), m.now().Add(-recentWindow).UnixMilli())
 	default:
