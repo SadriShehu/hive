@@ -9,13 +9,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tracker"
 )
 
 // teamOps is the fake world's teams, and what the TUI asked of them.
 type teamOps struct {
-	snap TeamSnapshot
-	feed []store.Message
+	snap      TeamSnapshot
+	feed      []store.Message
+	templates []TeamTemplate
 
 	said        []string // team|to|text
 	paused      []string // team|true/false
@@ -30,7 +32,8 @@ type teamOps struct {
 	purgedTeams   []string
 }
 
-func (f *teamOps) Teams() (TeamSnapshot, error) { return f.snap, nil }
+func (f *teamOps) Teams() (TeamSnapshot, error)  { return f.snap, nil }
+func (f *teamOps) TeamTemplates() []TeamTemplate { return f.templates }
 func (f *teamOps) TeamFeed(team string, _ int) ([]store.Message, error) {
 	f.feedAsked = append(f.feedAsked, team)
 	return f.feed, nil
@@ -400,6 +403,14 @@ func TestATeamIsPurgedForGoodFromTheTrash(t *testing.T) {
 	}
 }
 
+func setTeamRow(m *Model, i int, role, tool, model, prompt string) {
+	r := &m.teamForm.members[i]
+	r.role.SetValue(role)
+	r.tool.SetValue(tool)
+	r.model.SetValue(model)
+	r.prompt.SetValue(prompt)
+}
+
 func TestNewTeamForm(t *testing.T) {
 	m, ops := setupTeam(t)
 	typ := func(m Model, s string) Model {
@@ -410,25 +421,22 @@ func TestNewTeamForm(t *testing.T) {
 	}
 
 	m = press(t, m, "T")
-	if !strings.Contains(ansi.Strip(m.View()), "New team") {
-		t.Fatalf("no form:\n%s", ansi.Strip(m.View()))
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "New team") || !strings.Contains(view, "template") || !strings.Contains(view, "role") {
+		t.Fatalf("no form:\n%s", view)
 	}
 	m = typ(m, "docs")
 	m = press(t, m, "enter") // folder keeps its default
 	m = press(t, m, "enter") // work keeps the shared folder
 	m = press(t, m, "enter") // lead keeps claude
-	m = press(t, m, "enter") // members
-	m = typ(m, "writer=codex bad role")
-	m = press(t, m, "enter", "enter") // an invalid member: the form stays
-	if len(ops.started) != 0 || m.mode != modeTeam {
-		t.Fatalf("started %v from an invalid form (mode %v)", ops.started, m.mode)
-	}
-	if !strings.Contains(m.flash, "role") {
-		t.Errorf("flash = %q, want the reason", m.flash)
-	}
-
-	m.teamForm.members.SetValue("writer=codex reviewer=opencode:auto")
-	m.teamForm.focus(tfGoal)
+	m = press(t, m, "enter") // first member row
+	m = typ(m, "writer")
+	m = press(t, m, "enter")
+	m = typ(m, "codex")
+	m = press(t, m, "enter") // model stays blank
+	m = press(t, m, "enter")
+	m = typ(m, "the docs")
+	m = press(t, m, "enter")
 	m = typ(m, "write the docs")
 	m = press(t, m, "enter")
 	if len(ops.started) != 1 {
@@ -436,7 +444,8 @@ func TestNewTeamForm(t *testing.T) {
 	}
 	o := ops.started[0]
 	if o.Name != "docs" || o.Goal != "write the docs" || o.Lead == nil || o.Lead.Tool != "claude" ||
-		len(o.Members) != 2 || o.Members[1].Model != "auto" || o.Worktrees {
+		len(o.Members) != 1 || o.Members[0].Role != "writer" || o.Members[0].Tool != "codex" ||
+		o.Members[0].Model != "" || o.Members[0].Prompt != "the docs" || o.Worktrees {
 		t.Errorf("options = %+v", o)
 	}
 	if m.mode != modeNormal {
@@ -450,11 +459,170 @@ func TestNewTeamForm(t *testing.T) {
 	if view := ansi.Strip(m.View()); !strings.Contains(view, "‹ a worktree per member ›") || !strings.Contains(view, "merges") {
 		t.Fatalf("the work row didn't flip:\n%s", view)
 	}
-	m.teamForm.members.SetValue("writer=codex")
-	m.teamForm.focus(tfGoal)
+	setTeamRow(&m, 0, "writer", "codex", "", "")
+	m.teamForm.focus(m.teamForm.goalField())
 	m = press(t, m, "enter")
 	if len(ops.started) != 2 || !ops.started[1].Worktrees {
 		t.Fatalf("started = %+v, want worktrees", ops.started)
+	}
+}
+
+func TestTeamFormAddsAndRemovesMemberRows(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = press(t, m, "T")
+	if len(m.teamForm.members) != 1 {
+		t.Fatalf("started with %d rows, want one", len(m.teamForm.members))
+	}
+	m = press(t, m, "+")
+	if len(m.teamForm.members) != 2 {
+		t.Fatalf("after + rows = %d, want two", len(m.teamForm.members))
+	}
+	if r, c, ok := m.teamForm.rowOf(m.teamForm.field); !ok || r != 1 || c != memberRole {
+		t.Fatalf("focus after + = row %d cell %d (%v), want row 1 role", r, c, ok)
+	}
+	m = press(t, m, "tab")
+	if r, c, ok := m.teamForm.rowOf(m.teamForm.field); !ok || r != 1 || c != memberTool {
+		t.Fatalf("tab went to row %d cell %d (%v), want row 1 tool", r, c, ok)
+	}
+	m = press(t, m, "ctrl+d")
+	if len(m.teamForm.members) != 1 {
+		t.Fatalf("after ctrl+d rows = %d, want one", len(m.teamForm.members))
+	}
+	m = press(t, m, "ctrl+d")
+	if len(m.teamForm.members) != 1 {
+		t.Fatalf("ctrl+d removed the only row: %d", len(m.teamForm.members))
+	}
+}
+
+func TestTeamFormEditsMemberRows(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = press(t, m, "T")
+	m = press(t, m, "tab", "tab", "tab", "tab") // name → folder → work → lead → role
+	if _, _, ok := m.teamForm.rowOf(m.teamForm.field); !ok {
+		t.Fatalf("tab did not reach the member rows")
+	}
+	typ := func(m Model, s string) Model {
+		for _, r := range s {
+			m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+		return m
+	}
+	m = typ(m, "backend")
+	m = press(t, m, "tab")
+	m = typ(m, "claude")
+	m = press(t, m, "tab")
+	m = typ(m, "auto")
+	m = press(t, m, "tab")
+	m = typ(m, "handlers")
+	row := m.teamForm.members[0]
+	if row.role.Value() != "backend" || row.tool.Value() != "claude" ||
+		row.model.Value() != "auto" || row.prompt.Value() != "handlers" {
+		t.Errorf("row = %q %q %q %q", row.role.Value(), row.tool.Value(), row.model.Value(), row.prompt.Value())
+	}
+}
+
+func TestTeamFormOptionsFromRows(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = press(t, m, "T")
+	m.teamForm.name.SetValue("api")
+	m.teamForm.folder.SetValue("/src/app")
+	m.teamForm.work = true
+	setTeamRow(&m, 0, "backend", "claude", "auto", "handlers")
+	m.teamForm.addMember()
+	setTeamRow(&m, 1, "frontend", "codex", "", "the table")
+	o, err := m.teamForm.options()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Name != "api" || o.Cwd != "/src/app" || !o.Worktrees || o.Lead == nil || o.Lead.Tool != "claude" {
+		t.Errorf("options = %+v", o)
+	}
+	if len(o.Members) != 2 || o.Members[0].Prompt != "handlers" || o.Members[1].Prompt != "the table" ||
+		o.Members[1].Model != "" {
+		t.Errorf("members = %+v", o.Members)
+	}
+}
+
+func TestTeamFormTemplateFillsTheForm(t *testing.T) {
+	m, ops := setupTeam(t)
+	ops.templates = []TeamTemplate{{
+		Name: "api", Goal: "add the admin API", Lead: "codex:gpt-5", Cwd: "~/src/app", Worktrees: true,
+		Members: []TeamTemplateMember{
+			{Role: "backend", Tool: "claude", Model: "auto", Prompt: "handlers"},
+			{Role: "frontend", Tool: "codex"},
+		},
+	}}
+	m = press(t, m, "T")
+	m.teamForm.name.SetValue("admin-api")
+	m.teamForm.focus(tfTemplate)
+	m = press(t, m, "right")
+	f := m.teamForm
+	if f.name.Value() != "admin-api" {
+		t.Errorf("template overwrote the name: %q", f.name.Value())
+	}
+	if f.folder.Value() != "~/src/app" || !f.work || f.goal.Value() != "add the admin API" {
+		t.Errorf("form = folder %q work %v goal %q", f.folder.Value(), f.work, f.goal.Value())
+	}
+	if len(f.members) != 2 || f.members[0].role.Value() != "backend" ||
+		f.members[0].tool.Value() != "claude" || f.members[0].model.Value() != "auto" ||
+		f.members[0].prompt.Value() != "handlers" || f.members[1].role.Value() != "frontend" {
+		t.Errorf("members = %+v", f.members)
+	}
+	if f.leads[f.lead] != "codex" {
+		t.Errorf("lead = %q, want codex", f.leads[f.lead])
+	}
+	o, err := f.options()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Name != "admin-api" || o.Goal != "add the admin API" || o.Cwd != "~/src/app" || !o.Worktrees ||
+		o.Lead == nil || o.Lead.Tool != "codex" {
+		t.Errorf("options = %+v", o)
+	}
+	if len(o.Members) != 2 || o.Members[0].Prompt != "handlers" || o.Members[1].Prompt != "" ||
+		o.Members[0].Model != "auto" {
+		t.Errorf("members = %+v", o.Members)
+	}
+}
+
+func TestTeamFormMemberValidation(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = press(t, m, "T")
+	m.teamForm.name.SetValue("api")
+	check := func(want string) {
+		t.Helper()
+		_, err := m.teamForm.options()
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want %q", err, want)
+		}
+	}
+	setTeamRow(&m, 0, "", "", "", "")
+	check("row 1")
+	setTeamRow(&m, 0, "Backend", "claude", "", "")
+	check("row 1")
+	setTeamRow(&m, 0, "backend", "bad tool", "", "")
+	check("row 1")
+	setTeamRow(&m, 0, "backend", "claude", "", "")
+	if _, err := m.teamForm.options(); err != nil {
+		t.Fatalf("a valid row failed: %v", err)
+	}
+	m.teamForm.addMember()
+	setTeamRow(&m, 1, "backend", "codex", "", "")
+	check("twice")
+	setTeamRow(&m, 1, team.LeadRole, "codex", "", "")
+	check("twice")
+}
+
+func TestTeamFormNarrowWidth(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 40, Height: 15})
+	m = press(t, m, "T")
+	for range 8 {
+		m = press(t, m, "+")
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "New team") || !strings.Contains(view, "role") {
+		t.Fatalf("narrow form lost its fields:\n%s", view)
 	}
 }
 

@@ -366,51 +366,158 @@ func (m Model) mailbox(text string) tea.Cmd {
 
 // ---- the new-team form
 
+// The form's fixed fields, in the order tab moves through them. Member rows
+// follow tfLead, four fields each, then the goal.
 const (
-	tfName = iota
+	tfTemplate = iota
+	tfName
 	tfFolder
 	tfWork
 	tfLead
-	tfMembers
-	tfGoal
-	teamFormFields
 )
 
+const (
+	memberRole = iota
+	memberTool
+	memberModel
+	memberPart
+	memberCells
+)
+
+type teamRow struct {
+	role   textinput.Model
+	tool   textinput.Model
+	model  textinput.Model
+	prompt textinput.Model
+}
+
 type teamForm struct {
-	leads   []string // the tools that can lead, then "none"
-	lead    int
-	work    bool // a worktree per member, not the shared folder
-	field   int
-	name    textinput.Model
-	folder  textinput.Model
-	members textinput.Model
-	goal    textarea.Model
+	width     int
+	leads     []string // the tools that can lead, then "none"
+	lead      int
+	work      bool // a worktree per member, not the shared folder
+	templates []TeamTemplate
+	template  int // 0 is none; i+1 is templates[i]
+	field     int
+	name      textinput.Model
+	folder    textinput.Model
+	goal      textarea.Model
+	members   []teamRow
+}
+
+func newTeamRow(tool string) teamRow {
+	return teamRow{
+		role:   newInput("", "role"),
+		tool:   newInput("", tool),
+		model:  newInput("", "auto"),
+		prompt: newInput("", "its part"),
+	}
+}
+
+// membersAt is the focus slot of the first member's role.
+func (f teamForm) membersAt() int { return tfLead + 1 }
+
+// goalField is the focus slot of the goal, after every member row.
+func (f teamForm) goalField() int { return f.membersAt() + len(f.members)*memberCells }
+
+// slots is how many focus slots the form has.
+func (f teamForm) slots() int { return f.goalField() + 1 }
+
+// rowOf turns a focus slot into a member row and cell, if it is one.
+func (f teamForm) rowOf(field int) (row, cell int, ok bool) {
+	if field < f.membersAt() || field >= f.goalField() {
+		return 0, 0, false
+	}
+	d := field - f.membersAt()
+	return d / memberCells, d % memberCells, true
+}
+
+func (r *teamRow) input(cell int) *textinput.Model {
+	switch cell {
+	case memberRole:
+		return &r.role
+	case memberTool:
+		return &r.tool
+	case memberModel:
+		return &r.model
+	}
+	return &r.prompt
+}
+
+// memberWidths splits a line between the member fields; narrow terminals get
+// small fields rather than overlapping text.
+func memberWidths(w int) (role, tool, model, part int) {
+	role = min(12, max(6, w/6))
+	tool = min(12, max(6, w/6))
+	model = min(14, max(6, w/6))
+	part = max(6, w-(7+role+tool+model))
+	return
 }
 
 func (f *teamForm) layout(w int) {
+	f.width = w
 	f.name.Width = max(10, w-12)
 	f.folder.Width = max(10, w-12)
-	f.members.Width = max(10, w-12)
 	f.goal.SetWidth(max(10, w-12))
+	role, tool, model, part := memberWidths(w)
+	for i := range f.members {
+		f.members[i].role.Width = role
+		f.members[i].tool.Width = tool
+		f.members[i].model.Width = model
+		f.members[i].prompt.Width = part
+	}
 }
 
 func (f *teamForm) focus(field int) tea.Cmd {
-	f.field = field
+	f.field = max(0, min(field, f.slots()-1))
 	f.name.Blur()
 	f.folder.Blur()
-	f.members.Blur()
 	f.goal.Blur()
-	switch field {
+	for i := range f.members {
+		for cell := range memberCells {
+			f.members[i].input(cell).Blur()
+		}
+	}
+	switch f.field {
 	case tfName:
 		return f.name.Focus()
 	case tfFolder:
 		return f.folder.Focus()
-	case tfMembers:
-		return f.members.Focus()
-	case tfGoal:
+	}
+	if r, cell, ok := f.rowOf(f.field); ok {
+		return f.members[r].input(cell).Focus()
+	}
+	if f.field == f.goalField() {
 		return f.goal.Focus()
 	}
 	return nil
+}
+
+// addMember appends a blank member row and puts the cursor in its role.
+func (f *teamForm) addMember() {
+	f.members = append(f.members, newTeamRow("claude"))
+	f.layout(f.width)
+	f.field = f.membersAt() + (len(f.members)-1)*memberCells
+}
+
+// removeMember removes the row the cursor is on, or the last one, but never
+// the only row.
+func (f *teamForm) removeMember() {
+	if len(f.members) <= 1 {
+		return
+	}
+	row := len(f.members) - 1
+	if r, _, ok := f.rowOf(f.field); ok {
+		row = r
+	}
+	oldGoal := f.goalField()
+	f.members = append(f.members[:row], f.members[row+1:]...)
+	switch {
+	case f.field >= oldGoal:
+		f.field -= memberCells
+	case f.field >= f.membersAt():
+		f.field = min(f.field, f.goalField()-1)
+	}
 }
 
 func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
@@ -419,7 +526,7 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 		m.setFlash("no agent found on PATH", true)
 		return m, nil
 	}
-	f := teamForm{leads: append(slices.Clone(tools), "none")}
+	f := teamForm{leads: append(slices.Clone(tools), "none"), templates: m.ops.TeamTemplates()}
 	for i, t := range f.leads {
 		if t == "claude" {
 			f.lead = i
@@ -427,8 +534,8 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 	}
 	f.name = newInput("", "api-v2")
 	f.folder = newInput("", "folder")
-	f.members = newInput("", "backend=claude:auto frontend=codex reviewer=opencode")
 	f.goal = newPromptArea("what the team is for, and who owns what")
+	f.members = []teamRow{newTeamRow("claude")}
 	dir := ""
 	if s, ok := m.selected(); ok {
 		dir = s.Cwd
@@ -444,6 +551,73 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 	return m, m.teamForm.focus(tfName)
 }
 
+// templateLine draws the template row: none, or a saved roster.
+func (f teamForm) templateLine() string {
+	names := []string{"none"}
+	for _, t := range f.templates {
+		names = append(names, t.Name)
+	}
+	line := choices(names, f.template, func(string) lipgloss.Style { return sAccent })
+	switch {
+	case f.template > 0:
+		line += "  " + sDim.Render("fills the form; the name stays yours")
+	case len(f.templates) == 0:
+		line += "  " + sDim.Render("add a [[team]] table to config.toml")
+	}
+	return line
+}
+
+// applyTemplate fills the form from the selected template, leaving the team
+// name alone: that is still typed for this run.
+func (f *teamForm) applyTemplate() {
+	if f.template <= 0 || f.template > len(f.templates) {
+		return
+	}
+	t := f.templates[f.template-1]
+	if t.Cwd != "" {
+		f.folder.SetValue(t.Cwd)
+		f.folder.CursorEnd()
+	}
+	f.work = t.Worktrees
+	if t.Goal != "" {
+		f.goal.SetValue(t.Goal)
+	}
+	if t.Lead != "" {
+		f.setLead(t.Lead)
+	}
+	f.members = nil
+	for _, m := range t.Members {
+		row := newTeamRow("claude")
+		row.role.SetValue(m.Role)
+		row.tool.SetValue(m.Tool)
+		row.model.SetValue(m.Model)
+		row.prompt.SetValue(m.Prompt)
+		f.members = append(f.members, row)
+	}
+	if len(f.members) == 0 {
+		f.members = []teamRow{newTeamRow("claude")}
+	}
+	f.layout(f.width)
+}
+
+// setLead picks a tool in the lead row, adding it when a template names one
+// that isn't installed here.
+func (f *teamForm) setLead(lead string) {
+	if len(f.leads) == 0 {
+		f.leads = []string{"none"}
+	}
+	tool, _, _ := strings.Cut(lead, ":")
+	if tool == "" {
+		tool = "none"
+	}
+	f.lead = slices.Index(f.leads, tool)
+	if f.lead >= 0 {
+		return
+	}
+	f.leads = append(f.leads[:len(f.leads)-1], tool, "none")
+	f.lead = len(f.leads) - 2
+}
+
 // options is what the form asks hive to start, or why it can't.
 func (f teamForm) options() (tracker.TeamOptions, error) {
 	o := tracker.TeamOptions{Name: strings.TrimSpace(f.name.Value()), Goal: strings.TrimSpace(f.goal.Value()),
@@ -451,25 +625,43 @@ func (f teamForm) options() (tracker.TeamOptions, error) {
 	if err := team.ValidName(o.Name); err != nil {
 		return o, err
 	}
-	specs, err := team.ParseSpecs(f.members.Value())
-	if err != nil {
-		return o, err
+	var specs []team.Spec
+	seen := map[string]bool{}
+	for i, row := range f.members {
+		role := strings.TrimSpace(row.role.Value())
+		tool := strings.TrimSpace(row.tool.Value())
+		if role == "" || tool == "" {
+			return o, fmt.Errorf("member row %d needs a role and a tool", i+1)
+		}
+		if err := team.ValidRole(role); err != nil {
+			return o, fmt.Errorf("member row %d: %w", i+1, err)
+		}
+		if err := team.ValidTool(tool); err != nil {
+			return o, fmt.Errorf("member row %d: %w", i+1, err)
+		}
+		if seen[role] {
+			return o, fmt.Errorf("member row %d: the role %q is on the team twice", i+1, role)
+		}
+		seen[role] = true
+		specs = append(specs, team.Spec{Role: role, Tool: tool,
+			Model: strings.TrimSpace(row.model.Value()), Prompt: strings.TrimSpace(row.prompt.Value())})
 	}
 	o.Members = specs
-	if lead := f.leads[f.lead]; lead != "none" {
+	lead := "none"
+	if f.lead >= 0 && f.lead < len(f.leads) {
+		lead = f.leads[f.lead]
+	}
+	if lead != "none" {
 		o.Lead = &team.Spec{Role: team.LeadRole, Tool: lead}
 	}
-	if o.Lead == nil && len(o.Members) == 0 {
-		return o, fmt.Errorf("add members, or pick a tool to lead")
-	}
-	return o, team.CheckRoles(append(slices.Clone(o.Members), team.Spec{Role: leadRoleOf(o)}))
-}
-
-func leadRoleOf(o tracker.TeamOptions) string {
+	all := slices.Clone(o.Members)
 	if o.Lead != nil {
-		return o.Lead.Role
+		all = append(all, *o.Lead)
 	}
-	return ""
+	if err := team.CheckRoles(all); err != nil {
+		return o, err
+	}
+	return o, nil
 }
 
 func (m Model) keyTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -479,24 +671,34 @@ func (m Model) keyTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		return m, nil
 	case "tab", "down":
-		return m, f.focus((f.field + 1) % teamFormFields)
+		return m, f.focus((f.field + 1) % f.slots())
 	case "shift+tab", "up":
-		return m, f.focus((f.field + teamFormFields - 1) % teamFormFields)
+		return m, f.focus((f.field + f.slots() - 1) % f.slots())
+	case "+":
+		f.addMember()
+		return m, f.focus(f.field)
+	case "ctrl+d":
+		f.removeMember()
+		return m, f.focus(f.field)
 	case "left", "right":
-		if f.field == tfLead {
-			step := 1
-			if msg.String() == "left" {
-				step = -1
-			}
+		step := 1
+		if msg.String() == "left" {
+			step = -1
+		}
+		switch f.field {
+		case tfTemplate:
+			f.template = (f.template + step + len(f.templates) + 1) % (len(f.templates) + 1)
+			f.applyTemplate()
+			return m, nil
+		case tfLead:
 			f.lead = (f.lead + step + len(f.leads)) % len(f.leads)
 			return m, nil
-		}
-		if f.field == tfWork {
+		case tfWork:
 			f.work = !f.work
 			return m, nil
 		}
 	case "enter":
-		if f.field < tfGoal {
+		if f.field < f.goalField() {
 			return m, f.focus(f.field + 1)
 		}
 		opts, err := f.options()
@@ -517,12 +719,44 @@ func (m Model) keyTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		f.name, cmd = f.name.Update(msg)
 	case tfFolder:
 		f.folder, cmd = f.folder.Update(msg)
-	case tfMembers:
-		f.members, cmd = f.members.Update(msg)
-	case tfGoal:
+	}
+	if r, cell, ok := f.rowOf(f.field); ok {
+		in := f.members[r].input(cell)
+		*in, cmd = in.Update(msg)
+	}
+	if f.field == f.goalField() {
 		f.goal, cmd = f.goal.Update(msg)
 	}
 	return m, cmd
+}
+
+// memberWindow is the member rows to draw: all of them when they fit, else a
+// window that keeps the focused row on screen.
+func (f teamForm) memberWindow(room int) (start, end int) {
+	n := len(f.members)
+	room = max(1, room)
+	if n <= room {
+		return 0, n
+	}
+	focus := 0
+	if r, _, ok := f.rowOf(f.field); ok {
+		focus = r
+	}
+	start = min(max(0, focus-room+1), n-room)
+	return start, start + room
+}
+
+func (f teamForm) memberLine(i int, w int) string {
+	mark := "  "
+	if r, _, ok := f.rowOf(f.field); ok && r == i {
+		mark = sAccent.Render("› ")
+	}
+	role, tool, model, part := memberWidths(w)
+	cell := func(s string, width int) string { return pad(ansi.Truncate(s, width, ""), width) }
+	row := &f.members[i]
+	return mark + sDim.Render(fmt.Sprintf("%d ", i+1)) +
+		cell(row.role.View(), role) + " " + cell(row.tool.View(), tool) + " " +
+		cell(row.model.View(), model) + " " + cell(row.prompt.View(), part)
 }
 
 func (m Model) teamFormLines(w, h int) []string {
@@ -538,20 +772,32 @@ func (m Model) teamFormLines(w, h int) []string {
 	if f.leads[f.lead] == "none" {
 		leadLine += "  " + sDim.Render("you lead from the tree")
 	}
-	goal := visibleRows(f.goal, h-formChromeRows-1)
+	goalLines := 3
+	if h < 20 {
+		goalLines = 1
+	}
+	// Eight lines before the member rows, and the goal and help below them.
+	room := max(1, h-12-goalLines)
+	start, end := f.memberWindow(room)
+	role, tool, model, _ := memberWidths(w)
 	out := []string{sBold.Render("New team"), "",
+		field(tfTemplate, "template", f.templateLine()),
 		field(tfName, "name", f.name.View()),
 		field(tfFolder, "folder", f.folder.View()),
 		field(tfWork, "work", f.workLine()),
 		field(tfLead, "lead", leadLine),
-		field(tfMembers, "members", f.members.View()),
-		field(tfGoal, "goal", goal[0]),
+		"  " + sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"),
 	}
+	for i := start; i < end; i++ {
+		out = append(out, f.memberLine(i, w))
+	}
+	goal := visibleRows(f.goal, goalLines)
+	out = append(out, "", field(f.goalField(), "goal", goal[0]))
 	for _, line := range goal[1:] {
 		out = append(out, strings.Repeat(" ", 10)+line)
 	}
-	out = append(out, "", sDim.Render("members are role=tool or role=tool:model; the model can be auto."),
-		sDim.Render("each opens in its own tmux window with a brief; they report to the channel."))
+	out = append(out, "", sDim.Render("+ adds a member row, ctrl+d removes the focused one; roles and tools are required."),
+		sDim.Render("each member opens in its own tmux window with a brief; they report to the channel."))
 	return fit(out, w, h)
 }
 

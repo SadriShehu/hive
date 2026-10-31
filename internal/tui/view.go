@@ -486,7 +486,7 @@ func (m Model) hintLine() string {
 		}
 		return keys("↵", "next / start", "tab", "field", "←/→", "tool / model", "esc", "cancel")
 	case modeTeam:
-		return keys("↵", "next / start", "tab", "field", "←/→", "work / lead", "esc", "cancel")
+		return keys("↵", "next / start", "tab", "field", "+", "row", "ctrl+d", "remove", "←/→", "work · lead · template", "esc", "cancel")
 	case modeHelp:
 		return keys("any key", "close")
 	}

@@ -25,6 +25,15 @@ const LeadRole = "lead"
 var reserved = map[string]bool{store.ToAll: true, store.FromYou: true, store.FromHive: true, "none": true, "self": true}
 
 var rolePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,23}$`)
+var toolPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// ValidTool says why tool can't name one, or returns nil.
+func ValidTool(tool string) error {
+	if !toolPattern.MatchString(tool) {
+		return fmt.Errorf("tool %q must be lowercase letters, digits, - or _", tool)
+	}
+	return nil
+}
 
 // ValidRole says why role can't be one, or returns nil.
 func ValidRole(role string) error {
@@ -69,8 +78,7 @@ func ParseSpec(s string) (Spec, error) {
 	return Spec{Role: role, Tool: tool, Model: model}, nil
 }
 
-// ParseSpecs reads a space-separated list of specs, as the new-team form
-// takes them.
+// ParseSpecs reads a space-separated list of specs.
 func ParseSpecs(line string) ([]Spec, error) {
 	var out []Spec
 	for _, f := range strings.Fields(line) {
