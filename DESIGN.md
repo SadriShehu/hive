@@ -741,9 +741,8 @@ Tables in migrations that can run twice, as the trash's can:
 ### What comes next
 
 **The rest of phase 3.** A worktree per member, `hive team done`, the trash, mute,
-`hive team new --wait` and filtering the tree by team are built; left is:
-
-- A team in the README demo.
+`hive team new --wait`, filtering the tree by team and the team in the README demo are
+built.
 
 ## Edge cases and safety
 
@@ -839,8 +838,9 @@ internal/
   (`XDG_DATA_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `COPILOT_HOME`), never the real ones.
 - The README's demo is recorded the same way: `docs/demo/record.sh` runs stand-in agents
   (`docs/demo/agent`) that report through `hive hook`, with a config that gives the
-  built-in tools their process names, a scratch `HOME` and a private tmux server, then
-  replays `docs/demo.tape` with vhs.
+  built-in tools their process names, a scratch `HOME` and a private tmux server. It
+  starts a small team in that scratch database before the tree attaches, with a board
+  and a channel the tape opens, then replays `docs/demo.tape` with vhs.
 - A claim about a tool (hook format, event names, flags) is checked against the installed
   binary, not its docs: the first Copilot adapter guessed its hook format wrong, which only
   that check caught.
