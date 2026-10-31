@@ -286,7 +286,8 @@ that has no price of its own.
 
 A team is a few agents working on one goal in one folder, and a channel where they report
 to you. Each member is a real session in its own tmux window, as everything hive starts is;
-hive keeps who is on the team, the channel and the messages between members.
+hive keeps the goal, the task board, who is on the team, the channel and the messages
+between members.
 
 ```sh
 hive team new api-v2 --goal "add the admin API: list, invite and remove users" \
@@ -375,9 +376,9 @@ branches. Anything with commits to merge or changes not committed stays, and
 `hive team board` lists it under "worktrees"; run `done --clean` again once it is dealt
 with.
 
-`hive team new --wait` returns once each member has reported its session, so the roster
-it prints names them; a tool that starts its session only with its first message gets a
-stand-in ID, as `hive new --wait` gives one.
+**Waiting for the start.** `hive team new --wait` returns once each member has reported
+its session, so the roster it prints names them; a tool that starts its session only with
+its first message gets a stand-in ID, as `hive new --wait` gives one.
 
 **Mute.** `hive team mute <team> <role>` stops hive from typing that member's mail into
 its pane, for two members that write to each other without end. The mail still queues,

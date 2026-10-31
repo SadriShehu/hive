@@ -448,9 +448,9 @@ messages from teammates, typed into its pane. Only two leave it: the `hive team 
 commands it runs and its hook events. The agents stay native; the team lives in hive's
 database and the tree.
 
-Phase 1 is built: teams, the channel and the mailbox. So are the task board (the core of
-phase 2), and from phase 3 a worktree per member, `hive team done`, teams in the trash,
-`hive team mute` and `hive team new --wait`, with the live test.
+Phase 1 is built: teams, the channel and the mailbox. So are the task board (phase 2's
+core); and from phase 3, a worktree per member, `hive team done`, teams in the trash,
+`hive team mute`, `hive team new --wait` and the live test.
 [What comes next](#what-comes-next) is the rest of the plan.
 
 ### Decisions
@@ -600,7 +600,7 @@ task it holds (`backend · #4 handlers…`), else by what its session does.
 | `s` | write to everyone (`@role` for one); on a member, to that member |
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |
-| `d` | move the team and its members to the trash (asks first, refused while a member runs) |
+| `d` · `t` | move the team and its members to the trash (asks first, refused while a member runs) · show the trash |
 | `T` | start a team: name, folder, work (the shared folder or a worktree per member), lead, members as `role=tool[:model]`, goal |
 
 A done team is folded the first time the tree shows it done, and dimmed, with `✓ done`
@@ -669,9 +669,9 @@ the other; the team and its role go to the trash, and the session does not.
 
 Tables in migrations that can run twice, as the trash's can:
 
-- `teams` — ID (8 hex), name (unique), goal, folder, workspace (`shared`), the session
-  that made it, status (active or done), paused, the lead's role (empty when you lead),
-  and times.
+- `teams` — ID (8 hex), name (unique), goal, folder, workspace (`shared` or `worktrees`),
+  the session that made it, status (active or done), paused, the lead's role (empty when
+  you lead), and times.
 - `team_members` — team and role, the session playing it now, tool, model, the member's
   own part of the brief, folder, the pane it was last started in, and when it joined and
   left. A retired member keeps its row and its messages.
