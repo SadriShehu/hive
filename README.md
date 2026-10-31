@@ -294,19 +294,30 @@ hive team new api-v2 --goal "add the admin API: list, invite and remove users" \
 ```
 
 Press `T` in the tree for the same in a form. The team is a node in the tree with its
-members under it; select it and the preview is the channel:
+members under it, each titled by the task it holds; select it and the preview is the
+board and the channel:
 
 ```
 ⬡ api-v2 · add the admin API: list, invite and remove users
 4 members · led by lead · ~/src/app · started 25m ago
 ● lead  ◉ backend  ◆ frontend  ◉ reviewer
 ──────────────────────────────────────────────────────────────
+✓ #1 schema for admin users                            backend
+● #2 handlers for /admin/users                         backend
+○ #3 admin table view                        after #2  frontend
+──────────────────────────────────────────────────────────────
 10:02 you → lead         start with the schema
-10:09 backend            schema done: users.role added, email indexed
+10:09 hive → lead        #1 done by backend: users.role added · ready: #2 (backend)
 10:21 backend → frontend the list endpoint is GET /admin/users?page=
 10:26 hive               frontend needs you
 ▸ frontend waits on you · ↵ jumps there
 ```
+
+The lead turns the goal into tasks, each with an owner and the tasks it waits for:
+`hive team task add "admin table view" --owner frontend --after 2`. Members claim a task,
+mark it done with a note on what changed, or blocked with why. hive posts each, to the
+lead when an agent leads, and tells the owner of a task as soon as everything it waits for
+is done, so nobody polls.
 
 Members post progress with `hive team post`; hive adds its own posts (a member started,
 needs you, stopped); you answer with `s`. A message to a member is typed into its pane
@@ -320,7 +331,7 @@ holds no control characters, so it can't reach the TUI as keys.
 | --- | --- |
 | `↵` | jump to the member that needs you, else the lead, else the first running |
 | `s` | message everyone (`@role` for one); on a member, message that member |
-| `p` | pause or resume: no mail is delivered while paused |
+| `p` | pause or resume: no mail is delivered and no task claimed while paused |
 | `L` | take the lead yourself, or hand it back to an agent |
 | `x` | stop every member (asks first) |
 | `m` · `T` | hide hive's own posts · start a team |
@@ -328,8 +339,11 @@ holds no control characters, so it can't reach the TUI as keys.
 | Command | Does |
 | --- | --- |
 | `hive team new <name> [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]...` | start the team and print the roster |
-| `hive team ls` · `board [team]` · `log [team]` | the teams · goal, members and latest posts · the channel (all take `--json`) |
+| `hive team ls` · `board [team]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts · the channel (all take `--json`) |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate (`--private` keeps it out of your feed) |
+| `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print its number; its owner hears from hive when it is ready |
+| `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `ls [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, naming them |
+| `hive team wait [--task n] [--from role] [--any] [--timeout d]` | block until a task is done or blocked, a message arrives, or (`--any`) the board changes; print what happened |
 | `hive team inbox [--wait]` | print the messages queued for this member, on every team it is on |
 | `hive team add` · `rm` · `stop` | add a member · retire one · stop them all |
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |

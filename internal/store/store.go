@@ -189,6 +189,8 @@ var migrations = []string{
 	// Teams: groups of agents working on one goal, and the channel they and
 	// the user talk in. Like the trash, it can run twice.
 	teamsSchema,
+	// The teams' task boards.
+	teamTasksSchema,
 }
 
 // Open opens (creating if needed) the database at path.

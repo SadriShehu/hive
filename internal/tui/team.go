@@ -80,10 +80,13 @@ func (m Model) selectedTeam() (store.Team, *tree.Node, bool) {
 	return t, n, ok
 }
 
-// memberTitle names what a member does. A session hive opened for a role
-// holds the team's brief as its first prompt, which says nothing: that is
-// replaced by the member's own part.
+// memberTitle names what a member does: the task it holds. Else a session
+// hive opened for a role holds the team's brief as its first prompt, which
+// says nothing: that is replaced by the member's own part.
 func (m Model) memberTitle(n *tree.Node) string {
+	if held := m.heldTitle(n.TeamID, n.Role); held != "" {
+		return held
+	}
 	s := n.Session
 	if s.Title == "" && strings.HasPrefix(s.LastPrompt, "You are "+n.Role+" on the hive team") {
 		for _, mem := range m.snap.Members {
@@ -496,6 +499,9 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	}
 	g, gs := teamGlyph(n)
 	right := fmt.Sprintf("%d members", len(m.members(t.ID)))
+	if tasks := m.taskCount(t.ID); tasks != "" {
+		right += " · " + tasks
+	}
 	if t.Paused {
 		right = "⏸ paused · " + right
 	}
@@ -559,6 +565,10 @@ func (m Model) teamPreviewLines(n *tree.Node, w, h int) []string {
 		head = append(head, strings.Join(roster, "  "))
 	}
 	head = append(head, sRule.Render(strings.Repeat("─", w)))
+	// The board takes up to half of what is left; the channel the rest.
+	if tasks := m.taskLines(t.ID, w, max(2, (h-len(head))/2)); len(tasks) > 0 {
+		head = append(append(head, tasks...), sRule.Render(strings.Repeat("─", w)))
+	}
 
 	room := max(0, h-len(head))
 	var body []string

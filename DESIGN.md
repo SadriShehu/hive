@@ -439,8 +439,8 @@ reports as it starts up, or on the end of the turn before a `send`.
 A team is a few agents working on one goal in one folder, and a channel where they report
 to you. Each member is a real session in its own tmux window, started with its tool's own
 command; `hive send`, `tail`, `wait`, jump, stop and the trash work on it as on any
-session. hive holds what the team shares: who is on it, the goal, the channel and the
-messages between members. Nothing new runs in the background: hooks, `hive team …`
+session. hive holds what the team shares: who is on it, the goal, the task board, the channel
+and the messages between members. Nothing new runs in the background: hooks, `hive team …`
 commands and the tree's refresh drive it all.
 
 Only two things enter a member's session: its brief, typed as the first prompt, and
@@ -448,8 +448,8 @@ messages from teammates, typed into its pane. Only two leave it: the `hive team 
 commands it runs and its hook events. The agents stay native; the team lives in hive's
 database and the tree.
 
-Phase 1 is built: teams, the channel and the mailbox. [What comes next](#what-comes-next)
-is the rest of the plan.
+Phase 1 is built: teams, the channel and the mailbox; so is the core of phase 2, the task
+board. [What comes next](#what-comes-next) is the rest of the plan.
 
 ### Decisions
 
@@ -460,6 +460,7 @@ is the rest of the plan.
 | Who delivers | the sender's process when the recipient is idle, else a detached `hive team deliver` that the recipient's hook starts. No daemon |
 | Who leads | an agent hive starts, by default. You can step in at any point: write to anyone, take over the lead (`L`, `hive team lead`), or pause the team |
 | How you follow progress | a channel: members and hive post, you answer in the same feed. A post reaches a pane only when it names a member |
+| How work is split | numbered tasks with an owner and the tasks each waits for. hive tells an owner when its task is ready, so nobody polls |
 | Where members work | one shared folder; a worktree per member is opt-in, in phase 3 |
 | Channel view | the feed in the preview pane; a full-screen view comes in phase 2 |
 
@@ -501,9 +502,10 @@ is the rest of the plan.
 
 The first prompt of each member, and the one place hive talks to an agent: the team,
 its roster and folder, the goal, the member's own part, how to use `hive team board`,
-`post`, `say` and `log`, and that hive wakes it when someone writes to it. The lead is
-told to split the goal and hand out the parts with `say`, then review, integrate and post
-when the goal is met. When you lead, every member is told so, including one whose role
+`task claim`, `done` and `block`, `post`, `say` and `log`, and that hive wakes it when
+someone writes to it or a task of its own is ready. The lead is told to turn the goal into
+tasks with owners and `--after`, then review what is marked done, integrate and post when
+the goal is met. When you lead, every member is told so, including one whose role
 happens to be called `lead`: who leads goes by the team's lead role alone.
 
 ### The channel and the mailbox
@@ -546,12 +548,46 @@ slash command (`/exit`), a shell escape (`!`) or a memory shortcut (`#`) in the
 recipient's TUI; holding no escape, it can't end tmux's bracketed paste early and reach
 the TUI as keys. Several messages go as one paste, one line each, with one Enter.
 
+### The task board
+
+- **Tasks.** `hive team task add` puts a task on the board under the team's next number
+  (#1, #2, …), with a title, details (`--body`), an owner (a role) and the tasks it waits
+  for (`--after 1,2`). It can wait only for tasks already on the board, so tasks never wait
+  for each other in a ring. A task is open, claimed, done or blocked; its note says what
+  done changed, or why it is blocked.
+- **Claiming.** `claim <n>` makes a task the caller's. It is refused, with the reason,
+  for a task that waits for one that isn't done (naming them), that is another member's
+  or claimed by one, and on a paused team; `--force` overrides all but the pause and a task
+  that is done. Taking one over with `--force` is news to the member that held it. Only a
+  member claims (`--as role` for scripts). Two claims at once can't both win: a move
+  applies only over the task as it was read, and the loser is told who has it.
+- **Closing.** `done <n> [--note]` and `block <n> --why` are posted by hive. When an agent
+  leads and didn't make the change, the post is addressed to the lead, so it is typed into
+  the lead's pane at idle like any message. `done` lists the tasks it made ready: open
+  ones that waited for it and for nothing else left. hive tells each one's owner, through
+  the mailbox and out of your feed, since the post already names them: `#5 admin table
+  view is yours, and ready (#4 done by backend: …). hive team task claim 5 takes it.` A
+  task added with an owner and nothing left to wait for is told at once. Whoever closed a
+  task reads what became ready in the command's output instead.
+- **Waiting.** `hive team wait` looks at the board twice a second, as `hive wait` does,
+  and prints what happened: a task as hive words it, a message in its envelope. With no
+  flag it returns when any task is done or blocked, or mail comes for the caller; `--task
+  n` when that task is done or blocked (at once if it is); `--from role` on mail from that
+  role; `--any` also on a task added or claimed and on anything written in the channel
+  but hive's own posts. Mail it prints is marked delivered, as `inbox` does, so it isn't
+  typed again; a paused team keeps it. When hive's mail says what a task's line would,
+  only the mail is printed. A caller off the team, like you in a shell, reads the channel.
+- **Reading it.** `board` lists the tasks, and with each member the task it holds; `task
+  ls` adds the details; `ls` counts them. In JSON each task has `ready` and `waits`.
+
 ### In the tree
 
 A team is a node of its own (`⬡`): at the root, or under the session that made it unless
 that session is on the team. Its members sit under it, and a member's own children stay
-under the member. The node takes the most urgent status of its live members, and its
-preview is the channel, under a strip of the members.
+under the member. The node takes the most urgent status of its live members, and counts
+tasks done. Its preview is the board and the channel, under a strip of the members; the
+board takes at most half, folding the done tasks first. A member's row is titled by the
+task it holds (`backend · #4 handlers…`), else by what its session does.
 
 | Key, on a team | Does |
 | --- | --- |
@@ -563,7 +599,7 @@ preview is the channel, under a strip of the members.
 
 ### Data
 
-Six tables, in one migration that can run twice, as the trash's can:
+Tables in migrations that can run twice, as the trash's can:
 
 - `teams` — ID (8 hex), name (unique), goal, folder, workspace (`shared`), the session
   that made it, status (active or done), paused, the lead's role (empty when you lead),
@@ -577,24 +613,14 @@ Six tables, in one migration that can run twice, as the trash's can:
 - `launch_teams` — a pane, the team and role it was opened for, the process when the
   record hands a role on after `/clear`, and when it was made.
 - `team_reads` — per team, the last message you have seen.
+- `team_tasks` — team and number (from 1 per team), title, body, status (open, claimed,
+  done or blocked), owner (a role), the tasks it waits for (JSON), a note on what done
+  changed or why it is blocked, who added it, and times. In a migration of its own.
 
 ### What comes next
 
-**Phase 2, the task board.**
+**The rest of phase 2.** The task board is built; left are:
 
-- `hive team task add <title> [--body] [--owner role] [--after n,…]`, `claim <n>`,
-  `done <n> [--note]`, `block <n> --why`, `ls [--json]`: numbered tasks with an owner,
-  and the tasks each waits for. `claim` refuses a task whose `--after` tasks are open,
-  unless `--force`.
-- Closing a task posts to the lead, and messages the owners of tasks that became ready,
-  so work moves on without polling. A paused team claims no tasks.
-- `hive team wait [--task n] [--from role] [--any] [--timeout d]` blocks until a task
-  closes, a message arrives or the board changes, and prints what happened.
-- The brief teaches the task commands, and the lead turns the goal into tasks. The
-  board and the preview list the tasks; a member's row shows the task it holds.
-- `team_tasks`: team and number, title, body, status (open, claimed, done or blocked),
-  owner, the tasks it waits for (JSON), a note on what done changed or why it is
-  blocked, who added it, and times.
 - `[[team]]` templates in config.toml, with `[[team.member]]` rows; `--from template`.
 - The new-team form gets one row per member (role, tool, model, the member's part), with
   `+` to add one and templates to fill them. Tasks can be edited from the tree.

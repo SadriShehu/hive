@@ -201,7 +201,7 @@ func (s *Store) TeamByID(id string) (Team, error) {
 	return teams[0], nil
 }
 
-// DeleteTeam forgets a team with its members and its channel.
+// DeleteTeam forgets a team with its members, its channel and its tasks.
 func (s *Store) DeleteTeam(id string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -214,6 +214,7 @@ func (s *Store) DeleteTeam(id string) error {
 		`DELETE FROM team_members WHERE team_id = ?`,
 		`DELETE FROM launch_teams WHERE team_id = ?`,
 		`DELETE FROM team_reads WHERE team_id = ?`,
+		`DELETE FROM team_tasks WHERE team_id = ?`,
 		`DELETE FROM teams WHERE id = ?`,
 	} {
 		if _, err := tx.Exec(q, id); err != nil {

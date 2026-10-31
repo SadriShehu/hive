@@ -60,6 +60,7 @@ type TeamSnapshot struct {
 	Teams   []store.Team
 	Members []store.Member
 	Unread  map[string]int
+	Tasks   []store.Task // every team's board
 }
 
 type liveOps struct {
@@ -161,6 +162,9 @@ func (o *liveOps) Teams() (TeamSnapshot, error) {
 		return snap, err
 	}
 	if snap.Members, err = o.st.AllMembers(); err != nil {
+		return snap, err
+	}
+	if snap.Tasks, err = o.st.AllTasks(); err != nil {
 		return snap, err
 	}
 	snap.Unread, err = o.st.Unread()

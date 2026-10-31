@@ -118,7 +118,10 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 		fmt.Fprintf(&b, "Your part: %s\n", m.Prompt)
 	}
 	b.WriteString("\nThe team works through hive. A human follows along in the team's channel.\n" +
-		"- `hive team board` shows the goal, who is on the team and the latest messages.\n" +
+		"- `hive team board` shows the goal, who is on the team, the tasks and the latest messages.\n" +
+		"- Tasks: `hive team task claim <n>` takes one; `hive team task done <n> --note \"what changed\"`\n" +
+		"  closes it; `hive team task block <n> --why \"…\"` says what stops it. hive posts each to the\n" +
+		"  channel for you, and tells you when a task of yours is ready.\n" +
 		"- Progress: `hive team post \"text\"` writes to the channel, which the human reads. Post when you\n" +
 		"  finish a step that matters, when you are blocked, or when you learn something the others need.\n" +
 		"  Not every step. `hive team log -n 20` shows the channel.\n" +
@@ -130,13 +133,14 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 		"- Everyone works in the same folder. Pull before you start; commit small.\n")
 	switch {
 	case m.Role == t.LeadRole:
-		b.WriteString("\nYou lead. Break the goal into parts and give each teammate theirs with `hive team say`. " +
-			"Review what comes back, integrate it, and post when the goal is met.\n")
+		b.WriteString("\nYou lead. Turn the goal into tasks, each with an owner and the tasks it waits for: " +
+			"`hive team task add \"title\" --owner <role> --after <n,…>`. Review what is marked done, integrate it, " +
+			"and post when the goal is met.\n")
 	case t.LeadRole == "":
 		b.WriteString("\nThe human leads this team from hive and writes to you in the channel. " +
-			"Start by reading `hive team board`, then wait for or take your part.\n")
+			"Start by reading `hive team board`, then claim a task of yours, or wait for your part.\n")
 	default:
-		b.WriteString("\nStart with `hive team board`, then do your part. The lead is " + t.LeadRole + ".\n")
+		b.WriteString("\nStart with `hive team board`, then claim a task of yours, or wait for one. The lead is " + t.LeadRole + ".\n")
 	}
 	return b.String()
 }
