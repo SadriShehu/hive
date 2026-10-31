@@ -53,6 +53,10 @@ type Ops interface {
 	TeamStop(teamID string) (int, error)
 	TeamStart(o tracker.TeamOptions) (string, error)
 	TeamRead(teamID string, upTo int64) error
+	TeamTaskAdd(teamID, title, body, owner string, after []int) (store.Task, error)
+	TeamTaskEdit(teamID string, n int, title, body, owner string, after []int) (store.Task, error)
+	TeamTaskDone(teamID string, n int, note string) (store.Task, error)
+	TeamTaskBlock(teamID string, n int, why string) (store.Task, error)
 	TrashTeam(tm store.Team) ([]store.Session, error)
 	RestoreTeam(tm store.Team) ([]store.Session, error)
 	PurgeTeam(tm store.Team) (tracker.Purged, error)
@@ -279,3 +283,40 @@ func (o *liveOps) TeamStart(opts tracker.TeamOptions) (string, error) {
 }
 
 func (o *liveOps) TeamRead(teamID string, upTo int64) error { return o.st.MarkRead(teamID, upTo) }
+
+// Task changes come from the tree, as the user: the same tracker calls the
+// `hive team task` commands make.
+func (o *liveOps) TeamTaskAdd(teamID, title, body, owner string, after []int) (store.Task, error) {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return store.Task{}, err
+	}
+	task, _, err := o.tracker().AddTask(tm, store.FromYou, title, body, owner, after)
+	return task, err
+}
+
+func (o *liveOps) TeamTaskEdit(teamID string, n int, title, body, owner string, after []int) (store.Task, error) {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return store.Task{}, err
+	}
+	return o.tracker().EditTask(tm, n, title, body, owner, after)
+}
+
+func (o *liveOps) TeamTaskDone(teamID string, n int, note string) (store.Task, error) {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return store.Task{}, err
+	}
+	task, _, _, err := o.tracker().DoneTask(tm, store.FromYou, n, note)
+	return task, err
+}
+
+func (o *liveOps) TeamTaskBlock(teamID string, n int, why string) (store.Task, error) {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return store.Task{}, err
+	}
+	task, _, err := o.tracker().BlockTask(tm, store.FromYou, n, why)
+	return task, err
+}

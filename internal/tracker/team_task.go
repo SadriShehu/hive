@@ -69,6 +69,50 @@ func (t *Tracker) AddTask(tm store.Team, by, title, body, owner string, after []
 	return task, sent, err
 }
 
+// EditTask changes a task's title, body, owner and the tasks it waits for,
+// keeping its number and status. The owner must be on the team, and after
+// must name tasks already on the board, as when a task is added. It loses,
+// naming who moved it, when another member changed the task meanwhile.
+func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, after []int) (store.Task, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return store.Task{}, errors.New("a task needs a title")
+	}
+	tm, members, tasks, err := t.board(tm.ID)
+	if err != nil {
+		return store.Task{}, err
+	}
+	i, err := findTask(tasks, n)
+	if err != nil {
+		return store.Task{}, err
+	}
+	owner = strings.TrimPrefix(strings.TrimSpace(owner), "@")
+	if owner != "" && !onTeam(members, owner) {
+		return store.Task{}, fmt.Errorf("the team has no %s; roles: %s", owner, team.Roster(members))
+	}
+	if err := team.CheckAfter(after, tasks); err != nil {
+		return store.Task{}, err
+	}
+	if slices.Contains(after, n) {
+		return store.Task{}, fmt.Errorf("#%d can't wait for itself", n)
+	}
+	if after == nil {
+		after = []int{}
+	}
+	old := tasks[i]
+	task := old
+	task.Title, task.Body, task.Owner, task.After = title, strings.TrimSpace(body), owner, after
+	task.UpdatedAt = t.World.Now()
+	ok, err := t.Store.EditTask(old, task)
+	if err != nil {
+		return store.Task{}, err
+	}
+	if !ok {
+		return store.Task{}, t.stale(old)
+	}
+	return task, nil
+}
+
 // ClaimTask makes a task by's to work on. It is refused on a paused team,
 // and, unless force, for a task that waits for tasks that aren't done or is
 // another member's.
@@ -193,6 +237,11 @@ func (t *Tracker) moveTask(old, task store.Task) error {
 	if err != nil || ok {
 		return err
 	}
+	return t.stale(old)
+}
+
+// stale says why a task as it is now replaced the one read: somebody moved it.
+func (t *Tracker) stale(old store.Task) error {
 	now, err := t.Store.Task(old.TeamID, old.N)
 	if err != nil {
 		return err

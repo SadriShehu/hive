@@ -71,6 +71,82 @@ func TestUpdateTaskLosesToAnEarlierMove(t *testing.T) {
 	}
 }
 
+func TestEditTaskChangesItsFields(t *testing.T) {
+	st := teamStore(t)
+	first, err := st.AddTask(Task{TeamID: "t1", Title: "schema", Body: "tables", Owner: "backend", After: []int{},
+		CreatedAt: 10, UpdatedAt: 10})
+	must(t, err)
+	second, err := st.AddTask(Task{TeamID: "t1", Title: "handlers", Status: TaskClaimed, Owner: "backend",
+		CreatedAt: 11, UpdatedAt: 11})
+	must(t, err)
+
+	edited := first
+	edited.Title, edited.Body, edited.Owner, edited.After = "schema v2", "tables and roles", "frontend", []int{second.N}
+	edited.UpdatedAt = 20
+	if ok, err := st.EditTask(first, edited); err != nil || !ok {
+		t.Fatalf("EditTask = %v, %v; want it changed", ok, err)
+	}
+	got, err := st.Task("t1", first.N)
+	if err != nil || got.Title != "schema v2" || got.Body != "tables and roles" || got.Owner != "frontend" ||
+		!slices.Equal(got.After, []int{2}) || got.Status != TaskOpen || got.UpdatedAt != 20 {
+		t.Fatalf("#1 = %+v, %v", got, err)
+	}
+	if other, _ := st.Task("t1", second.N); other.Title != "handlers" || other.Status != TaskClaimed {
+		t.Errorf("#2 changed with #1: %+v", other)
+	}
+	if tm, _ := st.TeamByID("t1"); tm.UpdatedAt != 20 {
+		t.Errorf("the team's updated_at = %d, want the edit's 20", tm.UpdatedAt)
+	}
+
+	// An edit that waits for nothing reads back as an empty list, not null.
+	cleared := got
+	cleared.After, cleared.UpdatedAt = nil, 21
+	if ok, err := st.EditTask(got, cleared); err != nil || !ok {
+		t.Fatalf("clearing after = %v, %v", ok, err)
+	}
+	if got, _ = st.Task("t1", first.N); got.After == nil {
+		t.Error("cleared after reads back as nil, which prints as null")
+	}
+}
+
+func TestEditTaskLosesToAnEarlierMove(t *testing.T) {
+	st := teamStore(t)
+	open, err := st.AddTask(Task{TeamID: "t1", Title: "schema", CreatedAt: 10, UpdatedAt: 10})
+	must(t, err)
+
+	// backend claims #1 after the edit was read.
+	claimed := open
+	claimed.Status, claimed.Owner, claimed.UpdatedAt = TaskClaimed, "backend", 20
+	if ok, err := st.UpdateTask(open, claimed); err != nil || !ok {
+		t.Fatalf("the claim = %v, %v", ok, err)
+	}
+	edited := open
+	edited.Title, edited.Owner, edited.UpdatedAt = "schema v2", "frontend", 21
+	if ok, err := st.EditTask(open, edited); err != nil || ok {
+		t.Fatalf("the edit = %v, %v; want it refused", ok, err)
+	}
+	if got, _ := st.Task("t1", 1); got.Title != "schema" || got.Owner != "backend" || got.Status != TaskClaimed {
+		t.Errorf("#1 = %+v, want backend's claim kept", got)
+	}
+
+	// Two edits that read the same task: the second loses, even though its
+	// status and owner still match.
+	plain, err := st.AddTask(Task{TeamID: "t1", Title: "docs", CreatedAt: 30, UpdatedAt: 30})
+	must(t, err)
+	first, second := plain, plain
+	first.Title, first.UpdatedAt = "docs v1", 31
+	second.Title, second.UpdatedAt = "docs v2", 32
+	if ok, err := st.EditTask(plain, first); err != nil || !ok {
+		t.Fatalf("the first edit = %v, %v", ok, err)
+	}
+	if ok, err := st.EditTask(plain, second); err != nil || ok {
+		t.Fatalf("the second edit = %v, %v; want it refused", ok, err)
+	}
+	if got, _ := st.Task("t1", plain.N); got.Title != "docs v1" {
+		t.Errorf("#%d = %+v, want the first edit kept", plain.N, got)
+	}
+}
+
 func TestClaimMessagesTakesOnlyWhatWaits(t *testing.T) {
 	st := teamStore(t)
 	a, _ := st.AddMessage(Message{TeamID: "t1", From: "lead", To: "backend", Body: "a", Kind: MsgSay, At: 1}, []string{"backend"})

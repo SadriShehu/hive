@@ -47,6 +47,7 @@ const (
 	modeHelp
 	modeTeam    // the new-team form
 	modeChannel // a team's channel, full screen
+	modeTasks   // a team's task editor, full screen
 )
 
 // Model is the TUI state.
@@ -85,6 +86,8 @@ type Model struct {
 	channelInput  textinput.Model
 	channelScroll int  // lines scrolled back from the newest post
 	hideSystem    bool // leave hive's own posts out of the channel
+
+	taskEdit taskEditor // the team whose board is open, and where the cursor is
 
 	foldedDone map[string]bool // done teams the tree has folded once; the user may unfold them
 
@@ -364,6 +367,7 @@ type (
 		text string
 		err  error
 		quit bool
+		task int // a task the change left selected in the task editor
 	}
 )
 
@@ -571,6 +575,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeChannel {
 			m.layoutChannel()
 		}
+		if m.mode == modeTasks && m.taskEdit.form != nil {
+			m.taskEdit.form.layout(m.width)
+		}
 		return m, nil
 
 	case tickMsg:
@@ -601,6 +608,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.foldDone()
 		m.rebuild()
+		m.syncTaskEditor()
 		if first {
 			return m, m.previewCmd()
 		}
@@ -666,6 +674,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.quit {
 			return m, tea.Quit
 		}
+		if msg.task > 0 {
+			m.taskEdit.selN = msg.task
+		}
 		m.setFlash(msg.text, false)
 		return m, m.refreshCmd()
 
@@ -684,6 +695,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.keyTeamForm(msg)
 		case modeChannel:
 			return m.keyChannel(msg)
+		case modeTasks:
+			return m.keyTasks(msg)
 		case modeConfirm:
 			return m.keyConfirm(msg)
 		case modeHelp:
