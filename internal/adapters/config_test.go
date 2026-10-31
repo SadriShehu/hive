@@ -232,3 +232,69 @@ func TestLoadRejectsFusionMistakes(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfigTeams(t *testing.T) {
+	cfg, err := LoadConfig(writeConfig(t, `
+[[team]]
+name      = "api"
+goal      = "add the admin API"
+lead      = "claude:auto"
+cwd       = "~/src/app"
+worktrees = true
+
+[[team.member]]
+role   = "backend"
+tool   = "claude"
+model  = "auto"
+prompt = "handlers"
+
+[[team.member]]
+role = "frontend"
+tool = "codex"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Teams) != 1 {
+		t.Fatalf("Teams = %+v", cfg.Teams)
+	}
+	tm := cfg.Teams[0]
+	if tm.Name != "api" || tm.Goal != "add the admin API" || tm.Lead != "claude:auto" ||
+		tm.Cwd != "~/src/app" || !tm.Worktrees {
+		t.Errorf("template = %+v", tm)
+	}
+	if len(tm.Members) != 2 {
+		t.Fatalf("members = %+v", tm.Members)
+	}
+	if m := tm.Members[0]; m.Role != "backend" || m.Tool != "claude" || m.Model != "auto" || m.Prompt != "handlers" {
+		t.Errorf("backend = %+v", m)
+	}
+	if m := tm.Members[1]; m.Role != "frontend" || m.Tool != "codex" {
+		t.Errorf("frontend = %+v", m)
+	}
+}
+
+func TestLoadRejectsTeamMistakes(t *testing.T) {
+	for name, text := range map[string]string{
+		"unknown key": "[[team]]\nname = \"api\"\n[[team.member]]\nrole = \"backend\"\ntool = \"claude\"\nnope = 1\n",
+		"bad name":    "[[team]]\nname = \"api v2\"\n",
+		"duplicate":   "[[team]]\nname = \"api\"\n[[team]]\nname = \"api\"\n",
+		"bad role":    "[[team]]\nname = \"api\"\n[[team.member]]\nrole = \"Backend\"\ntool = \"claude\"\n",
+		"roles twice": "[[team]]\nname = \"api\"\n[[team.member]]\nrole = \"backend\"\ntool = \"claude\"\n[[team.member]]\nrole = \"backend\"\ntool = \"codex\"\n",
+		"lead twice":  "[[team]]\nname = \"api\"\nlead = \"claude\"\n[[team.member]]\nrole = \"lead\"\ntool = \"codex\"\n",
+		"no tool":     "[[team]]\nname = \"api\"\n[[team.member]]\nrole = \"backend\"\n",
+		"lead self":   "[[team]]\nname = \"api\"\nlead = \"self\"\n",
+		"bad lead":    "[[team]]\nname = \"api\"\nlead = \"My Tool\"\n",
+	} {
+		cfg, err := LoadConfig(writeConfig(t, text))
+		if err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		if len(cfg.Teams) != 0 {
+			t.Errorf("%s: a bad config kept the templates: %+v", name, cfg.Teams)
+		}
+		if _, ok := cfg.Models.Lookup("claude-opus-5-5"); !ok || len(cfg.Adapters) != len(Builtin()) {
+			t.Errorf("%s: a bad config changed the defaults", name)
+		}
+	}
+}

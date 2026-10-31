@@ -14,6 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sadrishehu/hive/internal/adapters"
+	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tmux"
@@ -139,7 +141,7 @@ func (e *teamEnv) session(m store.Member) (store.Session, bool) {
 }
 
 func newTeamNewCmd() *cobra.Command {
-	var goal, cwd, lead string
+	var goal, cwd, lead, from string
 	var members []string
 	var worktrees, wait bool
 	var timeout time.Duration
@@ -151,13 +153,16 @@ func newTeamNewCmd() *cobra.Command {
 			"--lead picks who leads: a tool (claude, claude:auto, codex:gpt-…), self (the agent running\n" +
 			"this command) or none (you lead from the tree). A member is role=tool or role=tool:model;\n" +
 			"the model can be auto. --goal - reads the goal from stdin.\n\n" +
+			"--from takes the goal, lead, worktrees and members of a [[team]] template in config.toml;\n" +
+			"a flag you also pass wins, and --member adds to the template's members.\n\n" +
 			"--worktrees gives each member a git worktree and branch of its own, hive/<team>/<role>,\n" +
 			"made from the folder's HEAD; the lead works in the folder itself and merges them.\n" +
 			"--wait waits until each member reports its session, so the team's roster is ready for\n" +
 			"`hive send` and the like; a tool that starts its session only with its first message\n" +
 			"gets a stand-in ID.",
 		Example: "  hive team new api-v2 --goal \"add the admin API\" --lead claude \\\n" +
-			"    --member backend=claude:auto --member frontend=codex --member reviewer=opencode",
+			"    --member backend=claude:auto --member frontend=codex --member reviewer=opencode\n" +
+			"  hive team new api-v2 --from api --member reviewer=opencode",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !tmux.Available() {
@@ -177,6 +182,25 @@ func newTeamNewCmd() *cobra.Command {
 					return err
 				}
 				specs = append(specs, sp)
+			}
+			if from != "" {
+				cfg, err := adapters.LoadConfig(paths.ConfigPath())
+				if err != nil {
+					return err
+				}
+				t, err := findTeamTemplate(cfg, from)
+				if err != nil {
+					return err
+				}
+				changed := map[string]bool{
+					"goal":      cmd.Flags().Changed("goal"),
+					"lead":      cmd.Flags().Changed("lead"),
+					"cwd":       cmd.Flags().Changed("cwd"),
+					"worktrees": cmd.Flags().Changed("worktrees"),
+				}
+				if goal, lead, cwd, worktrees, specs, err = templateTeam(t, goal, lead, cwd, worktrees, changed, specs); err != nil {
+					return err
+				}
 			}
 			e, err := openTeamEnv()
 			if err != nil {
@@ -219,10 +243,58 @@ func newTeamNewCmd() *cobra.Command {
 	_ = cmd.MarkFlagDirname("cwd")
 	f.StringVar(&lead, "lead", "claude", "who leads: a tool[:model], self, or none (you lead from the tree)")
 	f.StringArrayVar(&members, "member", nil, "a member: role=tool[:model]; repeat for each")
+	f.StringVar(&from, "from", "", "a [[team]] template in config.toml: its goal, lead, worktrees and members")
 	f.BoolVar(&worktrees, "worktrees", false, "a git worktree and branch per member; the lead works in the folder and merges")
 	f.BoolVarP(&wait, "wait", "w", false, "wait until each member reports in, then print the roster with its session IDs")
 	f.DurationVar(&timeout, "timeout", time.Minute, "how long --wait waits for each member")
 	return cmd
+}
+
+// findTeamTemplate returns the [[team]] template named name, or says which
+// templates the config has.
+func findTeamTemplate(cfg adapters.Config, name string) (adapters.Team, error) {
+	for _, t := range cfg.Teams {
+		if t.Name == name {
+			return t, nil
+		}
+	}
+	var names []string
+	for _, t := range cfg.Teams {
+		names = append(names, t.Name)
+	}
+	if len(names) == 0 {
+		return adapters.Team{}, fmt.Errorf("no team template %q in config.toml; add a [[team]] table", name)
+	}
+	return adapters.Team{}, fmt.Errorf("no team template %q in config.toml; templates: %s", name, strings.Join(names, ", "))
+}
+
+// templateTeam merges a template with the flags: the template gives defaults,
+// a flag that was set wins, and --member values follow the template's members.
+func templateTeam(t adapters.Team, goal, lead, cwd string, worktrees bool, changed map[string]bool, members []team.Spec) (string, string, string, bool, []team.Spec, error) {
+	if t.Lead == "self" {
+		return "", "", "", false, nil, fmt.Errorf("team template %q: a template can't lead as self; use a tool[:model] or none", t.Name)
+	}
+	if tool, _, _ := strings.Cut(t.Lead, ":"); t.Lead != "" && t.Lead != "none" && tool == "" {
+		return "", "", "", false, nil, fmt.Errorf("team template %q: lead %q has no tool", t.Name, t.Lead)
+	}
+	if !changed["goal"] {
+		goal = t.Goal
+	}
+	if !changed["lead"] && t.Lead != "" {
+		lead = t.Lead
+	}
+	if !changed["cwd"] {
+		cwd = t.Cwd
+	}
+	if !changed["worktrees"] {
+		worktrees = t.Worktrees
+	}
+	specs := make([]team.Spec, 0, len(t.Members)+len(members))
+	for _, m := range t.Members {
+		specs = append(specs, team.Spec{Role: m.Role, Tool: m.Tool, Model: m.Model, Prompt: m.Prompt})
+	}
+	specs = append(specs, members...)
+	return goal, lead, cwd, worktrees, specs, nil
 }
 
 // waitLaunched waits for each member hive started to report its session, and

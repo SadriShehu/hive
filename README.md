@@ -294,6 +294,33 @@ hive team new api-v2 --goal "add the admin API: list, invite and remove users" \
     --lead claude --member backend=claude:auto --member frontend=codex --member reviewer=opencode
 ```
 
+Save that roster as a template in `~/.config/hive/config.toml` and start the next team
+with `--from`. The template gives the defaults; a flag you also pass wins, and `--member`
+adds to the template's members:
+
+```toml
+[[team]]
+name      = "api"          # looked up by --from
+goal      = "add the admin API"
+lead      = "claude"       # a tool[:model], or "none"
+cwd       = "~/src/app"    # optional; default: where you run the command
+worktrees = true
+
+[[team.member]]
+role   = "backend"
+tool   = "claude"
+model  = "auto"
+prompt = "handlers"
+
+[[team.member]]
+role = "frontend"
+tool = "codex"
+```
+
+```sh
+hive team new admin-api --from api
+```
+
 Press `T` in the tree for the same in a form, with a work row for the shared folder or a
 worktree per member. The team is a node in the tree with its members under it, each
 titled by the task it holds; select it and the preview is the board and the channel:
@@ -340,7 +367,7 @@ holds no control characters, so it can't reach the TUI as keys.
 
 | Command | Does |
 | --- | --- |
-| `hive team new <name> [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees] [--wait]` | start the team and print the roster; `--wait` waits for each member's session ID |
+| `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--wait` waits for each member's session ID |
 | `hive team ls` · `board [team]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts · the channel (all take `--json`) |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate (`--private` keeps it out of your feed) |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print its number; its owner hears from hive when it is ready |
