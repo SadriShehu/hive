@@ -449,10 +449,10 @@ messages from teammates, typed into its pane. Only two leave it: the `hive team 
 commands it runs and its hook events. The agents stay native; the team lives in hive's
 database and the tree.
 
-Phase 1 is built: teams, the channel and the mailbox. So are the task board (phase 2's
-core); and from phase 3, a worktree per member, `hive team done`, teams in the trash,
-`hive team mute`, `hive team new --wait` and the live test.
-[What comes next](#what-comes-next) is the rest of the plan.
+The whole plan is built: teams, the channel and the mailbox; the task board; worktrees
+and `hive team done`; the trash, mute, `hive team new --wait` and the live test; config
+templates and the new-team form; the task editor; the full-screen channel; and the team
+filter and demo.
 
 ### Decisions
 
@@ -738,12 +738,6 @@ Tables in migrations that can run twice, as the trash's can:
   was muted.
 - `team_trash` — a team in the trash, and when it went.
 
-### What comes next
-
-**The rest of phase 3.** A worktree per member, `hive team done`, the trash, mute,
-`hive team new --wait`, filtering the tree by team and the team in the README demo are
-built.
-
 ## Edge cases and safety
 
 | Case | Handling |
@@ -815,7 +809,7 @@ internal/
 | — Folder suggestions | the new-agent form lists folders as you type; `hive new --cwd` completes them | PR #4 | 30 Sep |
 | — Needs you, and waiting | tmux and desktop alerts, prefix + A and `hive jump --next`, `hive status`, `hive wait` | PR #13 | 2 Oct |
 | — Picking the model | `hive new auto`, `--model auto`, `hive models`, tiers and ratings | PR #15 | 6 Oct |
-| — Teams, phase 1 | teams, the channel and the mailbox; team nodes in the tree | PR #17 | 31 Oct |
+| — Teams | teams, the channel and mailbox, task board, worktrees and done, trash, mute, templates, member-row form, task editor, full-screen channel, team filter, demo | PR #17 (with #18–#26) | 31 Oct |
 
 ## Testing
 
