@@ -45,6 +45,7 @@ const (
 	modeNew
 	modeConfirm
 	modeHelp
+	modeTeam // the new-team form
 )
 
 // Model is the TUI state.
@@ -73,7 +74,13 @@ type Model struct {
 	input     textarea.Model // the message being sent
 	sendLabel string
 	form      form
+	teamForm  teamForm
 	confirm   confirmation
+	sendTo    sendTarget // where the send prompt's message goes, when through a team's mailbox
+
+	snap       TeamSnapshot // the teams, who is on them, what is unread
+	feed       feed         // the selected team's channel
+	hideSystem bool         // leave hive's own posts out of the channel
 
 	showPreview bool
 	preview     preview
@@ -111,13 +118,16 @@ const (
 	actStop  = "stop"
 	actTrash = "trash"
 	actPurge = "purge"
+
+	actStopTeam = "stop team"
 )
 
 // confirmation is an action waiting for y.
 type confirmation struct {
 	action  string
 	session store.Session
-	below   int // sessions under it that go with it
+	team    store.Team // for actStopTeam
+	below   int        // sessions under it that go with it; live members for actStopTeam
 }
 
 // under returns every session below id in sessions, at any depth.
@@ -318,6 +328,7 @@ type (
 	tickMsg      time.Time
 	refreshedMsg struct {
 		sessions, trashed []store.Session
+		snap              TeamSnapshot
 		err               error
 	}
 	syncedMsg struct{ err error }
@@ -425,7 +436,11 @@ func (m *Model) refreshCmd() tea.Cmd {
 			return refreshedMsg{err: err}
 		}
 		trashed, err := ops.Trashed()
-		return refreshedMsg{sessions: s, trashed: trashed, err: err}
+		if err != nil {
+			return refreshedMsg{err: err}
+		}
+		snap, err := ops.Teams()
+		return refreshedMsg{sessions: s, trashed: trashed, snap: snap, err: err}
 	}
 }
 
@@ -450,7 +465,7 @@ func (m Model) usagesCmd() tea.Cmd {
 
 func (m *Model) usageCmd() tea.Cmd {
 	s, ok := m.selected()
-	if !ok || s.Synthetic() || m.syncing {
+	if !ok || s.Synthetic() || s.Source == store.SourceTeam || m.syncing {
 		return nil
 	}
 	if m.usage.id == s.ID {
@@ -482,6 +497,9 @@ func (m *Model) contentCmd() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	if s.Source == store.SourceTeam {
+		return m.feedCmd(strings.TrimPrefix(s.ID, tree.TeamPrefix))
+	}
 	ops := m.ops
 	pane := m.paneFor(s)
 	own := pane != "" && pane == s.Pane
@@ -503,6 +521,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampScroll()
 		if m.mode == modeNew {
 			m.form.layout(m.formWidth())
+		}
+		if m.mode == modeTeam {
+			m.teamForm.layout(m.formWidth())
 		}
 		if m.mode == modeSend {
 			m.layoutSend()
@@ -530,7 +551,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		first := !m.loaded
 		m.loaded = true
-		m.sessions, m.trashed = msg.sessions, msg.trashed
+		m.sessions, m.trashed, m.snap = msg.sessions, msg.trashed, msg.snap
 		m.byID = make(map[string]store.Session, len(msg.sessions)+len(msg.trashed))
 		for _, s := range append(slices.Clip(msg.trashed), msg.sessions...) {
 			m.byID[s.ID] = s
@@ -572,6 +593,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.usages[msg.id] = msg.usage
 		return m, nil
 
+	case feedMsg:
+		return m, m.onFeed(msg)
+
 	case previewMsg:
 		if msg.id == m.selID {
 			m.preview = preview{id: msg.id, screen: msg.screen, entries: msg.entries}
@@ -612,6 +636,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.keySend(msg)
 		case modeNew:
 			return m.keyNew(msg)
+		case modeTeam:
+			return m.keyTeamForm(msg)
 		case modeConfirm:
 			return m.keyConfirm(msg)
 		case modeHelp:
@@ -631,6 +657,9 @@ func (m *Model) setFlash(text string, isErr bool) {
 }
 
 func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m2, cmd, handled := m.keyTeam(msg); handled {
+		return m2, cmd
+	}
 	s, ok := m.selected()
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -681,7 +710,7 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		if ok {
-			return m, m.jump(s)
+			return m, m.jumpNode(m.selectedNode())
 		}
 	case "r":
 		if ok {
@@ -690,9 +719,12 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.resume(s, "")
 		}
+	case "T":
+		return m.openTeamForm()
 	case "s":
 		if ok {
 			m.mode = modeSend
+			m.sendTo = sendTarget{}
 			m.input.Reset()
 			m.sendLabel = "send to " + label(s) + " › "
 			m.layoutSend()
@@ -842,6 +874,9 @@ func (m Model) keySend(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok || strings.TrimSpace(text) == "" {
 			return m, nil
 		}
+		if m.sendTo.team != "" {
+			return m, m.mailbox(text)
+		}
 		ops, name := m.ops, label(s)
 		reopens := s.Pane == ""
 		quit := m.popup && reopens
@@ -863,6 +898,11 @@ func (m Model) keyConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	c, ops, name := m.confirm, m.ops, label(m.confirm.session)
 	switch c.action {
+	case actStopTeam:
+		return m, func() tea.Msg {
+			n, err := ops.TeamStop(c.team.ID)
+			return doneMsg{text: fmt.Sprintf("stopped %d members of %s", n, c.team.Name), err: err}
+		}
 	case actTrash:
 		return m, func() tea.Msg {
 			family, err := ops.Trash(c.session)
@@ -1086,7 +1126,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		if i := m.offset + msg.Y - 1; msg.Y >= 1 && i < len(m.rows) && msg.Y <= m.bodyHeight() {
 			if i == m.cursor && !m.trash {
-				return m, m.jump(m.rows[i].node.Session)
+				return m, m.jumpNode(m.rows[i].node)
 			}
 			return m.move(i - m.cursor)
 		}
@@ -1137,9 +1177,9 @@ func (m *Model) rebuild() {
 	case m.trash:
 		roots = tree.Build(m.trashed)
 	case !m.showAll && query == "":
-		roots = tree.Recent(tree.DropEmpty(tree.Build(m.sessions)), m.now().Add(-recentWindow).UnixMilli())
+		roots = tree.Recent(tree.DropEmpty(tree.BuildTeams(m.sessions, m.snap.Teams, m.snap.Members)), m.now().Add(-recentWindow).UnixMilli())
 	default:
-		roots = tree.DropEmpty(tree.Build(m.sessions))
+		roots = tree.DropEmpty(tree.BuildTeams(m.sessions, m.snap.Teams, m.snap.Members))
 	}
 	if m.hideSubs {
 		roots = tree.Prune(roots, func(n *tree.Node) bool { return n.Kind == store.KindInternal })

@@ -43,6 +43,9 @@ func (t *Tracker) InstalledTools() []string {
 // adapter's list, then what the tool itself lists right now, and, for a
 // tool that can't list, what its past sessions used.
 func (t *Tracker) ToolModels(ctx context.Context, tool string) ([]string, error) {
+	if models, ok := t.toolModels[tool]; ok {
+		return models, nil
+	}
 	a := t.adapter(tool)
 	if a == nil {
 		return nil, fmt.Errorf("hive doesn't know %q", tool)
@@ -64,7 +67,11 @@ func (t *Tracker) ToolModels(ctx context.Context, tool string) ([]string, error)
 		}
 		models = append(models, seen[tool]...)
 	}
-	return dedupe(models), nil
+	models = dedupe(models)
+	if t.toolModels != nil {
+		t.toolModels[tool] = models
+	}
+	return models, nil
 }
 
 func dedupe(list []string) []string {

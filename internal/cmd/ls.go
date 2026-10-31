@@ -55,7 +55,11 @@ func newLsCmd() *cobra.Command {
 				roots = tree.Recent(roots, time.Now().Add(-recentWindow).UnixMilli())
 			}
 			if asJSON {
-				return printJSON(roots, usages)
+				roles, err := teamRoles(st)
+				if err != nil {
+					return err
+				}
+				return printJSON(roots, usages, roles)
 			}
 			printTree(roots, usages, func(live int) string {
 				return fmt.Sprintf("%d live · %d sessions", live, len(sessions)) + listedCost(roots, usages)
@@ -71,18 +75,45 @@ func newLsCmd() *cobra.Command {
 	return cmd
 }
 
-func printJSON(roots []*tree.Node, usages map[string]store.Usage) error {
+// teamRoles maps each session that plays a team role to its team's name and
+// the role.
+func teamRoles(st *store.Store) (map[string][2]string, error) {
+	teams, err := st.Teams()
+	if err != nil {
+		return nil, err
+	}
+	names := map[string]string{}
+	for _, t := range teams {
+		names[t.ID] = t.Name
+	}
+	members, err := st.AllMembers()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][2]string{}
+	for _, m := range members {
+		if m.SessionID != "" {
+			out[m.SessionID] = [2]string{names[m.TeamID], m.Role}
+		}
+	}
+	return out, nil
+}
+
+func printJSON(roots []*tree.Node, usages map[string]store.Usage, roles map[string][2]string) error {
 	type row struct {
 		store.Session
 		Live  bool         `json:"live"`
 		Depth int          `json:"depth"`
 		Usage *store.Usage `json:"usage,omitempty"`
+		Team  string       `json:"team,omitempty"`
+		Role  string       `json:"role,omitempty"`
 	}
 	rows := []row{}
 	var add func(nodes []*tree.Node, depth int)
 	add = func(nodes []*tree.Node, depth int) {
 		for _, n := range nodes {
 			r := row{Session: n.Session, Live: n.Session.Live(), Depth: depth}
+			r.Team, r.Role = roles[n.Session.ID][0], roles[n.Session.ID][1]
 			if u, ok := usages[n.Session.ID]; ok && !u.Empty() {
 				r.Usage = &u
 			}
@@ -284,13 +315,19 @@ func shortID(s store.Session) string {
 	return s.Tool + ":" + truncateBare(s.NativeID, 12)
 }
 
+// homePath writes a path under the home folder with ~.
+func homePath(p string) string {
+	if home := paths.Home(); strings.HasPrefix(p, home) {
+		return "~" + p[len(home):]
+	}
+	return p
+}
+
 func shortPath(p string) string {
 	if p == "" {
 		return ""
 	}
-	if home := paths.Home(); strings.HasPrefix(p, home) {
-		p = "~" + p[len(home):]
-	}
+	p = homePath(p)
 	if utf8.RuneCountInString(p) <= 32 {
 		return p
 	}

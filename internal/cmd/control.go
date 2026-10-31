@@ -379,6 +379,19 @@ func newResumeCmd() *cobra.Command {
 	return cmd
 }
 
+// readText takes text from the arguments, or stdin for none or "-".
+func readText(args []string) (string, error) {
+	text := strings.Join(args, " ")
+	if text == "" || text == "-" {
+		in, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", err
+		}
+		text = strings.TrimRight(string(in), "\n")
+	}
+	return text, nil
+}
+
 func newSendCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "send <id> [text...]",
@@ -388,13 +401,9 @@ func newSendCmd() *cobra.Command {
 			"is read from stdin.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, args []string) error {
-			text := strings.Join(args, " ")
-			if text == "" || text == "-" {
-				in, err := io.ReadAll(os.Stdin)
-				if err != nil {
-					return err
-				}
-				text = strings.TrimRight(string(in), "\n")
+			text, err := readText(args)
+			if err != nil {
+				return err
 			}
 			result, err := tr.Send(s, text, tracker.LaunchOptions{Detached: true})
 			if err != nil {

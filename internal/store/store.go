@@ -186,6 +186,9 @@ var migrations = []string{
 		id TEXT PRIMARY KEY,
 		at INTEGER NOT NULL
 	);`,
+	// Teams: groups of agents working on one goal, and the channel they and
+	// the user talk in. Like the trash, it can run twice.
+	teamsSchema,
 }
 
 // Open opens (creating if needed) the database at path.

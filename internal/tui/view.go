@@ -55,9 +55,12 @@ func (m Model) View() string {
 		pw := m.width - tw - 3
 		left := m.treeLines(tw, h)
 		var right []string
-		if m.mode == modeNew {
+		switch m.mode {
+		case modeNew:
 			right = m.formLines(pw, h)
-		} else {
+		case modeTeam:
+			right = m.teamFormLines(pw, h)
+		default:
 			right = m.previewLines(pw, h)
 		}
 		sep := sRule.Render(" │ ")
@@ -66,6 +69,8 @@ func (m Model) View() string {
 		}
 	case m.mode == modeNew:
 		body = m.formLines(m.width, h)
+	case m.mode == modeTeam:
+		body = m.teamFormLines(m.width, h)
 	default:
 		body = m.treeLines(m.width, h)
 	}
@@ -89,6 +94,11 @@ func (m Model) headerLine() string {
 		left += sDim.Render("  ·  ") + lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n))
 	}
 	left += sDim.Render(fmt.Sprintf("  ·  %d sessions", total))
+	if n := m.teamCount(); n == 1 {
+		left += sDim.Render("  ·  ") + sAccent.Render("1 team")
+	} else if n > 1 {
+		left += sDim.Render("  ·  ") + sAccent.Render(fmt.Sprintf("%d teams", n))
+	}
 	if len(m.trashed) > 0 {
 		left += sDim.Render(fmt.Sprintf("  ·  %d in the trash", len(m.trashed)))
 	}
@@ -147,6 +157,9 @@ func (m Model) treeLines(w, h int) []string {
 // rowLine draws one session: tree lines, fold mark, status, tool, title,
 // kind and age. The selected row is highlighted across its whole width.
 func (m Model) rowLine(r row, w int, sel bool) string {
+	if r.node.Team != nil {
+		return m.teamRowLine(r, w, sel)
+	}
 	s := r.node.Session
 	on := func(st lipgloss.Style) lipgloss.Style {
 		if sel {
@@ -169,6 +182,9 @@ func (m Model) rowLine(r row, w int, sel bool) string {
 	tail := 1 + 3 + 1 + 4
 	tw := w - lead - tail
 	t := title(s)
+	if r.node.Role != "" {
+		t = r.node.Role + " · " + m.memberTitle(r.node)
+	}
 	if r.hidden > 0 {
 		t += fmt.Sprintf(" (+%d)", r.hidden)
 	}
@@ -200,13 +216,21 @@ func (m Model) previewLines(w, h int) []string {
 	if !ok {
 		return fit(nil, w, h)
 	}
+	if n := m.selectedNode(); n.Team != nil {
+		return m.teamPreviewLines(n, w, h)
+	}
 	g, gs := glyph(s)
 	head := []string{
-		toolStyle(s.Tool).Bold(true).Render(s.Tool) + " " + sBold.Render(ansi.Truncate(title(s), w-len(s.Tool)-1, "…")),
+		toolStyle(s.Tool).Bold(true).Render(s.Tool) + " " + sBold.Render(ansi.Truncate(m.nodeTitle(), w-len(s.Tool)-1, "…")),
 		gs.Render(g+" "+statusWord(s)) + sDim.Render(m.where(s)),
 	}
 	if s.Cwd != "" {
 		head = append(head, sDim.Render(ansi.Truncate(shortPath(s.Cwd), w, "…")))
+	}
+	if n := m.selectedNode(); n.Role != "" {
+		if t, ok := m.teamByID(n.TeamID); ok {
+			head = append(head, sAccent.Render(ansi.Truncate(n.Role+" on team "+t.Name, w, "…")))
+		}
 	}
 	if s.ParentID != "" {
 		from := s.ParentID
@@ -426,6 +450,8 @@ func (m Model) hintLine() string {
 		c := m.confirm
 		question := fmt.Sprintf("stop %s (pid %d)? ", label(c.session), c.session.PID)
 		switch c.action {
+		case actStopTeam:
+			question = fmt.Sprintf("stop the %d running members of %s? ", c.below, c.team.Name)
 		case actTrash:
 			question = fmt.Sprintf("move %s%s to the trash? ", label(c.session), belowText(c.below))
 		case actPurge:
@@ -438,8 +464,13 @@ func (m Model) hintLine() string {
 			return keys("tab", "fill in", "↑/↓", "pick", "↵", "next", "esc", "hide list")
 		}
 		return keys("↵", "next / start", "tab", "field", "←/→", "tool / model", "esc", "cancel")
+	case modeTeam:
+		return keys("↵", "next / start", "tab", "field", "←/→", "lead", "esc", "cancel")
 	case modeHelp:
 		return keys("any key", "close")
+	}
+	if hint, ok := m.teamHints(); ok {
+		return ansi.Truncate(hint, m.width, "…")
 	}
 	if m.trash {
 		return ansi.Truncate(keys("r", "restore", "d", "delete for good", "t", "back", "u", "usage", "/", "filter",
@@ -481,6 +512,8 @@ func helpLines() []string {
 		{"i", "hide / show subagents"},
 		{"←/→ space", "fold and unfold; ← on a leaf goes to its parent"},
 		{"y", "copy the session ID"},
+		{"T", "start a team: agents that work on one goal and report to a channel"},
+		{"on a team", "↵ jumps to the member that needs you · s messages everyone (@role for one) · p pauses · L takes or hands over the lead · x stops all · m hides hive's own posts"},
 		{"S", "sync history now (it also runs every 30s)"},
 		{"tab", "hide / show the preview"},
 		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills"},
