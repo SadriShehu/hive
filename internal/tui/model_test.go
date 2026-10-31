@@ -506,16 +506,25 @@ func TestViewFitsAnySize(t *testing.T) {
 	for _, size := range [][2]int{{30, 8}, {80, 20}, {99, 24}, {100, 24}, {160, 40}, {240, 70}} {
 		m, _ := setup(t, false)
 		m = step(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"", "?", "n", "s", "u"} {
+		for _, mode := range []string{"", "?", "n", "s", "u", "channel"} {
 			mm := m
-			if mode != "" {
+			switch {
+			case mode == "":
+			case mode == "channel":
+				tm, _ := setupTeam(t)
+				tm = step(t, tm, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+				mm = press(t, tm, "enter")
+				if mm.mode != modeChannel {
+					t.Fatalf("%dx%d: channel mode = %v", size[0], size[1], mm.mode)
+				}
+			default:
 				mm = press(t, m, mode)
-			}
-			if mode == "n" {
-				mm = press(t, mm, "tab", strings.Repeat("wrap me ", 40))
-			}
-			if mode == "s" {
-				mm = press(t, mm, strings.Repeat("wrap me ", 40))
+				if mode == "n" {
+					mm = press(t, mm, "tab", strings.Repeat("wrap me ", 40))
+				}
+				if mode == "s" {
+					mm = press(t, mm, strings.Repeat("wrap me ", 40))
+				}
 			}
 			lines := strings.Split(mm.View(), "\n")
 			if len(lines) != size[1] {
