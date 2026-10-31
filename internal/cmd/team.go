@@ -36,6 +36,7 @@ func newTeamCmd() *cobra.Command {
 	cmd.AddCommand(newTeamNewCmd(), newTeamLsCmd(), newTeamBoardCmd(), newTeamSayCmd(), newTeamPostCmd(),
 		newTeamLogCmd(), newTeamInboxCmd(), newTeamAddCmd(), newTeamRmCmd(), newTeamStopCmd(),
 		newTeamPauseCmd(true), newTeamPauseCmd(false), newTeamLeadCmd(), newTeamDeliverCmd())
+	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd())
 	return cmd
 }
 
@@ -244,7 +245,7 @@ func newTeamLsCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "ls",
-		Short: "List the teams, with their members and state",
+		Short: "List the teams, with their members, state and tasks done",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := openTeamEnv()
@@ -263,6 +264,7 @@ func newTeamLsCmd() *cobra.Command {
 			type teamRow struct {
 				store.Team
 				Members []memberRow `json:"members"`
+				Tasks   team.Counts `json:"tasks"`
 			}
 			rows := []teamRow{}
 			for _, t := range teams {
@@ -270,7 +272,11 @@ func newTeamLsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				row := teamRow{Team: t, Members: []memberRow{}}
+				tasks, err := e.st.Tasks(t.ID)
+				if err != nil {
+					return err
+				}
+				row := teamRow{Team: t, Members: []memberRow{}, Tasks: team.Count(tasks)}
 				for _, m := range ms {
 					s, ok := e.session(m)
 					row.Members = append(row.Members, memberRow{m, tracker.MemberState(m, s, ok)})
@@ -289,6 +295,9 @@ func newTeamLsCmd() *cobra.Command {
 				state := r.Status
 				if r.Paused {
 					state += ", paused"
+				}
+				if r.Tasks.Total > 0 {
+					state += fmt.Sprintf(" · %d/%d tasks done", r.Tasks.Done, r.Tasks.Total)
 				}
 				fmt.Printf("%s · %s · %s\n", r.Name, state, truncate(r.Goal, 60))
 				for _, m := range r.Members {
@@ -309,7 +318,7 @@ func newTeamBoardCmd() *cobra.Command {
 	var n int
 	cmd := &cobra.Command{
 		Use:   "board [team]",
-		Short: "The goal, who is on the team and doing what, and the latest channel posts",
+		Short: "The goal, who is on the team and doing what, the tasks, and the latest channel posts",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := openTeamEnv()
@@ -330,6 +339,10 @@ func newTeamBoardCmd() *cobra.Command {
 				return err
 			}
 			counts, _ := e.st.MessageCount(tm.ID)
+			tasks, err := e.st.Tasks(tm.ID)
+			if err != nil {
+				return err
+			}
 			type memberRow struct {
 				store.Member
 				State    string `json:"state"`
@@ -347,8 +360,9 @@ func newTeamBoardCmd() *cobra.Command {
 				return enc.Encode(struct {
 					store.Team
 					Members  []memberRow     `json:"members"`
+					Tasks    []taskRow       `json:"tasks"`
 					Messages []store.Message `json:"messages"`
-				}{tm, rows, msgs})
+				}{tm, rows, taskRows(tasks), msgs})
 			}
 			state := tm.Status
 			if tm.Paused {
@@ -367,14 +381,20 @@ func newTeamBoardCmd() *cobra.Command {
 				if !m.Active() {
 					continue
 				}
-				fmt.Printf("  %-10s %-9s %-9s %d posts\n", m.Role, m.Tool, m.State, m.Messages)
+				fmt.Printf("  %-10s %-9s %-9s %d posts", m.Role, m.Tool, m.State, m.Messages)
+				if t, ok := team.Held(m.Role, tasks); ok {
+					fmt.Printf("  #%d %s", t.N, truncate(t.Title, 40))
+				}
+				fmt.Println()
 			}
+			fmt.Println("\ntasks")
+			printTasks(tasks, false)
 			fmt.Println("\nchannel")
 			printMessages(msgs)
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the team, its members and the latest messages")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the team, its members, its tasks and the latest messages")
 	cmd.Flags().IntVarP(&n, "lines", "n", 12, "how many channel messages")
 	return cmd
 }
