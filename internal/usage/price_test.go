@@ -152,3 +152,44 @@ func TestBuiltinRowsAreRated(t *testing.T) {
 		}
 	}
 }
+
+func TestFamilyPriceReachesARatedRowWithoutOne(t *testing.T) {
+	c := NewCatalog(Builtin(), []Model{{Name: "gpt-6", Input: 1, Output: 2, ContextWindow: 400_000}})
+	u := c.Apply(store.Usage{Model: "gpt-6-luna", Models: map[string]store.Tokens{"gpt-6-luna": {Input: 1e6, Output: 1e6}}})
+	if u.CostSource != store.CostConfig || !close(u.CostUSD, 3) {
+		t.Errorf("the built-in gpt-6-luna row hid the gpt-6 price: %+v", u)
+	}
+	if u.ContextWindow != 400_000 {
+		t.Errorf("the built-in gpt-6-luna row hid the gpt-6 window: %d", u.ContextWindow)
+	}
+	if m, _ := c.Lookup("gpt-6-luna"); m.Name != "gpt-6-luna" || m.Tier != TierStrong {
+		t.Errorf("Lookup still finds the row named exactly: %+v", m)
+	}
+}
+
+func TestConfigRowKeepsTheBuiltInRatings(t *testing.T) {
+	c := NewCatalog(Builtin(), []Model{
+		{Name: "gpt-6-luna", Input: 1.25, Output: 10},
+		{Name: "claude-opus-5-5", ContextWindow: 1_000_000, Debugging: 10},
+		{Name: "claude-haiku-4-5", Input: 2, Output: 8},
+	})
+	if m, _ := c.Lookup("gpt-6-luna"); m.Tier != TierStrong || !m.Priced() {
+		t.Errorf("a price-only row lost the built-in tier: %+v", m)
+	}
+	opus, _ := c.Lookup("claude-opus-5-5")
+	if opus.Tier != TierStrong || opus.Rating(Debugging) != 10 || opus.ContextWindow != 1_000_000 || opus.Priced() {
+		t.Errorf("opus = %+v, want the built-in tier, its own debugging and window, and no price", opus)
+	}
+	if haiku, _ := c.Lookup("claude-haiku-4-5"); haiku.Input != 2 || haiku.CacheRead != 0 || haiku.CacheWrite != 0 {
+		t.Errorf("a row with prices should replace every price, not mix with the built-in ones: %+v", haiku)
+	}
+}
+
+func TestConfigRowWithoutAPriceIsNotPricedByItsFamily(t *testing.T) {
+	// claude-fable-5 is a prefix of claude-fable-5-1, at another price.
+	c := NewCatalog(Builtin(), []Model{{Name: "claude-fable-5-1", ContextWindow: 1_000_000}})
+	u := c.Apply(store.Usage{Models: map[string]store.Tokens{"claude-fable-5-1": {Input: 1e6}}})
+	if u.CostSource != "" {
+		t.Errorf("a row that takes the price away got claude-fable-5's: %+v", u)
+	}
+}

@@ -266,7 +266,7 @@ Where the numbers come from, per tool:
 
 ```toml
 # ~/.config/hive/config.toml
-[[model]]                   # USD per million tokens; a built-in row with the same name is replaced
+[[model]]                   # USD per million tokens; a built-in row with the same name takes these prices
 name           = "gpt-6-luna"
 input          = 1.25
 output         = 10
@@ -276,6 +276,11 @@ cache_write_1h = 2.5        # optional; cache_write applies to every write witho
 context_window = 258400
 tier           = "strong"   # how `hive new auto` rates it; see "Picking the model"
 ```
+
+A `[[model]]` named like a row hive ships with replaces that row's prices and context
+window; without prices, it takes the price away. A tier or a rating it doesn't set stays
+the built-in one. A name can also cover a family: `gpt-6` prices every `gpt-6-…` model
+that has no price of its own.
 
 ## Picking the model: auto
 
