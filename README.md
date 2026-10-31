@@ -323,7 +323,9 @@ hive team new admin-api --from api
 
 Press `T` in the tree for the same in a form, with a work row for the shared folder or a
 worktree per member. The team is a node in the tree with its members under it, each
-titled by the task it holds; select it and the preview is the board and the channel:
+titled by the task it holds; select it and the preview is the board and the channel.
+`↵` opens the channel full screen with a live line: type to write to everyone (`@role`
+for one), `↵` sends, `esc` goes back to the tree, and `↑/↓` scrolls the feed.
 
 ```
 ⬡ api-v2 · add the admin API: list, invite and remove users
@@ -338,7 +340,7 @@ titled by the task it holds; select it and the preview is the board and the chan
 10:09 hive → lead        #1 done by backend: users.role added · ready: #2 (backend)
 10:21 backend → frontend the list endpoint is GET /admin/users?page=
 10:26 hive               frontend needs you
-▸ frontend waits on you · ↵ jumps there
+▸ frontend waits on you · its row's ↵ jumps there
 ```
 
 The lead turns the goal into tasks, each with an owner and the tasks it waits for:
@@ -348,16 +350,17 @@ lead when an agent leads, and tells the owner of a task as soon as everything it
 is done, so nobody polls.
 
 Members post progress with `hive team post`; hive adds its own posts (a member started,
-needs you, stopped); you answer with `s`. A message to a member is typed into its pane
-when it is idle. If it is working, or waiting on you, it waits and is typed when the turn
-ends, so a message never answers a permission prompt. A plain post goes to the channel
+needs you, stopped); you answer with `s`, or on the channel's live line. A message to a
+member is typed into its pane when it is idle. If it is working, or waiting on you, it
+waits and is typed when the turn ends, so a message never answers a permission prompt. A
+plain post goes to the channel
 only; it reaches a pane only when it names a teammate with `@role`. Every delivered line
 starts with `[team · from role]`, so it can't run a slash command in the member's TUI, and
 holds no control characters, so it can't reach the TUI as keys.
 
 | Key, on a team | Does |
 | --- | --- |
-| `↵` | jump to the member that needs you, else the lead, else the first running |
+| `↵` | open the team's channel full screen; on a member row, jump to that member |
 | `s` | message everyone (`@role` for one); on a member, message that member |
 | `p` | pause or resume: no mail is delivered and no task claimed while paused |
 | `L` | take the lead yourself, or hand it back to an agent |

@@ -23,6 +23,7 @@ type teamOps struct {
 	teamStopped []string
 	started     []tracker.TeamOptions
 	read        []string // team|id
+	feedAsked   []string // team
 
 	trashedTeams  []string
 	restoredTeams []string
@@ -30,7 +31,8 @@ type teamOps struct {
 }
 
 func (f *teamOps) Teams() (TeamSnapshot, error) { return f.snap, nil }
-func (f *teamOps) TeamFeed(string, int) ([]store.Message, error) {
+func (f *teamOps) TeamFeed(team string, _ int) ([]store.Message, error) {
+	f.feedAsked = append(f.feedAsked, team)
 	return f.feed, nil
 }
 func (f *teamOps) TeamSay(team, to, text string) (string, error) {
@@ -160,24 +162,111 @@ func TestSelectingATeamShowsItsChannelAndMarksItRead(t *testing.T) {
 	}
 }
 
-func TestEnterOnATeamJumpsToTheMemberThatNeedsYou(t *testing.T) {
+func TestEnterOnATeamOpensItsChannel(t *testing.T) {
 	m, ops := setupTeam(t)
-	press(t, m, "enter")
+	ops.snap.Tasks = []store.Task{{TeamID: "t1", N: 1, Title: "schema for admin users", Status: store.TaskClaimed, Owner: "backend"}}
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+
+	m = press(t, m, "enter")
+	if m.mode != modeChannel || m.channelTeam != "t1" {
+		t.Fatalf("mode = %v, channel = %q, want the channel for t1", m.mode, m.channelTeam)
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"⬡ api-v2", "add the admin API", "3 members", "● lead", "#1 schema for admin users",
+		"start with the schema", "backend → frontend", "message api-v2"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("channel lacks %q:\n%s", want, view)
+		}
+	}
+	if len(ops.feedAsked) == 0 || ops.feedAsked[len(ops.feedAsked)-1] != "t1" {
+		t.Errorf("asked for feeds %v, want t1", ops.feedAsked)
+	}
+	if m.feed.teamID != "t1" || len(m.feed.msgs) == 0 {
+		t.Errorf("feed = %+v, want t1's messages", m.feed)
+	}
+}
+
+func TestEscLeavesTheChannelForTheTree(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = press(t, m, "enter")
+	m = press(t, m, "esc")
+	if m.mode != modeNormal {
+		t.Fatalf("mode = %v after esc, want the tree", m.mode)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "last 24h") || strings.Contains(view, "type a message") {
+		t.Errorf("esc didn't bring the tree back:\n%s", view)
+	}
+}
+
+func TestEnterOnAMemberStillJumps(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = press(t, m, "enter") // a team opens its channel
+	m = press(t, m, "esc")
+	m = press(t, m, "j", "j", "j") // frontend
+	m = press(t, m, "enter")
 	if strings.Join(ops.focused, ",") != "%3" {
 		t.Fatalf("focused %v, want the frontend's pane %%3", ops.focused)
 	}
+}
 
-	// Nobody waits: the lead.
-	ops2 := &fakeOps{sessions: teamSessions()}
-	ops2.sessions[2].Status = "idle"
-	ops2.snap, ops2.feed = teamSnapshot(), teamFeed()
-	m2 := New(ops2, false)
-	m2.now = func() time.Time { return now }
-	m2 = step(t, m2, tea.WindowSizeMsg{Width: 160, Height: 30})
-	m2 = step(t, m2, refreshedMsg{sessions: ops2.sessions, snap: ops2.snap})
-	press(t, m2, "enter")
-	if strings.Join(ops2.focused, ",") != "%1" {
-		t.Fatalf("focused %v, want the lead's pane %%1", ops2.focused)
+func TestSendingFromTheChannelStaysOpen(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = press(t, m, "enter")
+	before := len(ops.feedAsked)
+	for _, r := range "everyone sync up" {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m = press(t, m, "enter")
+	if m.mode != modeChannel {
+		t.Fatalf("mode = %v after sending, want the channel", m.mode)
+	}
+	if m.channelInput.Value() != "" {
+		t.Errorf("the live line still holds %q", m.channelInput.Value())
+	}
+
+	for _, r := range "@backend take the schema" {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m = press(t, m, "enter")
+	if m.mode != modeChannel {
+		t.Fatalf("mode = %v after the second send, want the channel", m.mode)
+	}
+
+	want := "t1|all|everyone sync up,t1|backend|take the schema"
+	if got := strings.Join(ops.said, ","); got != want {
+		t.Fatalf("said = %s\nwant   %s", got, want)
+	}
+	if len(ops.sent) != 0 {
+		t.Errorf("a channel message was typed straight into a session: %v", ops.sent)
+	}
+	if len(ops.feedAsked) <= before {
+		t.Error("sending didn't refresh the feed")
+	}
+}
+
+func TestAChannelMarksReadWhileThePreviewIsHidden(t *testing.T) {
+	for _, narrow := range []bool{false, true} {
+		m, ops := setupTeam(t)
+		if narrow {
+			m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		} else {
+			m = press(t, m, "tab") // hide the preview
+		}
+		ops.snap.Unread = map[string]int{"t1": 2}
+		m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+		ops.read = nil
+
+		m = press(t, m, "enter")
+		if m.mode != modeChannel {
+			t.Fatalf("narrow=%v: mode = %v, want the channel", narrow, m.mode)
+		}
+		if m.snap.Unread["t1"] != 0 {
+			t.Errorf("narrow=%v: unread = %v after opening the channel", narrow, m.snap.Unread)
+		}
+		if len(ops.read) != 1 || ops.read[0] != "t1|"+string(rune('0'+4)) {
+			t.Errorf("narrow=%v: read = %v, want it marked up to the last message", narrow, ops.read)
+		}
 	}
 }
 
