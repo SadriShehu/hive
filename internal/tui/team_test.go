@@ -468,3 +468,111 @@ func TestTeamKeysLeaveOrdinarySessionsAlone(t *testing.T) {
 		t.Errorf("x should still ask to stop a plain session, mode = %v", m.mode)
 	}
 }
+
+func TestTeamFilterShowsTheWholeTeamSubtree(t *testing.T) {
+	m, ops := setupTeam(t)
+	ops.sessions = append(ops.sessions,
+		store.Session{ID: "claude:LS", Tool: "claude", Title: "look things up", ParentID: "claude:L", Kind: "internal",
+			Status: "working", CreatedAt: ago(20 * time.Minute), UpdatedAt: ago(time.Minute)},
+		store.Session{ID: "claude:W", Tool: "claude", Title: "web polish", Status: "working", PID: 21, Pane: "%4",
+			CreatedAt: ago(25 * time.Minute), UpdatedAt: ago(time.Minute)},
+		store.Session{ID: "claude:Z", Tool: "claude", Title: "standalone", Status: "idle", PID: 22, Pane: "%5",
+			CreatedAt: ago(24 * time.Minute), UpdatedAt: ago(2 * time.Minute)},
+	)
+	ops.snap.Teams = append(ops.snap.Teams, store.Team{ID: "t2", Name: "web", Status: store.TeamActive,
+		CreatedAt: ago(25 * time.Minute), UpdatedAt: ago(time.Minute)})
+	ops.snap.Members = append(ops.snap.Members, store.Member{TeamID: "t2", Role: "writer", SessionID: "claude:W", Tool: "claude", JoinedAt: 4})
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+
+	m = press(t, m, "/", "t", "e", "a", "m", ":", "A", "P", "I", "enter")
+	if got, want := strings.Join(rowIDs(m), " "), "team:t1 claude:L claude:LS claude:B codex:F"; got != want {
+		t.Fatalf("team:API rows = %s, want %s", got, want)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "team “api”") {
+		t.Errorf("the header doesn't name the team scope:\n%s", view)
+	}
+
+	m = press(t, m, "esc")
+	rows := map[string]bool{}
+	for _, id := range rowIDs(m) {
+		rows[id] = true
+	}
+	for _, id := range []string{"team:t1", "claude:L", "claude:LS", "claude:B", "codex:F", "team:t2", "claude:W", "claude:Z"} {
+		if !rows[id] {
+			t.Errorf("esc left out %s", id)
+		}
+	}
+
+	// A bare team: shows every team, with its subtree, and no plain session.
+	m = press(t, m, "/", "t", "e", "a", "m", ":", "enter")
+	rows = map[string]bool{}
+	for _, id := range rowIDs(m) {
+		rows[id] = true
+	}
+	for _, id := range []string{"team:t1", "claude:L", "claude:LS", "claude:B", "codex:F", "team:t2", "claude:W"} {
+		if !rows[id] {
+			t.Errorf("team: left out %s", id)
+		}
+	}
+	if rows["claude:Z"] {
+		t.Error("team: kept a session that is on no team")
+	}
+
+	m = press(t, m, "esc", "/", "t", "e", "a", "m", ":", "z", "z", "z", "enter")
+	if len(m.rows) != 0 || !strings.Contains(ansi.Strip(m.View()), "nothing matches") {
+		t.Fatalf("no match: %d rows\n%s", len(m.rows), ansi.Strip(m.View()))
+	}
+
+	m = press(t, m, "esc")
+	if len(m.rows) == 0 {
+		t.Fatal("esc didn't clear the filter")
+	}
+
+	// Plain text still matches sessions and keeps the ancestors that lead to them.
+	m = press(t, m, "/", "h", "a", "n", "d", "l", "e", "r", "s", "enter")
+	if got, want := strings.Join(rowIDs(m), " "), "team:t1 claude:B"; got != want {
+		t.Fatalf("plain filter rows = %s, want %s", got, want)
+	}
+}
+
+func TestTeamFilterWorksInTheTrash(t *testing.T) {
+	m, ops := setupTeam(t)
+	trashed := teamSessions()
+	for i := range trashed {
+		trashed[i].DeletedAt = ago(time.Hour)
+	}
+	ops.trash = append(trashed,
+		store.Session{ID: "claude:W", Tool: "claude", Title: "web polish", Status: "exited",
+			CreatedAt: ago(2 * time.Hour), UpdatedAt: ago(time.Hour), DeletedAt: ago(time.Hour)},
+		store.Session{ID: "claude:Z", Tool: "claude", Title: "old spike", Status: "exited",
+			CreatedAt: ago(2 * time.Hour), UpdatedAt: ago(time.Hour), DeletedAt: ago(time.Hour)},
+	)
+	ops.sessions = nil
+	ops.snap.Teams = nil
+	ops.snap.Trashed = []store.Team{
+		{ID: "t1", Name: "api-v2", Status: store.TeamActive, CreatedAt: ago(30 * time.Minute), UpdatedAt: ago(time.Minute)},
+		{ID: "t2", Name: "web", Status: store.TeamActive, CreatedAt: ago(25 * time.Minute), UpdatedAt: ago(time.Minute)},
+	}
+	ops.snap.Members = append(ops.snap.Members, store.Member{TeamID: "t2", Role: "writer", SessionID: "claude:W", Tool: "claude", JoinedAt: 4})
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, trashed: ops.trash, snap: ops.snap})
+	m = press(t, m, "t")
+
+	m = press(t, m, "/", "t", "e", "a", "m", ":", "enter")
+	rows := map[string]bool{}
+	for _, id := range rowIDs(m) {
+		rows[id] = true
+	}
+	for _, id := range []string{"team:t1", "claude:L", "claude:B", "codex:F", "team:t2", "claude:W"} {
+		if !rows[id] {
+			t.Errorf("team: in the trash left out %s", id)
+		}
+	}
+	if rows["claude:Z"] {
+		t.Error("team: in the trash kept a session that is on no team")
+	}
+
+	m = press(t, m, "esc", "/", "t", "e", "a", "m", ":", "t", "2", "enter")
+	if got, want := strings.Join(rowIDs(m), " "), "team:t2 claude:W"; got != want {
+		t.Fatalf("team:t2 in the trash = %s, want %s", got, want)
+	}
+}
