@@ -191,6 +191,9 @@ var migrations = []string{
 	teamsSchema,
 	// The teams' task boards.
 	teamTasksSchema,
+	// Worktrees teams: where each started, and the worktrees hive made for
+	// its members. Like the trash, it can run twice.
+	teamWorktreesSchema,
 }
 
 // Open opens (creating if needed) the database at path.

@@ -293,9 +293,9 @@ hive team new api-v2 --goal "add the admin API: list, invite and remove users" \
     --lead claude --member backend=claude:auto --member frontend=codex --member reviewer=opencode
 ```
 
-Press `T` in the tree for the same in a form. The team is a node in the tree with its
-members under it, each titled by the task it holds; select it and the preview is the
-board and the channel:
+Press `T` in the tree for the same in a form, with a work row for the shared folder or a
+worktree per member. The team is a node in the tree with its members under it, each
+titled by the task it holds; select it and the preview is the board and the channel:
 
 ```
 ⬡ api-v2 · add the admin API: list, invite and remove users
@@ -338,7 +338,7 @@ holds no control characters, so it can't reach the TUI as keys.
 
 | Command | Does |
 | --- | --- |
-| `hive team new <name> [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]...` | start the team and print the roster |
+| `hive team new <name> [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees]` | start the team and print the roster |
 | `hive team ls` · `board [team]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts · the channel (all take `--json`) |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate (`--private` keeps it out of your feed) |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print its number; its owner hears from hive when it is ready |
@@ -347,12 +347,31 @@ holds no control characters, so it can't reach the TUI as keys.
 | `hive team inbox [--wait]` | print the messages queued for this member, on every team it is on |
 | `hive team add` · `rm` · `stop` | add a member · retire one · stop them all |
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
+| `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail; `--clean` removes merged worktrees |
 
 Inside a member the team and the role are implied; an agent on two teams names the one
 it means. A message is from the member's role, from `you` when you run the command
 outside any agent, and otherwise from the agent that ran it (its session, or `team/role`
 for a member of another team), so an agent is never taken for you. A team none of whose
 members start isn't kept. `hive ls --json` rows gain `team` and `role`.
+
+**Worktrees.** `--worktrees`, or the form's work row, gives each member a git worktree
+and branch of its own, on `hive/<team>/<role>` under
+`~/.local/share/hive/worktrees/<team>/<role>`, made from the team folder's HEAD as the
+member starts. The lead stays in the team's folder, on the branch it has, and merges the
+members' branches there, so the result lands on the branch you started from. hive checks
+first that the folder is a git repository with a commit, and it only removes the
+worktrees it made: a folder or branch already in a member's place fails that member
+rather than taking someone's work. The brief names each member's branch, and changes not
+committed in the team's folder aren't in the worktrees.
+
+**Done.** `hive team done <team>` marks the goal met: the team stays in the tree, dimmed
+and folded with its channel, and messages, posts and new members are refused from then
+on. It stops nobody; `hive team stop` does that. `--clean` removes the worktrees whose
+branches are merged into the branch the folder had when the team started, with their
+branches. Anything with commits to merge or changes not committed stays, and
+`hive team board` lists it under "worktrees"; run `done --clean` again once it is dealt
+with.
 
 ## Picking the model: auto
 

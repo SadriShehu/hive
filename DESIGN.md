@@ -448,8 +448,9 @@ messages from teammates, typed into its pane. Only two leave it: the `hive team 
 commands it runs and its hook events. The agents stay native; the team lives in hive's
 database and the tree.
 
-Phase 1 is built: teams, the channel and the mailbox; so is the core of phase 2, the task
-board. [What comes next](#what-comes-next) is the rest of the plan.
+Phase 1 is built: teams, the channel and the mailbox. So are the task board (the core of
+phase 2) and, from phase 3, a worktree per member and `hive team done`.
+[What comes next](#what-comes-next) is the rest of the plan.
 
 ### Decisions
 
@@ -461,7 +462,8 @@ board. [What comes next](#what-comes-next) is the rest of the plan.
 | Who leads | an agent hive starts, by default. You can step in at any point: write to anyone, take over the lead (`L`, `hive team lead`), or pause the team |
 | How you follow progress | a channel: members and hive post, you answer in the same feed. A post reaches a pane only when it names a member |
 | How work is split | numbered tasks with an owner and the tasks each waits for. hive tells an owner when its task is ready, so nobody polls |
-| Where members work | one shared folder; a worktree per member is opt-in, in phase 3 |
+| Where members work | one shared folder by default. `--worktrees` gives each member a worktree and branch of its own; the lead stays in the folder and merges |
+| When a team is done | when someone runs `hive team done`, you by default: the lead posts that the goal is met. done stops nobody |
 | Channel view | the feed in the preview pane; a full-screen view comes in phase 2 |
 
 ### Members and roles
@@ -595,7 +597,60 @@ task it holds (`backend · #4 handlers…`), else by what its session does.
 | `s` | write to everyone (`@role` for one); on a member, to that member |
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |
-| `T` | start a team: name, folder, lead, members as `role=tool[:model]`, goal |
+| `T` | start a team: name, folder, work (the shared folder or a worktree per member), lead, members as `role=tool[:model]`, goal |
+
+A done team is folded the first time the tree shows it done, and dimmed, with `✓ done`
+on its row; unfolded, it stays so. Its channel stays, and `s` on it says it is done.
+
+### Worktrees
+
+`hive team new --worktrees`, or the form's work row, gives each member a git worktree of
+its own, on the branch `hive/<team>/<role>`, under `<data dir>/worktrees/<team>/<role>`
+(`~/.local/share/hive` unless `HIVE_HOME` or `XDG_DATA_HOME` says otherwise). Each is made
+from the team folder's HEAD as the member starts, so one added later with `hive team add`
+starts from what has been merged by then. When the team's folder is a subfolder of its
+repository, the member starts in the same subfolder of its worktree. `team_members.cwd`
+records where each member works, and the brief names it.
+
+- **Checked first.** Before anything is recorded or started: git is on PATH, the folder is
+  in a repository with a commit, and git takes the team's name in a branch name. A name
+  like `a..b`, valid for a team, isn't valid for git.
+- **The lead works in the team's folder**, on the branch it has. The members' branches are
+  in the same repository, so it merges them there (`git merge hive/<team>/<role>`), and
+  the result lands on the branch you had, with no last merge left for you. A lead in a
+  worktree of its own would merge into `hive/<team>/lead`, which someone would still have
+  to merge. Who leads is settled as members start: handing the lead to a member later
+  moves nobody's folder. When you lead, every member gets a worktree, and you merge.
+- **Only what hive made.** A folder or a branch already at a member's place fails that
+  member, with the reason in the channel, rather than taking someone's work; it may be
+  left from an older team of the same name. A member retired and added again gets its
+  worktree back, with what it left there. A team that isn't kept (no member's window
+  opened) takes the worktrees and branches it made with it, so the name can be tried again.
+- **The brief.** A member is told its branch, to commit small and before it says a part is
+  done, and that the lead merges it; the lead, the branches to merge. Changes not committed
+  in the team's folder aren't in the worktrees, and hive's first post says so.
+
+### Done
+
+`hive team done <team>` marks the goal met: the status turns `done`, hive posts who did
+it, and the mail still queued is dropped. Messages, posts and new members are refused
+from then on ("api is done; it takes no more messages or members"), from the shell, from
+a member and from the tree. Running it again does nothing more, but cleans with `--clean`.
+
+- **It stops nobody.** The agent that runs it may well be the lead, which stopping every
+  member would end mid-command; stopping is `hive team stop`'s, which asks first. done
+  says who still runs.
+- **The lead isn't told to run it.** Its brief says to post when the goal is met; you
+  decide, since a done team can't be reopened yet.
+- **`--clean`** compares each branch with the branch the team's folder had when the team
+  started (`team_bases`), or, when its HEAD was detached then, with the folder's HEAD
+  now. A worktree goes, with its branch, when its branch has no commit that one lacks,
+  nothing in it is uncommitted, and its member doesn't run; `git worktree remove` runs
+  without `--force`. Anything else stays, with the reason: commits to merge (a squash
+  merge looks unmerged, and stays), changes not committed, a member still running, or
+  what git said. `hive team board` lists what stays under "worktrees", and `done --clean`
+  again takes what has been dealt with since. The team's folder of worktrees goes once
+  empty.
 
 ### Data
 
@@ -616,6 +671,10 @@ Tables in migrations that can run twice, as the trash's can:
 - `team_tasks` — team and number (from 1 per team), title, body, status (open, claimed,
   done or blocked), owner (a role), the tasks it waits for (JSON), a note on what done
   changed or why it is blocked, who added it, and times. In a migration of its own.
+- `team_bases` — per worktrees team, the branch its folder had when it started (empty when
+  HEAD was detached) and the commit: what `done --clean` compares with.
+- `team_worktrees` — team and role, the worktree's path and branch: the worktrees hive
+  made, and the only ones it removes. Removing one drops its row.
 
 ### What comes next
 
@@ -627,13 +686,8 @@ Tables in migrations that can run twice, as the trash's can:
 - A full-screen channel view: `↵` on a team opens it, with a live input line; `esc` goes
   back to the tree.
 
-**Phase 3, workspaces and hygiene.**
+**The rest of phase 3.** A worktree per member and `hive team done` are built; left are:
 
-- `--worktrees`: a git worktree and branch `hive/<team>/<role>` per member, under
-  `~/.local/share/hive/worktrees/<team>/<role>`; the lead merges.
-- `hive team done [--clean]` marks the goal met; the team stays in the tree, folded and
-  dimmed, with its history. `--clean` removes merged worktrees; an unmerged one stays,
-  and the board lists it.
 - Teams in the trash: `d` trashes a team with its members (asks first, refused while a
   member runs), and restore and purge take them together, purging the members through
   their tools.
