@@ -124,6 +124,54 @@ var scripts = map[string]script{
 	}},
 }
 
+// teamScripts stand in for the members of the demo's team. A member starts
+// with the brief hive writes, which begins "You are <role> on the hive team
+// …", so the role picks its script rather than the whole first prompt.
+var teamScripts = map[string]script{
+	"lead": {title: "Lead the checkout team", steps: []step{
+		{pause: 1, action: "Read", arg: "src/checkout/Checkout.tsx"},
+		{pause: 1.5, action: "Read", arg: "docs/checkout.md"},
+		{pause: 1.5, say: "Backend has the saved-cards API, frontend the one-page layout. I'll review both when they land."},
+	}, reply: []step{
+		{pause: 1, say: "Reviewing what landed on the board."},
+	}},
+	"backend": {title: "Saved cards API", steps: []step{
+		{pause: .8, action: "Read", arg: "src/api/savedCards.ts"},
+		{pause: 1.2, action: "Edit", arg: "src/api/savedCards.ts", out: "+58 −14"},
+		{pause: 1.5, action: "Bash", arg: "npm test -- savedCards", out: "✓ 14 passed"},
+		{pause: .8, action: "Bash", arg: `hive team post "Saved cards load from the account API; tests pass."`,
+			run: []string{"hive", "team", "post", "Saved cards load from the account API; tests pass."}},
+		{pause: .5, say: "Saved cards are on the account API, with the tests green."},
+	}, reply: []step{
+		{pause: 1, say: "On it."},
+	}},
+	"frontend": {title: "One-page checkout layout", steps: []step{
+		{pause: .8, action: "Read", arg: "src/checkout/Checkout.tsx"},
+		{pause: 1, action: "Edit", arg: "src/checkout/Checkout.tsx", out: "+72 −96"},
+		{pause: 1.5, action: "Edit", arg: "src/checkout/checkout.css", out: "+24 −38"},
+		{pause: 1.5, action: "Bash", arg: "npm test -- checkout", out: "✓ 64 passed"},
+		{pause: .8, action: "Bash", arg: `hive team post "The page is one column now; saved cards sit on top."`,
+			run: []string{"hive", "team", "post", "The page is one column now; saved cards sit on top."}},
+		{pause: .5, say: "One page, saved cards first; the tests pass."},
+	}, reply: []step{
+		{pause: 1, say: "On it."},
+	}},
+}
+
+// teamScript returns the script for a member's brief, by the role it names.
+func teamScript(prompt string) (script, bool) {
+	const start, middle = "You are ", " on the hive team "
+	if !strings.HasPrefix(prompt, start) {
+		return script{}, false
+	}
+	role, _, ok := strings.Cut(strings.TrimPrefix(prompt, start), middle)
+	if !ok {
+		return script{}, false
+	}
+	sc, ok := teamScripts[role]
+	return sc, ok
+}
+
 // generic answers anything without a script.
 var generic = []step{
 	{pause: 1, action: "Read", arg: "README.md"},
@@ -141,7 +189,13 @@ const (
 )
 
 func main() {
-	tool := strings.TrimPrefix(filepath.Base(os.Args[0]), "hive-demo-")
+	// A recording may give the stand-ins a process prefix of their own, so
+	// the tree it shows ignores stand-ins of tests running beside it.
+	prefix := os.Getenv("HIVE_DEMO_AGENT_PREFIX")
+	if prefix == "" {
+		prefix = "hive-demo-"
+	}
+	tool := strings.TrimPrefix(filepath.Base(os.Args[0]), prefix)
 	var id, prompt string
 	headless := false
 	for args := os.Args[1:]; len(args) > 0; args = args[1:] {
@@ -167,6 +221,9 @@ func main() {
 	}
 	cwd, _ := os.Getwd()
 	sc, ok := scripts[prompt]
+	if !ok {
+		sc, ok = teamScript(prompt)
+	}
 	if !ok {
 		sc.steps, sc.reply = generic, generic
 	}
@@ -288,6 +345,16 @@ func (a *agent) note(event, text string) {
 	f.Write(append(line, '\n'))
 }
 
+// agentProgram gives a stand-in the process name this run uses: a recording
+// with HIVE_DEMO_AGENT_PREFIX set starts its own children the same way.
+func agentProgram(name string) string {
+	prefix := os.Getenv("HIVE_DEMO_AGENT_PREFIX")
+	if prefix == "" || !strings.HasPrefix(name, "hive-demo-") {
+		return name
+	}
+	return prefix + strings.TrimPrefix(name, "hive-demo-")
+}
+
 func (a *agent) color() string { return "\x1b[38;2;" + accents[a.tool] + "m" }
 
 // take shows the first prompt as if typed, and starts working on it.
@@ -304,7 +371,7 @@ func (a *agent) play(steps []step) {
 			s.out = strings.TrimSpace(string(out))
 		}
 		if s.child != nil {
-			cmd := exec.Command(s.child[0], s.child[1:]...)
+			cmd := exec.Command(agentProgram(s.child[0]), s.child[1:]...)
 			if err := cmd.Start(); err == nil {
 				go cmd.Wait()
 			}

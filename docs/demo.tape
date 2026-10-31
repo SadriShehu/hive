@@ -20,17 +20,38 @@ Type "tmux -L hivedemo attach -t hive" Enter
 Sleep 1.5s
 Show
 
-# The tree: Claude started opencode, which runs Codex headless. The preview
-# follows the cursor.
-Sleep 3s
+# The team started before the tree attached: its board and channel are in
+# the preview, with a task for each member.
+Sleep 2.5s
+Type "/team:checkout"
+Sleep 700ms
+Enter
+Sleep 2.5s
+Escape
+Sleep 1s
+
+# The tree: Claude started opencode, which runs Codex headless. Filter to the
+# redesign, clear the filter to keep the selection, then walk its children.
+Type "/redesign"
+Sleep 700ms
+Enter
+Sleep 700ms
+Escape
+Sleep 500ms
 Down
 Sleep 2s
 Down
 Sleep 2.5s
-Down
-Sleep 2s
+Up
+Sleep 300ms
+Up
+Sleep 1s
 
 # Send the Copilot session a message, then jump into its pane to watch.
+Type "/flaky"
+Sleep 700ms
+Enter
+Sleep 700ms
 Type "s"
 Sleep 500ms
 Type "it still flakes on CI, check the timeouts"
@@ -75,9 +96,32 @@ Sleep 3s
 Ctrl+B
 Type "a"
 Sleep 1.5s
-Down
+Type "/skeleton"
+Sleep 700ms
+Enter
+Sleep 700ms
+Type "g"
 Sleep 300ms
 Down
-Sleep 300ms
-Down
-Sleep 3.5s
+Sleep 1s
+Escape
+Sleep 500ms
+
+# The team's channel full screen: its board and posts, one line from you, and
+# back to the tree.
+Type "/team:checkout"
+Sleep 700ms
+Enter
+Sleep 700ms
+Type "g"
+Sleep 500ms
+Enter
+Sleep 3s
+Type "ship it when the tests are green"
+Sleep 600ms
+Enter
+Sleep 3s
+Escape
+Sleep 1.5s
+Escape
+Sleep 2s
