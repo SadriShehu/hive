@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/proc"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/usage"
 )
 
@@ -39,6 +41,25 @@ type Fusion struct {
 	Tool string `toml:"tool"`
 }
 
+// Team is one [[team]] table of config.toml: a template `hive team new --from`
+// starts a team from. A field left out is a default the command line can set.
+type Team struct {
+	Name      string       `toml:"name"`
+	Goal      string       `toml:"goal"`
+	Lead      string       `toml:"lead"`
+	Cwd       string       `toml:"cwd"`
+	Worktrees bool         `toml:"worktrees"`
+	Members   []TeamMember `toml:"member"`
+}
+
+// TeamMember is one [[team.member]] row of a template.
+type TeamMember struct {
+	Role   string `toml:"role"`
+	Tool   string `toml:"tool"`
+	Model  string `toml:"model"`
+	Prompt string `toml:"prompt"`
+}
+
 var toolName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 type Config struct {
@@ -46,6 +67,7 @@ type Config struct {
 	Models   usage.Catalog
 	Alerts   Alerts
 	Fusion   fusion.Settings
+	Teams    []Team
 }
 
 // Load returns the built-in adapters with the config file at path applied.
@@ -80,6 +102,7 @@ func LoadConfig(path string) (Config, error) {
 	}
 	cfg.Models = usage.NewCatalog(usage.Builtin(), file.Model)
 	cfg.Alerts = file.Alerts
+	cfg.Teams = file.Team
 	return cfg, nil
 }
 
@@ -97,6 +120,7 @@ type configFile struct {
 	Model  []usage.Model `toml:"model"`
 	Alerts Alerts        `toml:"alerts"`
 	Fusion Fusion        `toml:"fusion"`
+	Team   []Team        `toml:"team"`
 }
 
 func readConfig(path string) (configFile, error) {
@@ -130,7 +154,51 @@ func readConfig(path string) (configFile, error) {
 	if cfg.Fusion.Tool != "" && !toolName.MatchString(cfg.Fusion.Tool) {
 		return configFile{}, fmt.Errorf("%s: fusion tool %q must be lowercase letters, digits, - or _", path, cfg.Fusion.Tool)
 	}
+	if err := checkTeams(path, cfg.Team); err != nil {
+		return configFile{}, err
+	}
 	return cfg, nil
+}
+
+// checkTeams says what is wrong with the [[team]] templates: a name or role
+// that can't be one, one used twice, a member without a tool, or a lead that
+// isn't a tool[:model] or none.
+func checkTeams(path string, teams []Team) error {
+	seen := map[string]bool{}
+	for _, t := range teams {
+		if err := team.ValidName(t.Name); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		if seen[t.Name] {
+			return fmt.Errorf("%s: team %q is defined twice", path, t.Name)
+		}
+		seen[t.Name] = true
+		var specs []team.Spec
+		for _, m := range t.Members {
+			if err := team.ValidRole(m.Role); err != nil {
+				return fmt.Errorf("%s: team %q: %w", path, t.Name, err)
+			}
+			if m.Tool == "" {
+				return fmt.Errorf("%s: team %q member %q has no tool", path, t.Name, m.Role)
+			}
+			specs = append(specs, team.Spec{Role: m.Role})
+		}
+		switch t.Lead {
+		case "", "none":
+		case "self":
+			return fmt.Errorf("%s: team %q lead can't be self; use a tool[:model] or none", path, t.Name)
+		default:
+			tool, _, _ := strings.Cut(t.Lead, ":")
+			if !toolName.MatchString(tool) {
+				return fmt.Errorf("%s: team %q lead %q must be a tool[:model] or none", path, t.Name, t.Lead)
+			}
+			specs = append(specs, team.Spec{Role: team.LeadRole})
+		}
+		if err := team.CheckRoles(specs); err != nil {
+			return fmt.Errorf("%s: team %q: %w", path, t.Name, err)
+		}
+	}
+	return nil
 }
 
 // apply returns spec with the fields c sets.
