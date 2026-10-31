@@ -257,7 +257,8 @@ their own. Reopening is refused, with the reason, when the tool would fail, such
 session that ended before its first message was saved.
 
 Other keys: `n` new agent, `c` new agent as a child of the selected one, `/` filter by
-title, folder or ID, `a` recent or all history, `i` hide or show subagents, `S` sync now,
+title, folder or ID (`team:<name or ID>` shows that team's whole subtree; a bare `team:`
+shows every team), `a` recent or all history, `i` hide or show subagents, `S` sync now,
 `y` copy the ID, `tab` hide the preview, `u` show what the session used (model, tokens,
 price, context, tools, skills) in place of the pane preview, `←` / `→` collapse and expand,
 `?` help, `q` quit.
@@ -735,10 +736,10 @@ Tables in migrations that can run twice, as the trash's can:
 - The new-team form gets one row per member (role, tool, model, the member's part), with
   `+` to add one and templates to fill them. Tasks can be edited from the tree.
 
-**The rest of phase 3.** A worktree per member, `hive team done`, the trash, mute and
-`hive team new --wait` are built; left is:
+**The rest of phase 3.** A worktree per member, `hive team done`, the trash, mute,
+`hive team new --wait` and filtering the tree by team are built; left is:
 
-- Filtering the tree by team, and a team in the README demo.
+- A team in the README demo.
 
 ## Edge cases and safety
 

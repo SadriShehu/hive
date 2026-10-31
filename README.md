@@ -97,7 +97,7 @@ transcript for a headless run, a subagent or a finished session.
 | `x` | stop it (asks first); a window hive opened closes with it |
 | `d` | move it and everything under it to the trash (asks first) |
 | `t` | the trash: `r` restores, `d` deletes for good, from its tool too (asks first) |
-| `/` | filter by title, folder or ID, across all history |
+| `/` | filter by title, folder or ID, across all history; `team:<name or ID>` shows a team's subtree |
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
 | `u` | show / hide what the session used: model, tokens, price, context, tools, skills |

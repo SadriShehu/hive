@@ -1,6 +1,7 @@
 package tree
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sadrishehu/hive/internal/store"
@@ -33,6 +34,29 @@ func TestDropEmpty(t *testing.T) {
 		if got[id] {
 			t.Errorf("%s kept", id)
 		}
+	}
+}
+
+func TestFilterTeamsKeepsATeamsWholeSubtreeAndItsAncestors(t *testing.T) {
+	sessions := []store.Session{
+		{ID: "claude:boss", Title: "boss", Status: store.StatusIdle},
+		{ID: "claude:L", Title: "lead", ParentID: "claude:boss", Status: store.StatusWorking},
+		{ID: "claude:sub", Title: "a subagent", ParentID: "claude:L", Kind: store.KindInternal, Status: store.StatusWorking},
+		{ID: "claude:other", Title: "not on a team", Status: store.StatusIdle},
+	}
+	teams := []store.Team{
+		{ID: "t1", Name: "api", CreatedBy: "claude:boss"},
+		{ID: "t2", Name: "web"},
+	}
+	members := []store.Member{{TeamID: "t1", Role: "lead", SessionID: "claude:L"}}
+	roots := BuildTeams(sessions, teams, members)
+
+	filtered := FilterTeams(roots, func(n *Node) bool { return n.Team != nil && n.Team.ID == "t1" })
+	var ids []string
+	Walk(filtered, func(n *Node, _ string) { ids = append(ids, n.ID) })
+	want := []string{"claude:boss", TeamPrefix + "t1", "claude:L", "claude:sub"}
+	if strings.Join(ids, " ") != strings.Join(want, " ") {
+		t.Fatalf("FilterTeams kept %v, want %v", ids, want)
 	}
 }
 

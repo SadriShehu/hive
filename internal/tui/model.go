@@ -370,7 +370,7 @@ type (
 // New returns the TUI model.
 func New(ops Ops, popup bool) Model {
 	m := Model{ops: ops, popup: popup, now: time.Now, collapsed: map[string]bool{}, showPreview: true}
-	m.filter = newInput("/ ", "filter by title, folder or ID")
+	m.filter = newInput("/ ", "filter by title, folder or ID; team: for a team")
 	m.input = newPromptArea("message")
 	m.channelInput = newChannelInput()
 	return m
@@ -1250,11 +1250,13 @@ func (m Model) selectedNode() *tree.Node {
 // they go with whatever they are under.
 func (m *Model) rebuild() {
 	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	teamScope, teamOnly := teamFilter(query)
+	filtering := query != ""
 	var roots []*tree.Node
 	switch {
 	case m.trash:
 		roots = tree.BuildTeams(m.trashed, m.snap.Trashed, m.snap.Members)
-	case !m.showAll && query == "":
+	case !m.showAll && !filtering:
 		roots = tree.Recent(tree.DropEmpty(tree.BuildTeams(m.sessions, m.snap.Teams, m.snap.Members)), m.now().Add(-recentWindow).UnixMilli())
 	default:
 		roots = tree.DropEmpty(tree.BuildTeams(m.sessions, m.snap.Teams, m.snap.Members))
@@ -1262,7 +1264,11 @@ func (m *Model) rebuild() {
 	if m.hideSubs {
 		roots = tree.Prune(roots, func(n *tree.Node) bool { return n.Kind == store.KindInternal })
 	}
-	if query != "" {
+	switch {
+	case teamOnly:
+		ids := m.teamScopeIDs(teamScope)
+		roots = tree.FilterTeams(roots, func(n *tree.Node) bool { return n.Team != nil && ids[n.Team.ID] })
+	case filtering:
 		roots = tree.Filter(roots, func(n *tree.Node) bool { return matches(n.Session, query) })
 	}
 	m.rows = m.rows[:0]
@@ -1278,7 +1284,7 @@ func (m *Model) rebuild() {
 				}
 			}
 			r := row{node: n, prefix: prefix}
-			if m.collapsed[n.ID] && query == "" {
+			if m.collapsed[n.ID] && !filtering {
 				r.hidden = count(n.Children)
 				m.rows = append(m.rows, r)
 				continue
@@ -1321,6 +1327,32 @@ func matches(s store.Session, query string) bool {
 		}
 	}
 	return false
+}
+
+// teamFilter reports whether a / filter is scoped to teams, and to what: an
+// empty scope means every team.
+func teamFilter(query string) (scope string, ok bool) {
+	const prefix = "team:"
+	if strings.HasPrefix(query, prefix) {
+		return strings.TrimSpace(strings.TrimPrefix(query, prefix)), true
+	}
+	return "", false
+}
+
+// teamScopeIDs returns the teams a team: filter matches: every team for an
+// empty scope, else those whose name or ID starts with it.
+func (m Model) teamScopeIDs(scope string) map[string]bool {
+	teams := m.snap.Teams
+	if m.trash {
+		teams = m.snap.Trashed
+	}
+	ids := map[string]bool{}
+	for _, t := range teams {
+		if scope == "" || strings.HasPrefix(strings.ToLower(t.Name), scope) || strings.HasPrefix(strings.ToLower(t.ID), scope) {
+			ids[t.ID] = true
+		}
+	}
+	return ids
 }
 
 func (m *Model) clampScroll() {
