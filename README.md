@@ -9,15 +9,17 @@ How it works, and why: [DESIGN.md](DESIGN.md).
 
 ## Demo
 
-![hive showing Claude Code, opencode, Codex and Copilot CLI sessions as one tree: previewing them, messaging and jumping into one, and starting a child agent from the popup](docs/demo.gif)
+![hive showing a team and Claude Code, opencode, Codex and Copilot CLI sessions as one tree: the team's board and channel, previewing an agent, messaging and jumping into one, and starting a child agent from the popup](docs/demo.gif)
 
 A Claude session spawns an opencode agent, which runs a headless Codex exec; all
-three show up as one tree. From there: watch each pane live, send one a message, jump
-into it, or start a child of your own.
+three show up as one tree, next to a small team whose members work on the same
+checkout. From there: watch each pane live, open the team's board and channel to read
+the posts and write back, send an agent a message, jump into it, or start a child of
+your own.
 
-The agents in the demo are scripted stand-ins that report to hive the way the real
-tools do, so recording it spends nothing; `docs/demo/record.sh` records it again
-(it needs [vhs](https://github.com/charmbracelet/vhs)).
+The agents and team members in the demo are scripted stand-ins that report to hive the
+way the real tools do, so recording it spends nothing; `docs/demo/record.sh` records it
+again (it needs [vhs](https://github.com/charmbracelet/vhs)).
 
 ```sh
 hive                 # the tree, in the current pane or a `hive` tmux session
