@@ -176,18 +176,21 @@ func (s *Store) CreateTeam(t Team) error {
 	return tx.Commit()
 }
 
-// Teams returns every team, newest first.
+// Teams returns every team out of the trash, newest first.
 func (s *Store) Teams() ([]Team, error) {
-	rows, err := s.db.Query(`SELECT ` + teamColumns + ` FROM teams ORDER BY created_at DESC, id`)
+	rows, err := s.db.Query(`SELECT ` + teamColumns + ` FROM teams
+		WHERE NOT EXISTS (SELECT 1 FROM team_trash WHERE team_trash.team_id = teams.id)
+		ORDER BY created_at DESC, id`)
 	if err != nil {
 		return nil, err
 	}
 	return scanTeams(rows)
 }
 
-// TeamByID returns the team with exactly this ID.
+// TeamByID returns the team with exactly this ID, out of the trash.
 func (s *Store) TeamByID(id string) (Team, error) {
-	rows, err := s.db.Query(`SELECT `+teamColumns+` FROM teams WHERE id = ?`, id)
+	rows, err := s.db.Query(`SELECT `+teamColumns+` FROM teams
+		WHERE id = ? AND NOT EXISTS (SELECT 1 FROM team_trash WHERE team_trash.team_id = teams.id)`, id)
 	if err != nil {
 		return Team{}, err
 	}
@@ -215,6 +218,10 @@ func (s *Store) DeleteTeam(id string) error {
 		`DELETE FROM launch_teams WHERE team_id = ?`,
 		`DELETE FROM team_reads WHERE team_id = ?`,
 		`DELETE FROM team_tasks WHERE team_id = ?`,
+		`DELETE FROM team_worktrees WHERE team_id = ?`,
+		`DELETE FROM team_bases WHERE team_id = ?`,
+		`DELETE FROM team_mutes WHERE team_id = ?`,
+		`DELETE FROM team_trash WHERE team_id = ?`,
 		`DELETE FROM teams WHERE id = ?`,
 	} {
 		if _, err := tx.Exec(q, id); err != nil {

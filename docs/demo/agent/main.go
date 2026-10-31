@@ -1,9 +1,18 @@
-// Command agent stands in for a coding agent in hive's demo. Built as
-// hive-demo-claude, hive-demo-opencode, hive-demo-codex or hive-demo-copilot,
-// it reports to hive through `hive hook` as that tool would, plays a short
-// script in its pane and answers what it is sent, so the demo is recorded
-// without spending anything. A headless run (`codex exec`, `opencode run`)
-// writes no screen; Codex's keeps a rollout file for hive's preview.
+// Command agent stands in for a coding agent in hive's demo and live tests.
+// Built as hive-demo-claude, hive-demo-opencode, hive-demo-codex or
+// hive-demo-copilot, it reports to hive through `hive hook` as that tool
+// would, plays a short script in its pane and answers what it is sent, so the
+// demo is recorded without spending anything. A headless run (`codex exec`,
+// `opencode run`) writes no screen; Codex's keeps a rollout file for hive's
+// preview.
+//
+// For live tests, HIVE_DEMO_LOG names a file where it notes, one JSON line
+// each, when it starts, ends and goes idle, and every message it gets, as the
+// message arrives: one typed while it works says so. It then also asks for
+// bracketed paste, as real agents do, so a paste of several lines is one
+// message, and runs what follows "$ " in a message from its shell, noting
+// what that printed. HIVE_DEMO_TURN (a duration) makes every turn that long,
+// in place of the scripts.
 package main
 
 import (
@@ -17,6 +26,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -135,13 +146,15 @@ func main() {
 	headless := false
 	for args := os.Args[1:]; len(args) > 0; args = args[1:] {
 		switch a := args[0]; {
-		case (a == "--session-id" || a == "--prompt") && len(args) > 1:
-			if a == "--session-id" {
-				id = args[1]
-			} else {
+		case (a == "--session-id" || a == "--resume" || a == "--session" || a == "--prompt") && len(args) > 1:
+			if a == "--prompt" {
 				prompt = args[1]
+			} else {
+				id = args[1] // the session to start as, or to continue
 			}
 			args = args[1:]
+		case a == "resume" && len(args) == len(os.Args)-1 && len(args) > 1: // codex resume <id>
+			id, args = args[1], args[1:]
 		case a == "exec" || a == "run" || a == "-p":
 			headless = true
 		case a == "--interactive":
@@ -157,7 +170,11 @@ func main() {
 	if !ok {
 		sc.steps, sc.reply = generic, generic
 	}
-	a := &agent{tool: tool, id: id, cwd: cwd, title: sc.title, headless: headless}
+	if turn, err := time.ParseDuration(os.Getenv("HIVE_DEMO_TURN")); err == nil {
+		sc.steps = []step{{pause: turn.Seconds(), say: "Done."}}
+		sc.reply = sc.steps
+	}
+	a := &agent{tool: tool, id: id, cwd: cwd, title: sc.title, headless: headless, log: os.Getenv("HIVE_DEMO_LOG")}
 	a.hook("start")
 	if headless {
 		a.rollout(map[string]any{"type": "message", "role": "user",
@@ -167,24 +184,27 @@ func main() {
 		a.hook("end")
 		return
 	}
-	fmt.Printf("%s%s%s %s%s%s\n\n", a.color(), bold+tool, reset, dim, shortPath(cwd), reset)
-	if prompt != "" {
-		a.take(prompt)
-		a.play(sc.steps)
-		a.hook("idle")
+	if a.log != "" {
+		fmt.Print("\x1b[?2004h") // bracketed paste, as real agents ask for
 	}
-	in := bufio.NewScanner(os.Stdin)
+	fmt.Printf("%s%s%s %s%s%s\n\n", a.color(), bold+tool, reset, dim, shortPath(cwd), reset)
+	msgs := a.listen()
+	if prompt != "" {
+		a.note("got", prompt)
+		a.take(prompt)
+		a.turn(prompt, sc.steps)
+	}
 	for {
 		fmt.Print("\n" + a.color() + "› " + reset)
-		if !in.Scan() {
+		msg, ok := <-msgs
+		if !ok {
 			a.hook("end")
 			return
 		}
-		if msg := strings.TrimSpace(in.Text()); msg != "" {
+		if msg != "" {
 			a.hook("prompt")
 			fmt.Println()
-			a.play(cmpSteps(sc.reply, generic))
-			a.hook("idle")
+			a.turn(msg, cmpSteps(sc.reply, generic))
 		}
 	}
 }
@@ -192,6 +212,80 @@ func main() {
 type agent struct {
 	tool, id, cwd, title string
 	headless             bool
+	log                  string      // where a live test reads what it did
+	working              atomic.Bool // from taking a message until its turn ends
+}
+
+// turn works on a message, then reports the turn over. In a live test, what
+// follows "$ " in the message is a command the agent runs from its shell, as
+// an agent runs `hive team say`.
+func (a *agent) turn(msg string, steps []step) {
+	a.working.Store(true)
+	if _, command, ok := strings.Cut(msg, "$ "); ok && a.log != "" {
+		out, err := exec.Command("/bin/sh", "-c", command).CombinedOutput()
+		if err != nil {
+			out = append(out, []byte(err.Error())...)
+		}
+		a.note("ran", strings.TrimSpace(string(out)))
+	}
+	a.play(steps)
+	a.working.Store(false)
+	a.note("idle", "")
+	a.hook("idle")
+}
+
+// listen reads what is typed into the pane: a message a line, or a bracketed
+// paste of any number of lines. It notes each message as it arrives, while
+// the agent may still be working, and hands it on for the next turn.
+func (a *agent) listen() <-chan string {
+	const start, end = "\x1b[200~", "\x1b[201~"
+	msgs := make(chan string, 16)
+	go func() {
+		defer close(msgs)
+		in := bufio.NewScanner(os.Stdin)
+		in.Buffer(nil, 1<<20)
+		var paste []string
+		pasting := false
+		for in.Scan() {
+			line := in.Text()
+			if rest, ok := strings.CutPrefix(line, start); ok {
+				line, pasting, paste = rest, true, nil
+			}
+			if pasting {
+				rest, done := strings.CutSuffix(line, end)
+				if paste = append(paste, rest); !done {
+					continue
+				}
+				line, pasting = strings.Join(paste, "\n"), false
+			}
+			msg := strings.TrimSpace(line)
+			if msg != "" {
+				a.note("got", msg)
+			}
+			msgs <- msg
+		}
+	}()
+	return msgs
+}
+
+var logMu sync.Mutex
+
+// note writes one line to the live test's log: what happened, the text it
+// got, and whether it was working when that came.
+func (a *agent) note(event, text string) {
+	if a.log == "" {
+		return
+	}
+	line, _ := json.Marshal(map[string]any{"at": time.Now().UnixMilli(), "tool": a.tool, "id": a.id,
+		"pid": os.Getpid(), "event": event, "text": text, "working": a.working.Load()})
+	logMu.Lock()
+	defer logMu.Unlock()
+	f, err := os.OpenFile(a.log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(append(line, '\n'))
 }
 
 func (a *agent) color() string { return "\x1b[38;2;" + accents[a.tool] + "m" }
@@ -270,6 +364,9 @@ func wrap(text string, width int) string {
 
 // hook reports an event to hive, the way the tool's own integration does.
 func (a *agent) hook(event string) {
+	if event == "start" || event == "end" {
+		a.note(event, "")
+	}
 	args := []string{"hook", a.tool, "--event", event, "--session", a.id,
 		"--pid", strconv.Itoa(os.Getpid()), "--cwd", a.cwd}
 	if a.title != "" {

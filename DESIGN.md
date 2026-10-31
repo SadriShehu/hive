@@ -449,7 +449,8 @@ commands it runs and its hook events. The agents stay native; the team lives in 
 database and the tree.
 
 Phase 1 is built: teams, the channel and the mailbox. So are the task board (the core of
-phase 2) and, from phase 3, a worktree per member and `hive team done`.
+phase 2), and from phase 3 a worktree per member, `hive team done`, teams in the trash,
+`hive team mute` and `hive team new --wait`, with the live test.
 [What comes next](#what-comes-next) is the rest of the plan.
 
 ### Decisions
@@ -478,7 +479,8 @@ phase 2) and, from phase 3, a worktree per member and `hive team done`.
   started with `auto` gets its pick from the goal and its own part, not from the brief;
   one `hive team new` asks each tool what it runs only once. A failed member stays on
   the team with the error in the channel; if no member's window opens, the team isn't
-  kept.
+  kept. `--wait` returns once each member has reported its session, so the roster it
+  prints names them for `hive send` and the like.
 - **Linking.** `launch_teams` records the pane hive opened for a role; the first session
   that reports from that pane within 10 minutes takes the role, as with a launch record.
   Older records are dropped, since pane IDs start over when tmux restarts. Claude and
@@ -530,6 +532,7 @@ happens to be called `lead`: who leads goes by the team's lead role alone.
 | Recipient is | hive does |
 | --- | --- |
 | on a paused team | queues it; `resume` delivers what waited. `inbox` leaves it too |
+| muted with `hive team mute` | queues it; `unmute` delivers what waited. `inbox` still reads it |
 | idle, in a pane | types it now, from the sender's process, and records it in `inputs` so `hive wait` waits for the answer |
 | working | queues it. Its `idle` hook starts `hive team deliver` detached, which waits a second for the TUI to settle, looks again at the member, its teams and its status, then types everything queued as one paste |
 | waiting on you | queues it: typing into a permission prompt would answer it |
@@ -597,6 +600,7 @@ task it holds (`backend · #4 handlers…`), else by what its session does.
 | `s` | write to everyone (`@role` for one); on a member, to that member |
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |
+| `d` | move the team and its members to the trash (asks first, refused while a member runs) |
 | `T` | start a team: name, folder, work (the shared folder or a worktree per member), lead, members as `role=tool[:model]`, goal |
 
 A done team is folded the first time the tree shows it done, and dimmed, with `✓ done`
@@ -652,6 +656,15 @@ a member and from the tree. Running it again does nothing more, but cleans with 
   again takes what has been dealt with since. The team's folder of worktrees goes once
   empty.
 
+### The trash
+
+`d` on a team moves it, and the sessions of its members, to the trash together; `t` shows
+the trash, where a team keeps its members under it. `r` restores the team, its members and
+their sessions; `d` deletes them for good, each member's session through its tool, as a
+session is. A team with a member running isn't trashed. A member's session that still
+plays a role on a team out of the trash stays, so one agent on two teams isn't taken from
+the other; the team and its role go to the trash, and the session does not.
+
 ### Data
 
 Tables in migrations that can run twice, as the trash's can:
@@ -675,6 +688,9 @@ Tables in migrations that can run twice, as the trash's can:
   HEAD was detached) and the commit: what `done --clean` compares with.
 - `team_worktrees` — team and role, the worktree's path and branch: the worktrees hive
   made, and the only ones it removes. Removing one drops its row.
+- `team_mutes` — a team and a role whose mail waits to be delivered by hand, and when it
+  was muted.
+- `team_trash` — a team in the trash, and when it went.
 
 ### What comes next
 
@@ -686,17 +702,10 @@ Tables in migrations that can run twice, as the trash's can:
 - A full-screen channel view: `↵` on a team opens it, with a live input line; `esc` goes
   back to the tree.
 
-**The rest of phase 3.** A worktree per member and `hive team done` are built; left are:
+**The rest of phase 3.** A worktree per member, `hive team done`, the trash, mute and
+`hive team new --wait` are built; left is:
 
-- Teams in the trash: `d` trashes a team with its members (asks first, refused while a
-  member runs), and restore and purge take them together, purging the members through
-  their tools.
-- `hive team mute <role>` pauses delivery to one member, for two that write to each
-  other without end (the board already counts each member's messages).
 - Filtering the tree by team, and a team in the README demo.
-
-**Left from phase 1.** `hive team new --wait`, and a live test with fake agents on a
-private tmux server: say, delivery at idle, reopening with mail.
 
 ## Edge cases and safety
 

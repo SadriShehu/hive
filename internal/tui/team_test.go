@@ -23,6 +23,10 @@ type teamOps struct {
 	teamStopped []string
 	started     []tracker.TeamOptions
 	read        []string // team|id
+
+	trashedTeams  []string
+	restoredTeams []string
+	purgedTeams   []string
 }
 
 func (f *teamOps) Teams() (TeamSnapshot, error) { return f.snap, nil }
@@ -49,6 +53,18 @@ func (f *teamOps) TeamStart(o tracker.TeamOptions) (string, error) {
 func (f *teamOps) TeamRead(team string, id int64) error {
 	f.read = append(f.read, team+"|"+string(rune('0'+id)))
 	return nil
+}
+func (f *teamOps) TrashTeam(tm store.Team) ([]store.Session, error) {
+	f.trashedTeams = append(f.trashedTeams, tm.ID)
+	return nil, nil
+}
+func (f *teamOps) RestoreTeam(tm store.Team) ([]store.Session, error) {
+	f.restoredTeams = append(f.restoredTeams, tm.ID)
+	return nil, nil
+}
+func (f *teamOps) PurgeTeam(tm store.Team) (tracker.Purged, error) {
+	f.purgedTeams = append(f.purgedTeams, tm.ID)
+	return tracker.Purged{}, nil
 }
 
 // teamSessions is a lead at work, an idle backend and a frontend that needs
@@ -221,6 +237,76 @@ func TestPauseLeadAndStopOnATeam(t *testing.T) {
 		t.Fatalf("stopped = %v", ops.teamStopped)
 	}
 	if !strings.Contains(m.flash, "stopped 3 members of api-v2") {
+		t.Errorf("flash = %q", m.flash)
+	}
+}
+
+// stoppedTeam is a team whose members have all ended, as one goes to the
+// trash.
+func stoppedTeam(t *testing.T, m Model, ops *fakeOps) Model {
+	for i := range ops.sessions {
+		ops.sessions[i].Status, ops.sessions[i].PID = store.StatusExited, 0
+	}
+	return step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+}
+
+// movedToTrash shows a team in the trash, with its members' sessions.
+func movedToTrash(t *testing.T, m Model, ops *fakeOps) Model {
+	tm := ops.snap.Teams[0]
+	ops.snap.Teams = nil
+	ops.snap.Trashed = []store.Team{tm}
+	ops.trash = append([]store.Session(nil), ops.sessions...)
+	return step(t, m, refreshedMsg{sessions: nil, trashed: ops.trash, snap: ops.snap})
+}
+
+func TestATeamGoesToTheTrashWithItsMembers(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = stoppedTeam(t, m, ops)
+
+	m = press(t, m, "d")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "move team api-v2 and its 3 members to the trash?") {
+		t.Fatalf("no confirmation:\n%s", view)
+	}
+	m = press(t, m, "y")
+	if strings.Join(ops.trashedTeams, ",") != "t1" {
+		t.Fatalf("trashed teams = %v", ops.trashedTeams)
+	}
+	if !strings.Contains(m.flash, "moved team api-v2 and its 3 members to the trash") {
+		t.Errorf("flash = %q", m.flash)
+	}
+
+	m = movedToTrash(t, m, ops)
+	m = press(t, m, "t")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "3 sessions, 1 team") || !strings.Contains(view, "in the trash") {
+		t.Fatalf("the trash view:\n%s", view)
+	}
+	if got, want := strings.Join(rowIDs(m), " "), "team:t1 claude:L claude:B codex:F"; got != want {
+		t.Fatalf("trash rows = %s, want %s", got, want)
+	}
+	m = press(t, m, "r")
+	if strings.Join(ops.restoredTeams, ",") != "t1" {
+		t.Fatalf("restored teams = %v", ops.restoredTeams)
+	}
+	if !strings.Contains(m.flash, "restored team api-v2 and its 3 members") {
+		t.Errorf("flash = %q", m.flash)
+	}
+}
+
+func TestATeamIsPurgedForGoodFromTheTrash(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = stoppedTeam(t, m, ops)
+	m = movedToTrash(t, m, ops)
+	m = press(t, m, "t")
+
+	m = press(t, m, "d")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "delete team api-v2 and its 3 members for good") {
+		t.Fatalf("no confirmation:\n%s", view)
+	}
+	m = press(t, m, "y")
+	if strings.Join(ops.purgedTeams, ",") != "t1" {
+		t.Fatalf("purged teams = %v", ops.purgedTeams)
+	}
+	if !strings.Contains(m.flash, "deleted team api-v2 and its 3 members for good") {
 		t.Errorf("flash = %q", m.flash)
 	}
 }

@@ -99,14 +99,16 @@ func (m Model) headerLine() string {
 	} else if n > 1 {
 		left += sDim.Render("  ·  ") + sAccent.Render(fmt.Sprintf("%d teams", n))
 	}
-	if len(m.trashed) > 0 {
+	if len(m.snap.Trashed) > 0 {
+		left += sDim.Render("  ·  " + m.trashCount() + " in the trash")
+	} else if len(m.trashed) > 0 {
 		left += sDim.Render(fmt.Sprintf("  ·  %d in the trash", len(m.trashed)))
 	}
 	scope := "last 24h"
 	switch {
 	case m.trash:
 		left = sBadge.Render("hive") + "  " + sText.Render("trash") +
-			sDim.Render(fmt.Sprintf("  ·  %d sessions, deleted from hive; their tools still have them", len(m.trashed)))
+			sDim.Render("  ·  "+m.trashCount()+", deleted from hive; their tools still have them")
 		scope = "t goes back"
 	case m.showAll:
 		scope = "all history"
@@ -457,6 +459,11 @@ func (m Model) hintLine() string {
 		case actPurge:
 			question = fmt.Sprintf("delete %s%s for good, transcripts and all? there's no undo ",
 				label(c.session), belowText(c.below))
+		case actTrashTeam:
+			question = fmt.Sprintf("move team %s and its %s to the trash? ", c.team.Name, membersText(c.below))
+		case actPurgeTeam:
+			question = fmt.Sprintf("delete team %s and its %s for good, transcripts and all? there's no undo ",
+				c.team.Name, membersText(c.below))
 		}
 		return sError.Render(question) + keys("y", "yes", "any other key", "no")
 	case modeNew:
