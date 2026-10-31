@@ -22,7 +22,7 @@ func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
 
 func (m Model) usageTakesTheBody() bool {
 	return m.showUsage && m.showPreview && !m.previewVisible() &&
-		m.mode != modeNew && m.mode != modeHelp && m.mode != modeChannel
+		m.mode != modeNew && m.mode != modeHelp && m.mode != modeChannel && m.mode != modeTasks
 }
 
 func (m Model) treeWidth() int {
@@ -51,6 +51,8 @@ func (m Model) View() string {
 		body = fit(helpLines(), m.width, h)
 	case m.mode == modeChannel:
 		body = m.channelLines(m.width, h)
+	case m.mode == modeTasks:
+		body = m.taskEditorLines(m.width, h)
 	case m.usageTakesTheBody():
 		body = m.previewLines(m.width, h)
 	case m.previewVisible():
@@ -487,6 +489,14 @@ func (m Model) hintLine() string {
 		return keys("↵", "next / start", "tab", "field", "←/→", "tool / model", "esc", "cancel")
 	case modeTeam:
 		return keys("↵", "next / start", "tab", "field", "+", "row", "ctrl+d", "remove", "←/→", "work · lead · template", "esc", "cancel")
+	case modeTasks:
+		if f := m.taskEdit.form; f != nil {
+			if f.kind == taskFormDone || f.kind == taskFormBlock {
+				return keys("↵", "confirm", "esc", "cancel")
+			}
+			return keys("↵", "next / save", "tab", "field", "esc", "cancel")
+		}
+		return keys("j/k", "move", "n", "add", "e", "edit", "d", "done", "b", "block", "esc", "back")
 	case modeHelp:
 		return keys("any key", "close")
 	}

@@ -615,6 +615,14 @@ the TUI as keys. Several messages go as one paste, one line each, with one Enter
   only the mail is printed. A caller off the team, like you in a shell, reads the channel.
 - **Reading it.** `board` lists the tasks, and with each member the task it holds; `task
   ls` adds the details; `ls` counts them. In JSON each task has `ready` and `waits`.
+- **Editing it from the tree.** `e` on a team opens its board full screen: every task
+  with its status, owner and what it waits for, and the selected task's body and note
+  under the list. `j`/`k` move, `n` adds a task, `e` or `↵` edits the selected one, `d`
+  marks it done with an optional note, `b` marks it blocked with a required why, and
+  `esc` goes back to the tree, or from a form back to the board. The user acts as `you`
+  on the API: the owner must be a role on the team, and `after` must name tasks already
+  on the board, as when one is added. An edit is applied over the task as it was read,
+  and loses, naming who has it, when someone moved it meanwhile.
 
 ### In the tree
 
@@ -634,6 +642,7 @@ no preview.
 | Key, on a team | Does |
 | --- | --- |
 | `↵` | open the team's channel full screen; on a member row, jump to that member |
+| `e` | open the board editor: `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
 | `s` | write to everyone (`@role` for one); on a member, to that member |
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |
@@ -730,10 +739,6 @@ Tables in migrations that can run twice, as the trash's can:
 - `team_trash` — a team in the trash, and when it went.
 
 ### What comes next
-
-**The rest of phase 2.** The task board is built; left are:
-
-- Tasks can be edited from the tree.
 
 **The rest of phase 3.** A worktree per member, `hive team done`, the trash, mute,
 `hive team new --wait` and filtering the tree by team are built; left is:

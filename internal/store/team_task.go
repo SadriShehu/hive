@@ -161,6 +161,45 @@ func (s *Store) UpdateTask(old, t Task) (bool, error) {
 	return true, tx.Commit()
 }
 
+// EditTask moves a task's title, body, owner and the tasks it waits for from
+// what was read (old) to what it now is, and reports whether it did: it
+// doesn't when someone else moved the task in between.
+func (s *Store) EditTask(old, t Task) (bool, error) {
+	if t.After == nil {
+		t.After = []int{}
+	}
+	if old.After == nil {
+		old.After = []int{}
+	}
+	after, err := json.Marshal(t.After)
+	if err != nil {
+		return false, err
+	}
+	was, err := json.Marshal(old.After)
+	if err != nil {
+		return false, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE team_tasks SET title = ?, body = ?, owner = ?, after = ?, updated_at = ?
+		WHERE team_id = ? AND n = ? AND status = ? AND owner = ? AND title = ? AND body = ? AND after = ?`,
+		t.Title, t.Body, t.Owner, string(after), t.UpdatedAt,
+		old.TeamID, old.N, old.Status, old.Owner, old.Title, old.Body, string(was))
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, nil
+	}
+	if _, err := tx.Exec(`UPDATE teams SET updated_at = MAX(updated_at, ?) WHERE id = ?`, t.UpdatedAt, old.TeamID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
 // MessagesAfter returns a team's messages after id, oldest first, private
 // ones too.
 func (s *Store) MessagesAfter(teamID string, id int64) ([]Message, error) {
