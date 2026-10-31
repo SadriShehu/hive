@@ -52,12 +52,16 @@ type Ops interface {
 	TeamStop(teamID string) (int, error)
 	TeamStart(o tracker.TeamOptions) (string, error)
 	TeamRead(teamID string, upTo int64) error
+	TrashTeam(tm store.Team) ([]store.Session, error)
+	RestoreTeam(tm store.Team) ([]store.Session, error)
+	PurgeTeam(tm store.Team) (tracker.Purged, error)
 }
 
-// TeamSnapshot is every team, who is on them, and how many channel messages
-// the user hasn't read.
+// TeamSnapshot is every team, who is on them, the teams in the trash, and how
+// many channel messages the user hasn't read.
 type TeamSnapshot struct {
 	Teams   []store.Team
+	Trashed []store.Team // in the trash
 	Members []store.Member
 	Unread  map[string]int
 	Tasks   []store.Task // every team's board
@@ -161,6 +165,9 @@ func (o *liveOps) Teams() (TeamSnapshot, error) {
 	if snap.Teams, err = o.st.Teams(); err != nil {
 		return snap, err
 	}
+	if snap.Trashed, err = o.st.TrashedTeams(); err != nil {
+		return snap, err
+	}
 	if snap.Members, err = o.st.AllMembers(); err != nil {
 		return snap, err
 	}
@@ -169,6 +176,17 @@ func (o *liveOps) Teams() (TeamSnapshot, error) {
 	}
 	snap.Unread, err = o.st.Unread()
 	return snap, err
+}
+
+func (o *liveOps) TrashTeam(tm store.Team) ([]store.Session, error) { return o.tracker().TrashTeam(tm) }
+func (o *liveOps) RestoreTeam(tm store.Team) ([]store.Session, error) {
+	return o.tracker().RestoreTeam(tm)
+}
+
+func (o *liveOps) PurgeTeam(tm store.Team) (tracker.Purged, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return o.tracker().PurgeTeam(ctx, tm)
 }
 
 func (o *liveOps) TeamFeed(teamID string, n int) ([]store.Message, error) {

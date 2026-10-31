@@ -271,7 +271,9 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 				return err
 			}
 		}
-		t.teamNote(id, "stopped")
+		if cur.Status != store.StatusExited { // liveness may have found it gone first, and said so
+			t.teamNote(id, "stopped")
+		}
 	}
 	if ev.Type == agent.Start && ev.EnvFile != "" {
 		return exportParent(ev.EnvFile, id)
@@ -564,8 +566,12 @@ func (t *Tracker) Refresh() ([]store.Session, error) {
 		}
 		p, running := procs[s.PID]
 		if !running || !t.spec(s.Tool).Matches(p) {
-			if err := t.Store.MarkGone(s.ID, now); err != nil {
+			gone, err := t.Store.MarkGone(s.ID, now)
+			if err != nil {
 				return nil, err
+			}
+			if gone { // its window closed, or it crashed: no end event says so
+				t.teamNote(s.ID, "stopped")
 			}
 			sessions[i].Status, sessions[i].PID, sessions[i].Pane = store.StatusExited, 0, ""
 			continue
@@ -582,7 +588,7 @@ func (t *Tracker) Refresh() ([]store.Session, error) {
 			continue
 		}
 		if parent := byID[s.ParentID]; parent == nil || !parent.Live() {
-			if err := t.Store.MarkGone(s.ID, now); err != nil {
+			if _, err := t.Store.MarkGone(s.ID, now); err != nil {
 				return nil, err
 			}
 			sessions[i].Status = store.StatusExited

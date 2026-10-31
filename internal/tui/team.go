@@ -200,7 +200,11 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.mode, m.confirm = modeConfirm, confirmation{action: actStopTeam, team: tm, below: live}
 		return m, nil, true
 	case "d":
-		m.setFlash("a team can't be deleted yet: x stops its members", true)
+		if running := m.runningMembers(tm.ID); len(running) > 0 {
+			m.setFlash("stop "+joinRoles(running)+" first: a team goes to the trash once nobody runs", true)
+			return m, nil, true
+		}
+		m.mode, m.confirm = modeConfirm, confirmation{action: actTrashTeam, team: tm, session: n.Session, below: len(m.members(tm.ID))}
 	case "c", "r", "u":
 		m.setFlash("pick a member of "+tm.Name+" for that", true)
 	case "y":
@@ -513,7 +517,9 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	if tasks := m.taskCount(t.ID); tasks != "" {
 		right += " · " + tasks
 	}
-	if t.Paused {
+	if _, trashed := m.trashedTeamByID(t.ID); trashed {
+		right = "in the trash · " + right
+	} else if t.Paused {
 		right = "⏸ paused · " + right
 	}
 	nameStyle := sBold
@@ -564,7 +570,9 @@ func (m Model) teamPreviewLines(n *tree.Node, w, h int) []string {
 		sDim.Render(ansi.Truncate(fmt.Sprintf("%d members · led by %s · %s · started %s ago",
 			len(members), led, where, age(m.now(), t.CreatedAt)), w, "…")),
 	}
-	if isDone(&t) {
+	if _, trashed := m.trashedTeamByID(t.ID); trashed {
+		head = append(head, sError.Render("in the trash · r restores it · d deletes it for good"))
+	} else if isDone(&t) {
 		head = append(head, sDim.Render("✓ done: the goal is met; the team takes no more messages"))
 	} else if t.Paused {
 		head = append(head, sError.Render("⏸ paused: no mail is delivered · p resumes"))

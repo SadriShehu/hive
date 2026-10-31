@@ -334,11 +334,12 @@ holds no control characters, so it can't reach the TUI as keys.
 | `p` | pause or resume: no mail is delivered and no task claimed while paused |
 | `L` | take the lead yourself, or hand it back to an agent |
 | `x` | stop every member (asks first) |
+| `d` · `t` | move the team and its members to the trash (asks first) · show the trash |
 | `m` · `T` | hide hive's own posts · start a team |
 
 | Command | Does |
 | --- | --- |
-| `hive team new <name> [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees]` | start the team and print the roster |
+| `hive team new <name> [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees] [--wait]` | start the team and print the roster; `--wait` waits for each member's session ID |
 | `hive team ls` · `board [team]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts · the channel (all take `--json`) |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate (`--private` keeps it out of your feed) |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print its number; its owner hears from hive when it is ready |
@@ -348,6 +349,7 @@ holds no control characters, so it can't reach the TUI as keys.
 | `hive team add` · `rm` · `stop` | add a member · retire one · stop them all |
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
 | `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail; `--clean` removes merged worktrees |
+| `hive team mute <team> <role>` · `unmute <team> <role>` | pause hive's delivery to one member · let it go on |
 
 Inside a member the team and the role are implied; an agent on two teams names the one
 it means. A message is from the member's role, from `you` when you run the command
@@ -372,6 +374,22 @@ branches are merged into the branch the folder had when the team started, with t
 branches. Anything with commits to merge or changes not committed stays, and
 `hive team board` lists it under "worktrees"; run `done --clean` again once it is dealt
 with.
+
+`hive team new --wait` returns once each member has reported its session, so the roster
+it prints names them; a tool that starts its session only with its first message gets a
+stand-in ID, as `hive new --wait` gives one.
+
+**Mute.** `hive team mute <team> <role>` stops hive from typing that member's mail into
+its pane, for two members that write to each other without end. The mail still queues,
+and `hive team inbox` still reads it; `unmute` delivers what waited at the member's next
+idle.
+
+**The trash.** `d` on a team, in the tree, moves the team and its members' sessions to
+the trash together; it asks first, and refuses while a member runs. `t` shows the trash,
+where a team keeps its members under it: `r` restores the team and its sessions, and `d`
+deletes them for good, each member's session through its tool. A member's session that is
+also on a team out of the trash stays, so one agent on two teams isn't taken from the
+other.
 
 ## Picking the model: auto
 

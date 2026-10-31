@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +37,7 @@ func newTeamCmd() *cobra.Command {
 	cmd.AddCommand(newTeamNewCmd(), newTeamLsCmd(), newTeamBoardCmd(), newTeamSayCmd(), newTeamPostCmd(),
 		newTeamLogCmd(), newTeamInboxCmd(), newTeamAddCmd(), newTeamRmCmd(), newTeamStopCmd(),
 		newTeamPauseCmd(true), newTeamPauseCmd(false), newTeamLeadCmd(), newTeamDeliverCmd(), newTeamDoneCmd())
-	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd())
+	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd(), newTeamMuteCmd(true), newTeamMuteCmd(false))
 	return cmd
 }
 
@@ -140,7 +141,8 @@ func (e *teamEnv) session(m store.Member) (store.Session, bool) {
 func newTeamNewCmd() *cobra.Command {
 	var goal, cwd, lead string
 	var members []string
-	var worktrees bool
+	var worktrees, wait bool
+	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "new <name>",
 		Short: "Start a team: its members open in their own tmux windows",
@@ -150,7 +152,10 @@ func newTeamNewCmd() *cobra.Command {
 			"this command) or none (you lead from the tree). A member is role=tool or role=tool:model;\n" +
 			"the model can be auto. --goal - reads the goal from stdin.\n\n" +
 			"--worktrees gives each member a git worktree and branch of its own, hive/<team>/<role>,\n" +
-			"made from the folder's HEAD; the lead works in the folder itself and merges them.",
+			"made from the folder's HEAD; the lead works in the folder itself and merges them.\n" +
+			"--wait waits until each member reports its session, so the team's roster is ready for\n" +
+			"`hive send` and the like; a tool that starts its session only with its first message\n" +
+			"gets a stand-in ID.",
 		Example: "  hive team new api-v2 --goal \"add the admin API\" --lead claude \\\n" +
 			"    --member backend=claude:auto --member frontend=codex --member reviewer=opencode",
 		Args: cobra.ExactArgs(1),
@@ -196,9 +201,13 @@ func newTeamNewCmd() *cobra.Command {
 				tool, model, _ := strings.Cut(lead, ":")
 				o.Lead = &team.Spec{Role: team.LeadRole, Tool: tool, Model: model}
 			}
+			before := time.Now().UnixMilli()
 			tm, launched, err := e.tr.NewTeam(cmd.Context(), o)
 			if err != nil {
 				return err
+			}
+			if wait {
+				waitLaunched(cmd.Context(), e, tm, launched, before, timeout)
 			}
 			printLaunched(tm, launched)
 			return nil
@@ -211,7 +220,31 @@ func newTeamNewCmd() *cobra.Command {
 	f.StringVar(&lead, "lead", "claude", "who leads: a tool[:model], self, or none (you lead from the tree)")
 	f.StringArrayVar(&members, "member", nil, "a member: role=tool[:model]; repeat for each")
 	f.BoolVar(&worktrees, "worktrees", false, "a git worktree and branch per member; the lead works in the folder and merges")
+	f.BoolVarP(&wait, "wait", "w", false, "wait until each member reports in, then print the roster with its session IDs")
+	f.DurationVar(&timeout, "timeout", time.Minute, "how long --wait waits for each member")
 	return cmd
+}
+
+// waitLaunched waits for each member hive started to report its session, and
+// puts the ID it found in launched, so the roster prints it. A member that
+// doesn't report in before timeout keeps the pane it was started in; the
+// others are still printed.
+func waitLaunched(ctx context.Context, e *teamEnv, tm store.Team, launched []tracker.MemberLaunch, after int64, timeout time.Duration) {
+	for i := range launched {
+		if ctx.Err() != nil {
+			return
+		}
+		l := &launched[i]
+		if l.Err != nil || l.Launched.SessionID != "" || l.Launched.Pane == "" {
+			continue
+		}
+		s, err := e.tr.WaitForSession(l.Member.Tool, l.Launched.Pane, after, quietStart, timeout)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", l.Member.Role, err)
+			continue
+		}
+		l.Launched.SessionID = s.ID
+	}
 }
 
 func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
@@ -695,6 +728,43 @@ func newTeamPauseCmd(pause bool) *cobra.Command {
 				return err
 			}
 			return e.tr.SetPaused(tm, pause)
+		},
+	}
+}
+
+func newTeamMuteCmd(mute bool) *cobra.Command {
+	use, short := "unmute <team> <role>", "Let hive deliver a member's mail again"
+	if mute {
+		use, short = "mute <team> <role>", "Pause hive's delivery to one member; its mail still queues, and inbox still reads it"
+	}
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Long: "Stop hive from typing a member's queued mail into its pane, for two members that write to\n" +
+			"each other without end. The mail still queues, and `hive team inbox` still reads it; a\n" +
+			"paused team and a muted member both wait for their mail.\n\n" +
+			"unmute lets delivery go on; what waited is typed at the member's next idle, as usual.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openTeamEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			tm, err := e.team(args[0])
+			if err != nil {
+				return err
+			}
+			role := strings.TrimPrefix(args[1], "@")
+			if err := e.tr.MuteMember(tm, role, mute); err != nil {
+				return err
+			}
+			if mute {
+				fmt.Printf("%s on %s is muted: its mail waits until `hive team unmute %s %s`\n", role, tm.Name, tm.Name, role)
+			} else {
+				fmt.Printf("%s on %s is not muted; what waited is delivered at its next idle\n", role, tm.Name)
+			}
+			return nil
 		},
 	}
 }

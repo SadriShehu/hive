@@ -194,6 +194,10 @@ var migrations = []string{
 	// Worktrees teams: where each started, and the worktrees hive made for
 	// its members. Like the trash, it can run twice.
 	teamWorktreesSchema,
+	// Members whose mail waits to be delivered by hand.
+	teamMutesSchema,
+	// Teams in the trash.
+	teamTrashSchema,
 }
 
 // Open opens (creating if needed) the database at path.
@@ -451,11 +455,17 @@ func (s *Store) SetStatus(id, status string, at int64) error {
 }
 
 // MarkGone records that a session's process no longer exists, whatever
-// status was recorded before.
-func (s *Store) MarkGone(id string, at int64) error {
-	_, err := s.db.Exec(`UPDATE sessions SET status = ?, status_at = MAX(status_at, ?),
-		updated_at = MAX(updated_at, ?), pid = 0, pane = '' WHERE id = ?`, StatusExited, at, at, id)
-	return err
+// status was recorded before. It reports whether the session was running
+// until now: of several processes that find it gone, one hears yes.
+func (s *Store) MarkGone(id string, at int64) (bool, error) {
+	res, err := s.db.Exec(`UPDATE sessions SET status = ?, status_at = MAX(status_at, ?),
+		updated_at = MAX(updated_at, ?), pid = 0, pane = '' WHERE id = ? AND (pid <> 0 OR status <> ?)`,
+		StatusExited, at, at, id, StatusExited)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // EndOthersOnPID marks every other top-level session running as pid exited:
