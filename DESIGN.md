@@ -341,13 +341,197 @@ names the real session once it starts. `hive wait` then blocks until the child i
 with what it was given; the `inputs` table keeps it from returning on the idle a tool
 reports as it starts up, or on the end of the turn before a `send`.
 
+## Teams
+
+A team is a few agents working on one goal in one folder, and a channel where they report
+to you. Each member is a real session in its own tmux window, started with its tool's own
+command; `hive send`, `tail`, `wait`, jump, stop and the trash work on it as on any
+session. hive holds what the team shares: who is on it, the goal, the channel and the
+messages between members. Nothing new runs in the background: hooks, `hive team …`
+commands and the tree's refresh drive it all.
+
+Only two things enter a member's session: its brief, typed as the first prompt, and
+messages from teammates, typed into its pane. Only two leave it: the `hive team …`
+commands it runs and its hook events. The agents stay native; the team lives in hive's
+database and the tree.
+
+Phase 1 is built: teams, the channel and the mailbox. [What comes next](#what-comes-next)
+is the rest of the plan.
+
+### Decisions
+
+| Question | Decision |
+| --- | --- |
+| How members are addressed | by role (`lead`, `backend`, …), not session: mail follows a member reopened under a new session |
+| A message to a working member | waits for its `idle` hook, then is typed with everything else queued as one paste |
+| Who delivers | the sender's process when the recipient is idle, else a detached `hive team deliver` that the recipient's hook starts. No daemon |
+| Who leads | an agent hive starts, by default. You can step in at any point: write to anyone, take over the lead (`L`, `hive team lead`), or pause the team |
+| How you follow progress | a channel: members and hive post, you answer in the same feed. A post reaches a pane only when it names a member |
+| Where members work | one shared folder; a worktree per member is opt-in, in phase 3 |
+| Channel view | the feed in the preview pane; a full-screen view comes in phase 2 |
+
+### Members and roles
+
+- **Who leads.** `--lead tool[:model]` starts an agent as `lead` (claude by default),
+  `--lead self` makes the agent running `hive team new` the lead without starting
+  another, and `--lead none` leaves it to you. `L` and `hive team lead` move it at any
+  time; retiring the lead hands it to you.
+- **Starting.** hive starts each member through the usual launch, detached, with the
+  brief as its first prompt and `HIVE_TEAM` and `HIVE_ROLE` in its window's environment,
+  next to `HIVE_PARENT`. Members start in the order given, the lead first. A member
+  started with `auto` gets its pick from the goal and its own part, not from the brief;
+  one `hive team new` asks each tool what it runs only once. A failed member stays on
+  the team with the error in the channel; if no member's window opens, the team isn't
+  kept.
+- **Linking.** `launch_teams` records the pane hive opened for a role; the first session
+  that reports from that pane within 10 minutes takes the role, as with a launch record.
+  Older records are dropped, since pane IDs start over when tmux restarts. Claude and
+  Copilot are linked at once, since hive gives them their session IDs.
+- **The role follows the member** when hive reopens it (a new pane record), when it
+  continues under a new session ID (Codex, opencode), and when its process starts a new
+  session (`/clear` in Claude, `/new` in opencode). For `/clear`, the ended session leaves
+  a record naming its process, so only that process's next session in that pane takes
+  the role, whichever of the two hooks arrives first.
+- **Several teams.** A session can play a role on more than one team: an agent on one
+  can lead another of its own with `--lead self`. Its mail from all of them arrives in
+  one paste, and a command it runs without naming a team asks which.
+- **Who is calling.** A `hive team` command finds its member, in order: the nearest
+  session up the process tree, or up the parent links from it, that plays a role, so a
+  member's subagent or child speaks for it; the role `HIVE_TEAM` and `HIVE_ROLE` name;
+  the nearest up the parent links from the session `HIVE_PARENT` names. The process tree
+  comes first because `HIVE_PARENT` in a member's window names the agent that made the
+  team. A message is from the caller's role; from `you` only outside any agent; and from
+  an agent that isn't on the team, as its session ID (or `team/role` for a member of
+  another team), so an agent is never taken for you. `--as` sets it for scripts.
+
+### The brief
+
+The first prompt of each member, and the one place hive talks to an agent: the team,
+its roster and folder, the goal, the member's own part, how to use `hive team board`,
+`post`, `say` and `log`, and that hive wakes it when someone writes to it. The lead is
+told to split the goal and hand out the parts with `say`, then review, integrate and post
+when the goal is met. When you lead, every member is told so, including one whose role
+happens to be called `lead`: who leads goes by the team's lead role alone.
+
+### The channel and the mailbox
+
+- **Posts.** `hive team post` writes to the channel, which you read in the team node's
+  preview. A post reaches a pane only when it names a teammate with `@role`, a whole role:
+  `@dev` isn't in `@dev-ops`. Otherwise every update would interrupt every agent.
+- **hive's posts.** A member started, needs you, stopped, continues as another session or
+  left; the team paused or resumed; who leads. They come from hooks and commands, so they
+  cost no tokens, and the feed has news even when an agent forgets to post. `m` hides
+  them.
+- **Messages.** `hive team say <role|all>` writes to teammates; `all` leaves the sender
+  out, and a member can't write to itself. `--private` keeps one out of your feed. What
+  you write with `s` in the tree goes through the same mailbox.
+- **Unread.** `team_reads` keeps the last message you have seen per team; the node shows
+  what others wrote since.
+
+**Delivery rules**, per recipient, in order:
+
+| Recipient is | hive does |
+| --- | --- |
+| on a paused team | queues it; `resume` delivers what waited. `inbox` leaves it too |
+| idle, in a pane | types it now, from the sender's process, and records it in `inputs` so `hive wait` waits for the answer |
+| working | queues it. Its `idle` hook starts `hive team deliver` detached, which waits a second for the TUI to settle, looks again at the member, its teams and its status, then types everything queued as one paste |
+| waiting on you | queues it: typing into a permission prompt would answer it |
+| of unknown status, in a pane (a tool without turn hooks) | types it now, and says the delivery was blind |
+| exited | reopens it with the queued messages as its next prompt, as `hive send` does |
+| not reported in yet | queues it; its `start` hook delivers |
+| retired with `hive team rm` | gets nothing: its queue is dropped, and nothing more is addressed to it |
+
+The sender's process and the hook's can deliver at once, so a delivery claims the queued
+rows in one `UPDATE … RETURNING` before it types, and gives them back if typing fails.
+`hive hook` never waits on a delivery, so the agent's hook timeout is never at risk and
+nothing prints into the agent. An agent that would rather read its mail runs
+`hive team inbox [--wait]`.
+
+**The envelope.** Every delivered line is `[team · from role] text`, with line breaks and
+every other control character turned into spaces. Starting with `[`, a line can't run a
+slash command (`/exit`), a shell escape (`!`) or a memory shortcut (`#`) in the
+recipient's TUI; holding no escape, it can't end tmux's bracketed paste early and reach
+the TUI as keys. Several messages go as one paste, one line each, with one Enter.
+
+### In the tree
+
+A team is a node of its own (`⬡`): at the root, or under the session that made it unless
+that session is on the team. Its members sit under it, and a member's own children stay
+under the member. The node takes the most urgent status of its live members, and its
+preview is the channel, under a strip of the members.
+
+| Key, on a team | Does |
+| --- | --- |
+| `↵` | jump to the member that needs you, else the lead, else the first running |
+| `s` | write to everyone (`@role` for one); on a member, to that member |
+| `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
+| `x` | stop every member that runs (asks first) |
+| `T` | start a team: name, folder, lead, members as `role=tool[:model]`, goal |
+
+### Data
+
+Six tables, in one migration that can run twice, as the trash's can:
+
+- `teams` — ID (8 hex), name (unique), goal, folder, workspace (`shared`), the session
+  that made it, status (active or done), paused, the lead's role (empty when you lead),
+  and times.
+- `team_members` — team and role, the session playing it now, tool, model, the member's
+  own part of the brief, folder, the pane it was last started in, and when it joined and
+  left. A retired member keeps its row and its messages.
+- `team_messages` — team, from (a role, `you`, `hive`, or an agent off the team), to (a
+  role, `all`, or nobody for a post), body, kind (post, say or system), private, time.
+- `team_deliveries` — a message queued for a role, and when it was delivered.
+- `launch_teams` — a pane, the team and role it was opened for, the process when the
+  record hands a role on after `/clear`, and when it was made.
+- `team_reads` — per team, the last message you have seen.
+
+### What comes next
+
+**Phase 2, the task board.**
+
+- `hive team task add <title> [--body] [--owner role] [--after n,…]`, `claim <n>`,
+  `done <n> [--note]`, `block <n> --why`, `ls [--json]`: numbered tasks with an owner,
+  and the tasks each waits for. `claim` refuses a task whose `--after` tasks are open,
+  unless `--force`.
+- Closing a task posts to the lead, and messages the owners of tasks that became ready,
+  so work moves on without polling. A paused team claims no tasks.
+- `hive team wait [--task n] [--from role] [--any] [--timeout d]` blocks until a task
+  closes, a message arrives or the board changes, and prints what happened.
+- The brief teaches the task commands, and the lead turns the goal into tasks. The
+  board and the preview list the tasks; a member's row shows the task it holds.
+- `team_tasks`: team and number, title, body, status (open, claimed, done or blocked),
+  owner, the tasks it waits for (JSON), a note on what done changed or why it is
+  blocked, who added it, and times.
+- `[[team]]` templates in config.toml, with `[[team.member]]` rows; `--from template`.
+- The new-team form gets one row per member (role, tool, model, the member's part), with
+  `+` to add one and templates to fill them. Tasks can be edited from the tree.
+- A full-screen channel view: `↵` on a team opens it, with a live input line; `esc` goes
+  back to the tree.
+
+**Phase 3, workspaces and hygiene.**
+
+- `--worktrees`: a git worktree and branch `hive/<team>/<role>` per member, under
+  `~/.local/share/hive/worktrees/<team>/<role>`; the lead merges.
+- `hive team done [--clean]` marks the goal met; the team stays in the tree, folded and
+  dimmed, with its history. `--clean` removes merged worktrees; an unmerged one stays,
+  and the board lists it.
+- Teams in the trash: `d` trashes a team with its members (asks first, refused while a
+  member runs), and restore and purge take them together, purging the members through
+  their tools.
+- `hive team mute <role>` pauses delivery to one member, for two that write to each
+  other without end (the board already counts each member's messages).
+- Filtering the tree by team, and a team in the README demo.
+
+**Left from phase 1.** `hive team new --wait`, and a live test with fake agents on a
+private tmux server: say, delivery at idle, reopening with mail.
+
 ## Edge cases and safety
 
 | Case | Handling |
 | --- | --- |
 | Hook output leaking into an agent | `hive hook` prints nothing (Claude adds SessionStart output to its context), always exits 0, and logs errors to `~/.local/share/hive/hive.log` |
 | Events arriving out of order | each carries a timestamp; an older status never overwrites a newer one |
-| `/clear` in Claude, `/new` in opencode | a new top-level session in the same process ends the previous one |
+| `/clear` in Claude, `/new` in opencode | a new top-level session in the same process ends the previous one, and takes the roles it played on teams |
 | Reused pids | liveness also checks that the process's program matches the tool |
 | Detached children (`nohup`, `setsid`) | the process tree breaks, so `HIVE_PARENT` from the environment links them |
 | Reopening a session that is still running | refused, so two processes never write one session |
@@ -383,13 +567,14 @@ internal/
     copilot/    user-level hooks, session store import, preview, delete
     codex/      hooks.json, rollout and state DB import, preview, delete
   adapters/     the built-in adapters, with config.toml applied
-  tracker/      linking, liveness, sync, launch/resume/send/stop, trash and purge, lookup, who needs you, wait
-  store/        SQLite: sessions, trash, launches, spawn hints, import state, inputs
+  tracker/      linking, liveness, sync, launch/resume/send/stop, trash and purge, lookup, who needs you, wait, teams
+  store/        SQLite: sessions, trash, launches, spawn hints, import state, inputs, teams
+  team/         the rules of teams that need no database: roles, the brief, the envelope, when to deliver
   spawn/        finds agent commands in shell history
   proc/         the process table
   tmux/         windows, panes, paste, capture, messages, the key bindings
   tree/         the session tree and its filters
-  tui/          the tree UI
+  tui/          the tree UI, team nodes and the channel
   cmd/          the commands
   paths/        data, log and config locations
 ```
@@ -407,14 +592,18 @@ internal/
 | — Claude daemon | spares and helper processes hidden | `ef8beea` | 29 Sep |
 | — Deleting | trash (`d`, `hive rm`), restore, deleting for good through each tool | PR #3 | 29 Sep |
 | — Folder suggestions | the new-agent form lists folders as you type; `hive new --cwd` completes them | PR #4 | 30 Sep |
-| — Needs you, and waiting | tmux and desktop alerts, prefix + A and `hive jump --next`, `hive status`, `hive wait` | this branch | 2 Oct |
+| — Needs you, and waiting | tmux and desktop alerts, prefix + A and `hive jump --next`, `hive status`, `hive wait` | PR #13 | 2 Oct |
+| — Picking the model | `hive new auto`, `--model auto`, `hive models`, tiers and ratings | PR #15 | 6 Oct |
+| — Teams, phase 1 | teams, the channel and the mailbox; team nodes in the tree | PR #17 | 31 Oct |
 
 ## Testing
 
 - Unit tests cover each package. Linking runs against a fake world (process table, panes,
   environment, clock); hook parsing uses recorded payloads; installs round-trip in temporary
   config folders; importers read fixtures shaped like the real files; the TUI model is driven
-  through a fake of its operations.
+  through a fake of its operations. Team delivery runs against the same fake world, with
+  the pane typing (`Tracker.Type`, `HasPane`) replaced, so a test sees what would be typed
+  where.
 - tmux tests use a private server (`tmux -L hive-test-<pid>`) with `TMUX` unset. Every tmux
   command in a test names its server: `$TMUX` beats `TMUX_TMPDIR`, and a bare `kill-server`
   once closed every window the user had.
