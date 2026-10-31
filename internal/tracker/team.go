@@ -48,6 +48,7 @@ type TeamOptions struct {
 	Members   []team.Spec
 	CreatedBy string // the session running `hive team new`, if an agent
 	Session   string // tmux session for the windows; "" means the home session
+	Worktrees bool   // a git worktree and branch per member; the lead works in Cwd and merges
 }
 
 // MemberLaunch is the result of starting one member.
@@ -87,16 +88,28 @@ func (t *Tracker) NewTeam(ctx context.Context, o TeamOptions) (store.Team, []Mem
 	if err != nil {
 		return store.Team{}, nil, err
 	}
+	workspace, base := store.WorkspaceShared, store.TeamBase{}
+	if o.Worktrees {
+		if base, err = t.repoBase(o.Name, cwd); err != nil {
+			return store.Team{}, nil, err
+		}
+		workspace = store.WorkspaceWorktrees
+	}
 	now := t.World.Now()
 	tm := store.Team{ID: newTeamID(), Name: o.Name, Goal: strings.TrimSpace(o.Goal), Cwd: cwd,
-		Workspace: store.WorkspaceShared, CreatedBy: o.CreatedBy, Status: store.TeamActive,
+		Workspace: workspace, CreatedBy: o.CreatedBy, Status: store.TeamActive,
 		LeadRole: lead, CreatedAt: now, UpdatedAt: now}
 	if err := t.Store.CreateTeam(tm); err != nil {
 		return store.Team{}, nil, err
 	}
+	if o.Worktrees {
+		if err := t.startWorktrees(tm, base); err != nil {
+			return store.Team{}, nil, errors.Join(err, t.Store.ForgetWorktrees(tm.ID), t.Store.DeleteTeam(tm.ID))
+		}
+	}
 	out, err := t.startTeam(ctx, tm, specs, o.SelfLead, o.Session)
 	if err != nil {
-		return store.Team{}, nil, errors.Join(err, t.Store.DeleteTeam(tm.ID))
+		return store.Team{}, nil, errors.Join(err, t.dropWorktrees(tm), t.Store.DeleteTeam(tm.ID))
 	}
 	return tm, out, nil
 }
@@ -149,10 +162,6 @@ func (t *Tracker) startTeam(ctx context.Context, tm store.Team, specs []team.Spe
 
 // startMember opens a member's window with its brief as the first prompt.
 func (t *Tracker) startMember(ctx context.Context, tm store.Team, m store.Member, members []store.Member, session string) (Launched, error) {
-	cwd := m.Cwd
-	if cwd == "" {
-		cwd = tm.Cwd
-	}
 	// auto is rated on the goal and the member's part, not on the brief.
 	if (PickOptions{Tool: m.Tool, Model: m.Model}).Wants() {
 		choice, err := t.Pick(ctx, PickOptions{Tool: m.Tool, Model: m.Model, Prompt: strings.TrimSpace(tm.Goal + "\n" + m.Prompt), ParentID: tm.CreatedBy})
@@ -165,7 +174,11 @@ func (t *Tracker) startMember(ctx context.Context, tm store.Team, m store.Member
 			return Launched{}, err
 		}
 	}
-	l, err := t.Launch(ctx, LaunchOptions{Tool: m.Tool, Model: m.Model, Cwd: cwd, Prompt: team.Brief(tm, m, members),
+	if err := t.placeMember(tm, &m); err != nil {
+		t.system(tm, m.Role+" didn't start: "+err.Error())
+		return Launched{}, err
+	}
+	l, err := t.Launch(ctx, LaunchOptions{Tool: m.Tool, Model: m.Model, Cwd: team.Folder(tm, m), Prompt: team.Brief(tm, m, members),
 		ParentID: tm.CreatedBy, Session: session, Detached: true,
 		Env: map[string]string{team.TeamEnv: tm.ID, team.RoleEnv: m.Role}})
 	if err != nil {
@@ -187,6 +200,9 @@ func (t *Tracker) startMember(ctx context.Context, tm store.Team, m store.Member
 // AddMember puts one more member on a team and starts it.
 func (t *Tracker) AddMember(ctx context.Context, tm store.Team, sp team.Spec, session string) (store.Member, Launched, error) {
 	if err := team.ValidRole(sp.Role); err != nil {
+		return store.Member{}, Launched{}, err
+	}
+	if err := closed(tm); err != nil {
 		return store.Member{}, Launched{}, err
 	}
 	m := store.Member{TeamID: tm.ID, Role: sp.Role, Tool: sp.Tool, Model: sp.Model, Prompt: sp.Prompt, JoinedAt: t.World.Now()}
@@ -560,6 +576,9 @@ func (t *Tracker) Say(tm store.Team, from, to, body string, private bool) (store
 	if body == "" {
 		return store.Message{}, nil, errors.New("nothing to say")
 	}
+	if err := closed(tm); err != nil {
+		return store.Message{}, nil, err
+	}
 	members, err := t.Store.Members(tm.ID)
 	if err != nil {
 		return store.Message{}, nil, err
@@ -586,6 +605,9 @@ func (t *Tracker) Post(tm store.Team, from, body string) (store.Message, []Sent,
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return store.Message{}, nil, errors.New("nothing to post")
+	}
+	if err := closed(tm); err != nil {
+		return store.Message{}, nil, err
 	}
 	members, err := t.Store.Members(tm.ID)
 	if err != nil {
