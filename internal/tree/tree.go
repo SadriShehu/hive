@@ -4,6 +4,7 @@ package tree
 import (
 	"cmp"
 	"slices"
+	"strings"
 
 	"github.com/sadrishehu/hive/internal/store"
 )
@@ -14,6 +15,108 @@ type Node struct {
 	Children []*Node
 	Last     int64 // most recent activity anywhere in the subtree, epoch ms
 	Live     bool  // something in the subtree is running
+
+	Team   *store.Team // set on a team's node, whose Session is a stand-in for it
+	TeamID string      // set on a team's node and on its members
+	Role   string      // set on a member: the role its session plays
+}
+
+// TeamPrefix starts the ID of the stand-in session of a team's node.
+const TeamPrefix = "team:"
+
+// BuildTeams is Build with the teams in it. A team is a node of its own, at
+// the root or under the session that made it, with its members as its
+// children; a member's own sessions stay under the member. Members the tree
+// can't find a session for yet are left out.
+func BuildTeams(sessions []store.Session, teams []store.Team, members []store.Member) []*Node {
+	if len(teams) == 0 {
+		return Build(sessions)
+	}
+	byID := make(map[string]int, len(sessions))
+	for i, s := range sessions {
+		byID[s.ID] = i
+	}
+	all := append([]store.Session(nil), sessions...)
+	roles := map[string]store.Member{} // by the session that plays the role
+	onTeam := map[[2]string]bool{}     // session and team: a session can be on several
+	for _, m := range members {
+		if !m.Active() {
+			continue
+		}
+		i, ok := byID[m.SessionID]
+		if !ok && m.Pane != "" { // not reported in yet: the pending session in its pane
+			for j, s := range sessions {
+				if s.Pane == m.Pane && s.Synthetic() {
+					i, ok = j, true
+				}
+			}
+		}
+		if ok {
+			roles[all[i].ID] = m
+			onTeam[[2]string{all[i].ID, m.TeamID}] = true
+		}
+	}
+	byTeam := map[string]store.Team{}
+	standIns := map[string]*store.Session{}
+	for _, t := range teams {
+		byTeam[t.ID] = t
+		st := store.Session{ID: TeamPrefix + t.ID, Tool: "team", Title: t.Name, Cwd: t.Cwd, Kind: "team",
+			Status: store.StatusUnknown, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, Source: store.SourceTeam}
+		if _, ok := byID[t.CreatedBy]; ok && t.CreatedBy != "" && !onTeam[[2]string{t.CreatedBy, t.ID}] {
+			st.ParentID = t.CreatedBy
+		}
+		all = append(all, st)
+	}
+	// Appending may have moved the slice: take the stand-ins again.
+	for i := range all {
+		if all[i].Source == store.SourceTeam {
+			standIns[strings.TrimPrefix(all[i].ID, TeamPrefix)] = &all[i]
+		}
+	}
+	for i := range all {
+		m, ok := roles[all[i].ID]
+		if !ok {
+			continue
+		}
+		if t, ok := standIns[m.TeamID]; ok {
+			all[i].ParentID = t.ID
+			if rank(all[i].Status) > rank(t.Status) && all[i].Live() {
+				t.Status = all[i].Status
+			}
+			t.UpdatedAt = max(t.UpdatedAt, all[i].UpdatedAt)
+		}
+	}
+	roots := Build(all)
+	var annotate func(nodes []*Node)
+	annotate = func(nodes []*Node) {
+		for _, n := range nodes {
+			switch {
+			case n.Source == store.SourceTeam:
+				t := byTeam[strings.TrimPrefix(n.ID, TeamPrefix)]
+				n.Team, n.TeamID = &t, t.ID
+			case roles[n.ID].Role != "":
+				n.TeamID, n.Role = roles[n.ID].TeamID, roles[n.ID].Role
+			}
+			annotate(n.Children)
+		}
+	}
+	annotate(roots)
+	return roots
+}
+
+// rank orders statuses by how much they ask of the user.
+func rank(status string) int {
+	switch status {
+	case store.StatusAttention:
+		return 4
+	case store.StatusWorking:
+		return 3
+	case store.StatusIdle:
+		return 2
+	case store.StatusExited:
+		return 1
+	}
+	return 0
 }
 
 // Build links sessions to their parents. A session whose parent is unknown

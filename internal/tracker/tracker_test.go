@@ -21,6 +21,8 @@ type fakeWorld struct {
 	env   map[string]string
 	self  int
 	now   int64
+
+	onForget func() // runs where the tracker drops what it has read
 }
 
 func (w *fakeWorld) Procs() proc.Table        { return w.procs }
@@ -29,7 +31,11 @@ func (w *fakeWorld) Cwd(int) string           { return "/work" }
 func (w *fakeWorld) Getenv(key string) string { return w.env[key] }
 func (w *fakeWorld) SelfPID() int             { return w.self }
 func (w *fakeWorld) Now() int64               { return w.now }
-func (w *fakeWorld) Forget()                  {}
+func (w *fakeWorld) Forget() {
+	if w.onForget != nil {
+		w.onForget()
+	}
+}
 
 func (w *fakeWorld) add(pid, ppid int, args string) {
 	w.procs[pid] = proc.Proc{PID: pid, PPID: ppid, Args: strings.Fields(args)}

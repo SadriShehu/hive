@@ -282,6 +282,64 @@ window; without prices, it takes the price away. A tier or a rating it doesn't s
 the built-in one. A name can also cover a family: `gpt-6` prices every `gpt-6-…` model
 that has no price of its own.
 
+## Teams
+
+A team is a few agents working on one goal in one folder, and a channel where they report
+to you. Each member is a real session in its own tmux window, as everything hive starts is;
+hive keeps who is on the team, the channel and the messages between members.
+
+```sh
+hive team new api-v2 --goal "add the admin API: list, invite and remove users" \
+    --lead claude --member backend=claude:auto --member frontend=codex --member reviewer=opencode
+```
+
+Press `T` in the tree for the same in a form. The team is a node in the tree with its
+members under it; select it and the preview is the channel:
+
+```
+⬡ api-v2 · add the admin API: list, invite and remove users
+4 members · led by lead · ~/src/app · started 25m ago
+● lead  ◉ backend  ◆ frontend  ◉ reviewer
+──────────────────────────────────────────────────────────────
+10:02 you → lead         start with the schema
+10:09 backend            schema done: users.role added, email indexed
+10:21 backend → frontend the list endpoint is GET /admin/users?page=
+10:26 hive               frontend needs you
+▸ frontend waits on you · ↵ jumps there
+```
+
+Members post progress with `hive team post`; hive adds its own posts (a member started,
+needs you, stopped); you answer with `s`. A message to a member is typed into its pane
+when it is idle. If it is working, or waiting on you, it waits and is typed when the turn
+ends, so a message never answers a permission prompt. A plain post goes to the channel
+only; it reaches a pane only when it names a teammate with `@role`. Every delivered line
+starts with `[team · from role]`, so it can't run a slash command in the member's TUI, and
+holds no control characters, so it can't reach the TUI as keys.
+
+| Key, on a team | Does |
+| --- | --- |
+| `↵` | jump to the member that needs you, else the lead, else the first running |
+| `s` | message everyone (`@role` for one); on a member, message that member |
+| `p` | pause or resume: no mail is delivered while paused |
+| `L` | take the lead yourself, or hand it back to an agent |
+| `x` | stop every member (asks first) |
+| `m` · `T` | hide hive's own posts · start a team |
+
+| Command | Does |
+| --- | --- |
+| `hive team new <name> [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]...` | start the team and print the roster |
+| `hive team ls` · `board [team]` · `log [team]` | the teams · goal, members and latest posts · the channel (all take `--json`) |
+| `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate (`--private` keeps it out of your feed) |
+| `hive team inbox [--wait]` | print the messages queued for this member, on every team it is on |
+| `hive team add` · `rm` · `stop` | add a member · retire one · stop them all |
+| `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
+
+Inside a member the team and the role are implied; an agent on two teams names the one
+it means. A message is from the member's role, from `you` when you run the command
+outside any agent, and otherwise from the agent that ran it (its session, or `team/role`
+for a member of another team), so an agent is never taken for you. A team none of whose
+members start isn't kept. `hive ls --json` rows gain `team` and `role`.
+
 ## Picking the model: auto
 
 hive can choose the model for a new agent, and the tool too, the way Copilot's

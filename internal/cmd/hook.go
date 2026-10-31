@@ -70,6 +70,7 @@ func runHook(tool string, args []string, f hookFlags) error {
 		tr.Logf = logf
 	}
 	tr.OnAttention = func(s store.Session) { alert(st, s) }
+	tr.OnDeliverable = func(s store.Session) { startDeliver(s.ID) }
 	var errs []error
 	for _, ev := range events {
 		errs = append(errs, tr.Ingest(ev))

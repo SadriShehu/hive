@@ -87,10 +87,21 @@ type Tracker struct {
 	// user: a permission prompt or a question.
 	OnAttention func(s store.Session)
 
+	// OnDeliverable, when set, is told when a team member's agent is ready
+	// for the messages queued for it (it went idle, or started). It must not
+	// wait: it runs inside a hook.
+	OnDeliverable func(s store.Session)
+
+	// Type and HasPane replace the tmux calls that type into a pane, for
+	// tests.
+	Type    func(pane, text string) error
+	HasPane func(pane string) bool
+
 	Models usage.Catalog
 	Fusion fusion.Settings // what `auto` means when picking a model
 
-	cwds map[string]string // process folders, by pid@start
+	cwds       map[string]string   // process folders, by pid@start
+	toolModels map[string][]string // what each tool runs, while NewTeam picks for several members
 }
 
 // New returns a tracker.
@@ -210,6 +221,9 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 		if err := t.Store.Attach(id, pid, pane, s.Kind); err != nil {
 			return err
 		}
+		if err := t.takeOverRoles(pid, id, pane); err != nil {
+			return err
+		}
 		if err := t.Store.EndOthersOnPID(pid, id, at); err != nil {
 			return err
 		}
@@ -221,6 +235,15 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 	}
 	if pane != "" {
 		if err := t.Store.MoveInput(pane, id); err != nil {
+			return err
+		}
+	}
+	if !internal {
+		running := pid
+		if running == 0 && exists {
+			running = cur.PID
+		}
+		if err := t.linkMember(id, running, pane); err != nil {
 			return err
 		}
 	}
@@ -239,6 +262,17 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 			t.attention(id, at)
 		}
 	}
+	switch ev.Type {
+	case agent.Idle, agent.Start:
+		t.deliverable(id)
+	case agent.End:
+		if exists && !internal {
+			if err := t.handOffRoles(cur, at); err != nil {
+				return err
+			}
+		}
+		t.teamNote(id, "stopped")
+	}
 	if ev.Type == agent.Start && ev.EnvFile != "" {
 		return exportParent(ev.EnvFile, id)
 	}
@@ -248,10 +282,12 @@ func (t *Tracker) Ingest(ev agent.Event) error {
 // attention tells OnAttention that id started waiting on the user at at,
 // unless a newer status was already recorded.
 func (t *Tracker) attention(id string, at int64) {
-	if t.OnAttention == nil {
+	s, ok, err := t.Store.Get(id)
+	if err != nil || !ok || s.Status != store.StatusAttention || s.StatusAt != at {
 		return
 	}
-	if s, ok, err := t.Store.Get(id); err == nil && ok && s.Status == store.StatusAttention && s.StatusAt == at {
+	t.teamNote(id, "needs you")
+	if t.OnAttention != nil {
 		t.OnAttention(s)
 	}
 }
@@ -395,20 +431,36 @@ func (t *Tracker) Caller() string {
 
 // inherited finds id's parent from pid's ancestors and the environment.
 func (t *Tracker) inherited(id string, pid int) (string, string) {
-	ok := func(p string) bool { return p != "" && p != id }
-	if pid > 0 {
-		for _, a := range t.World.Procs().Ancestors(pid) {
-			sessions, err := t.Store.OnPID(a)
-			if err != nil {
-				break
-			}
-			for _, s := range sessions {
-				if ok(s.ID) {
-					return s.ID, "process"
-				}
+	if p := t.ancestorSession(id, pid); p != "" {
+		return p, "process"
+	}
+	return t.envSession(id)
+}
+
+// ancestorSession is the session, other than id, of pid's nearest ancestor
+// process that runs one.
+func (t *Tracker) ancestorSession(id string, pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	for _, a := range t.World.Procs().Ancestors(pid) {
+		sessions, err := t.Store.OnPID(a)
+		if err != nil {
+			break
+		}
+		for _, s := range sessions {
+			if s.ID != "" && s.ID != id {
+				return s.ID
 			}
 		}
 	}
+	return ""
+}
+
+// envSession is the session, other than id, that the environment names:
+// HIVE_PARENT, else an adapter's own variable.
+func (t *Tracker) envSession(id string) (string, string) {
+	ok := func(p string) bool { return p != "" && p != id }
 	if p := t.World.Getenv(ParentEnv); ok(p) {
 		return p, "env " + ParentEnv
 	}

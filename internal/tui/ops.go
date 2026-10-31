@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -39,6 +41,25 @@ type Ops interface {
 	Fusion() fusion.Settings              // what auto means
 	Usages() (map[string]store.Usage, error)
 	Usage(ctx context.Context, s store.Session) (store.Usage, error)
+
+	// Teams. The user writes to a team as "you", through the same mailbox
+	// the members use.
+	Teams() (TeamSnapshot, error)
+	TeamFeed(teamID string, n int) ([]store.Message, error)
+	TeamSay(teamID, to, text string) (string, error) // to: a role or "all"; says what happened to each
+	TeamPause(teamID string, paused bool) error
+	TeamLead(teamID, role string) error // "" for the user
+	TeamStop(teamID string) (int, error)
+	TeamStart(o tracker.TeamOptions) (string, error)
+	TeamRead(teamID string, upTo int64) error
+}
+
+// TeamSnapshot is every team, who is on them, and how many channel messages
+// the user hasn't read.
+type TeamSnapshot struct {
+	Teams   []store.Team
+	Members []store.Member
+	Unread  map[string]int
 }
 
 type liveOps struct {
@@ -132,3 +153,84 @@ func (o *liveOps) Copy(text string) error {
 }
 
 func (o *liveOps) Tools() []string { return o.tracker().InstalledTools() }
+
+func (o *liveOps) Teams() (TeamSnapshot, error) {
+	var snap TeamSnapshot
+	var err error
+	if snap.Teams, err = o.st.Teams(); err != nil {
+		return snap, err
+	}
+	if snap.Members, err = o.st.AllMembers(); err != nil {
+		return snap, err
+	}
+	snap.Unread, err = o.st.Unread()
+	return snap, err
+}
+
+func (o *liveOps) TeamFeed(teamID string, n int) ([]store.Message, error) {
+	return o.st.Messages(teamID, n, false)
+}
+
+func (o *liveOps) TeamSay(teamID, to, text string) (string, error) {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return "", err
+	}
+	_, sent, err := o.tracker().Say(tm, store.FromYou, to, text, false)
+	if err != nil {
+		return "", err
+	}
+	var parts []string
+	for _, s := range sent {
+		parts = append(parts, s.Role+": "+s.How)
+	}
+	return strings.Join(parts, " · "), nil
+}
+
+func (o *liveOps) TeamPause(teamID string, paused bool) error {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return err
+	}
+	return o.tracker().SetPaused(tm, paused)
+}
+
+func (o *liveOps) TeamLead(teamID, role string) error {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return err
+	}
+	return o.tracker().SetLead(tm, role)
+}
+
+func (o *liveOps) TeamStop(teamID string) (int, error) {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return 0, err
+	}
+	return o.tracker().StopTeam(tm)
+}
+
+func (o *liveOps) TeamStart(opts tracker.TeamOptions) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	tm, launched, err := o.tracker().NewTeam(ctx, opts)
+	if err != nil {
+		return "", err
+	}
+	started, failed := 0, ""
+	for _, l := range launched {
+		if l.Err == nil {
+			started++
+		} else if failed == "" {
+			failed = l.Member.Role + ": " + l.Err.Error()
+		}
+	}
+	text := fmt.Sprintf("team %s: %d of %d members started", tm.Name, started, len(launched))
+	if failed != "" {
+		return text, errors.New(text + "; " + failed)
+	}
+	return text, nil
+}
+
+func (o *liveOps) TeamRead(teamID string, upTo int64) error { return o.st.MarkRead(teamID, upTo) }

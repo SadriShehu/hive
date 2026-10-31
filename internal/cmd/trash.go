@@ -63,7 +63,7 @@ func newTrashCmd() *cobra.Command {
 			}
 			roots := tree.Build(trashed)
 			if asJSON {
-				return printJSON(roots, nil)
+				return printJSON(roots, nil, nil)
 			}
 			if len(trashed) == 0 {
 				fmt.Println("the trash is empty")
@@ -148,7 +148,8 @@ func newPurgeCmd() *cobra.Command {
 				return nil
 			}
 			if !yes {
-				ok, err := confirm("delete " + what + " for good, from their tools too, transcripts and all?")
+				ok, err := confirm("delete "+what+" for good, from their tools too, transcripts and all?",
+					"this deletes for good", "nothing deleted")
 				if err != nil || !ok {
 					return err
 				}
@@ -197,17 +198,18 @@ func lookupTrashed(trashed []store.Session, ref string) (store.Session, error) {
 }
 
 // confirm asks question on the terminal. Without one, there is no one to
-// ask, and it says how to go ahead anyway.
-func confirm(question string) (bool, error) {
+// ask, and it says what going ahead does and how to anyway; told no, it
+// says what didn't happen.
+func confirm(question, effect, declined string) (bool, error) {
 	if !term.IsTerminal(os.Stdin.Fd()) {
-		return false, errors.New("this deletes for good: pass --yes to go ahead")
+		return false, fmt.Errorf("%s: pass --yes to go ahead", effect)
 	}
 	fmt.Fprintf(os.Stderr, "%s [y/N] ", question)
 	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	if a := strings.ToLower(strings.TrimSpace(answer)); a == "y" || a == "yes" {
 		return true, nil
 	}
-	fmt.Fprintln(os.Stderr, "nothing deleted")
+	fmt.Fprintln(os.Stderr, declined)
 	return false, nil
 }
 

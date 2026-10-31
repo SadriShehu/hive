@@ -39,6 +39,8 @@ type fakeOps struct {
 
 	fusion      fusion.Settings
 	modelsAsked []string
+
+	teamOps
 }
 
 func (f *fakeOps) Refresh() ([]store.Session, error) { return f.sessions, nil }
