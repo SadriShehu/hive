@@ -502,6 +502,34 @@ core); and from phase 3, a worktree per member, `hive team done`, teams in the t
   an agent that isn't on the team, as its session ID (or `team/role` for a member of
   another team), so an agent is never taken for you. `--as` sets it for scripts.
 
+### Templates
+
+A `[[team]]` table in config.toml saves a roster and its goal, and `hive team new --from`
+starts a team from it. The template supplies the goal, lead, folder, worktrees and
+members; a flag passed on the command line wins, and `--member` adds to the template's
+members, so a saved roster can take one more reviewer for a particular run. The positional
+name is always the new team's, and `self` isn't allowed as a template lead: no agent runs
+the command then.
+
+```toml
+[[team]]
+name      = "api"          # looked up by --from
+goal      = "add the admin API"
+lead      = "claude"       # a tool[:model], or "none"
+cwd       = "~/src/app"    # optional; default: where you run the command
+worktrees = true
+
+[[team.member]]
+role   = "backend"
+tool   = "claude"
+model  = "auto"
+prompt = "handlers"
+```
+
+The template's name is unique and follows a team name's rules; every member's role is a
+valid role and appears once, including the lead's; and a member names a tool. A broken
+config changes nothing, as everywhere else.
+
 ### The brief
 
 The first prompt of each member, and the one place hive talks to an agent: the team,
@@ -696,7 +724,6 @@ Tables in migrations that can run twice, as the trash's can:
 
 **The rest of phase 2.** The task board is built; left are:
 
-- `[[team]]` templates in config.toml, with `[[team.member]]` rows; `--from template`.
 - The new-team form gets one row per member (role, tool, model, the member's part), with
   `+` to add one and templates to fill them. Tasks can be edited from the tree.
 - A full-screen channel view: `↵` on a team opens it, with a live input line; `esc` goes
