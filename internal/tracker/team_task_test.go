@@ -95,6 +95,9 @@ func TestEditTaskChangesItsFieldsAndChecksTheBoard(t *testing.T) {
 	if _, err := tr.EditTask(tm, 2, "x", "", "", []int{2}); err == nil || !strings.Contains(err.Error(), "itself") {
 		t.Errorf("waiting for itself = %v, want it refused", err)
 	}
+	if _, err := tr.EditTask(tm, 1, "schema", "", "backend", []int{2}); err == nil || !strings.Contains(err.Error(), "waits for it") {
+		t.Errorf("a dependency cycle = %v, want it refused", err)
+	}
 	if _, err := tr.EditTask(tm, 2, " ", "", "", nil); err == nil {
 		t.Error("an empty title was kept")
 	}

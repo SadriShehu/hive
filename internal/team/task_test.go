@@ -56,6 +56,12 @@ func TestReadiness(t *testing.T) {
 	if err := CheckAfter([]int{9}, tasks); err == nil || !strings.Contains(err.Error(), "#9") {
 		t.Errorf("CheckAfter(9) = %v, want #9 named", err)
 	}
+	if !Cycles(1, []int{4}, tasks) || !Cycles(2, []int{3}, tasks) {
+		t.Error("a task that waits for the edited one was not seen as a cycle")
+	}
+	if Cycles(4, []int{3}, tasks) {
+		t.Error("#3 doesn't wait for #4; that is not a cycle")
+	}
 
 	// #2 closes: #3 becomes ready; #4 was ready already and doesn't wait for #2.
 	tasks[1].Status = store.TaskDone
