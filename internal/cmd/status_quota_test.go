@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,5 +80,31 @@ func TestStatusReadDoesNotHangOnAnOpenPipe(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("readStatusInput hung on an open, silent pipe")
+	}
+}
+
+// --then hands the same JSON to the user's own status line, prints what it
+// prints, and keeps its exit status.
+func TestStatusThenRunsTheUsersLineWithTheSameJSON(t *testing.T) {
+	dir := t.TempDir()
+	got := filepath.Join(dir, "got.json")
+	script := filepath.Join(dir, "line.sh")
+	body := "#!/bin/sh\ncat > " + got + "\nprintf 'the user line'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"rate_limits":{"five_hour":{"used_percentage":7}}}`
+	var out, errOut bytes.Buffer
+	if code := runThen(script, []byte(payload), &out, &errOut); code != 0 {
+		t.Fatalf("runThen = %d, stderr %q", code, errOut.String())
+	}
+	if out.String() != "the user line" {
+		t.Errorf("stdout = %q, want the user's line", out.String())
+	}
+	if data, err := os.ReadFile(got); err != nil || string(data) != payload {
+		t.Errorf("the command read %q, %v; want the same JSON", data, err)
+	}
+	if code := runThen("exit 3", nil, io.Discard, io.Discard); code != 3 {
+		t.Errorf("a command that exits 3 = %d, want 3", code)
 	}
 }
