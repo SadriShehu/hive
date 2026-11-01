@@ -619,8 +619,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.syncCmd())
 		}
 		// The channel and the team preview show every member's usage and
-		// the account's rate limits, refreshed on the usage cadence.
-		if m.now().Sub(m.quotasAt) >= usageEvery {
+		// the account's rate limits, refreshed on the usage cadence while
+		// one of them is on screen. Otherwise the selected session's own
+		// fetch is all the tree needs.
+		if m.teamUsageInView() && m.now().Sub(m.quotasAt) >= usageEvery {
 			m.quotasAt = m.now()
 			cmds = append(cmds, m.usagesCmd(), m.quotasCmd())
 		}
@@ -1319,6 +1321,16 @@ func (m Model) selected() (store.Session, bool) {
 		return store.Session{}, false
 	}
 	return m.rows[m.cursor].node.Session, true
+}
+
+// teamUsageInView reports whether a team's channel or its tree preview is on
+// screen, the only places that show every member's usage and the quota.
+func (m Model) teamUsageInView() bool {
+	if m.mode == modeChannel {
+		return true
+	}
+	n := m.selectedNode()
+	return m.previewVisible() && n != nil && n.Team != nil
 }
 
 func (m Model) selectedNode() *tree.Node {
