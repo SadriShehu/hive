@@ -368,7 +368,8 @@ func (s *Store) SetMemberPane(teamID, role, pane string, pid int) error {
 	return err
 }
 
-// RetireMember takes a member off the team, keeping its history.
+// RetireMember takes a member off the team, keeping its history; its queued
+// mail and its mute go.
 func (s *Store) RetireMember(teamID, role string, at int64) error {
 	res, err := s.db.Exec(`UPDATE team_members SET left_at = ? WHERE team_id = ? AND role = ? AND left_at = 0`,
 		at, teamID, role)
@@ -380,7 +381,11 @@ func (s *Store) RetireMember(teamID, role string, at int64) error {
 	}
 	_, err = s.db.Exec(`DELETE FROM team_deliveries WHERE role = ? AND delivered_at = 0 AND message_id IN
 		(SELECT id FROM team_messages WHERE team_id = ?)`, role, teamID)
-	return err
+	if err != nil {
+		return err
+	}
+	// The role taken again starts unmuted.
+	return s.Unmute(teamID, role)
 }
 
 // LaunchTeam records that the next session to report in from a pane plays

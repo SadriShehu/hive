@@ -43,8 +43,12 @@ func TestTeamsAndMembersRoundTrip(t *testing.T) {
 		t.Fatalf("Memberships = %+v %v", ms, err)
 	}
 
-	// A retired member is off the team, can be taken again, and keeps no queued mail.
+	// A retired member is off the team, can be taken again, and keeps no
+	// queued mail and no mute.
 	st.AddMessage(Message{TeamID: "t1", From: "lead", To: "backend", Body: "x", Kind: MsgSay, At: 5}, []string{"backend"})
+	if err := st.Mute("t1", "backend", 5); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.RetireMember("t1", "backend", 6); err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +57,9 @@ func TestTeamsAndMembersRoundTrip(t *testing.T) {
 	}
 	if pending, _ := st.HasPending("t1", "backend"); pending {
 		t.Error("a retired member keeps its queued mail")
+	}
+	if muted, _ := st.Muted("t1", "backend"); muted {
+		t.Error("a retired member stays muted, and so would the role taken again")
 	}
 	if err := st.AddMember(Member{TeamID: "t1", Role: "backend", Tool: "codex", JoinedAt: 7}); err != nil {
 		t.Errorf("a retired role can't be taken again: %v", err)
