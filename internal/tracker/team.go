@@ -242,12 +242,39 @@ func (t *Tracker) RetireMember(tm store.Team, role string) error {
 	if _, err := t.system(tm, role+" left the team"); err != nil {
 		return err
 	}
+	if err := t.releaseTasks(tm, role); err != nil {
+		return err
+	}
 	if stop != nil {
 		t.World.Forget()
 		_, err := t.stopMember(*stop)
 		return err
 	}
 	return nil
+}
+
+// releaseTasks reopens the tasks a role that left had claimed, for another
+// member to take, and tells the lead.
+func (t *Tracker) releaseTasks(tm store.Team, role string) error {
+	tm, members, tasks, err := t.board(tm.ID)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, old := range tasks {
+		if old.Status != store.TaskClaimed || old.Owner != role {
+			continue
+		}
+		task := old
+		task.Status, task.Owner, task.UpdatedAt = store.TaskOpen, "", t.World.Now()
+		if err := t.moveTask(old, task); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		_, err := t.announce(tm, members, fmt.Sprintf("#%d released: %s left: %s", task.N, role, task.Title), t.toLead(tm, members, ""), false)
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // stopMember ends a member's agent, whether hive knows its session yet or

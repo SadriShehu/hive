@@ -576,7 +576,7 @@ happens to be called `lead`: who leads goes by the team's lead role alone.
 | of unknown status, in a pane (a tool without turn hooks) | types it now, and says the delivery was blind |
 | exited | reopens it with the queued messages as its next prompt, as `hive send` does |
 | not reported in yet | queues it; its `start` hook delivers |
-| retired with `hive team rm` | gets nothing: its queue is dropped, and nothing more is addressed to it |
+| retired with `hive team rm` | gets nothing: its queue is dropped, and nothing more is addressed to it; the tasks it had claimed are open again, and hive tells the lead |
 
 The sender's process and the hook's can deliver at once, so a delivery claims the queued
 rows in one `UPDATE … RETURNING` before it types, and gives them back if typing fails.
@@ -732,8 +732,9 @@ Tables in migrations that can run twice, as the trash's can:
   the session that made it, status (active or done), paused, the lead's role (empty when
   you lead), and times.
 - `team_members` — team and role, the session playing it now, tool, model, the member's
-  own part of the brief, folder, the pane it was last started in, and when it joined and
-  left. A retired member keeps its row and its messages.
+  own part of the brief, folder, the pane it was last started in and that pane's first
+  process (until its session ends), and when it joined and left. A retired member keeps
+  its row and its messages.
 - `team_messages` — team, from (a role, `you`, `hive`, or an agent off the team), to (a
   role, `all`, or nobody for a post), body, kind (post, say or system), private, time.
 - `team_deliveries` — a message queued for a role, and when it was delivered.
