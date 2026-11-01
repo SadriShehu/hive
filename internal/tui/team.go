@@ -1077,6 +1077,27 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	return ansi.Truncate(line, w, "")
 }
 
+// memberState says what a member is doing, as tracker.MemberState does, from
+// the member row and the tree's snapshot. #28 clears a member's pane and
+// pane PID once the pane is gone, so a record with neither is stopped; that
+// avoids asking tmux on every redraw.
+func memberState(mem store.Member, s store.Session, found bool) string {
+	switch {
+	case !mem.Active():
+		return "left"
+	case mem.SessionID == "" && (mem.Pane == "" || mem.PanePID == 0):
+		return "stopped"
+	case mem.SessionID == "" || !found:
+		return "starting"
+	case !s.Live() && s.Status != store.StatusUnknown:
+		return "ended"
+	}
+	if s.Status == store.StatusAttention {
+		return "needs you"
+	}
+	return s.Status
+}
+
 // teamHead draws who a team is: its name and goal, how it runs, its state and
 // its roster.
 func (m Model) teamHead(t store.Team, w int) []string {
@@ -1112,15 +1133,10 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	for _, mem := range members {
 		s, ok := m.memberSession(mem)
 		g, gs := "◌", sDim
-		state := "starting"
 		if ok {
 			g, gs = glyph(s)
-			state = s.Status
-			if s.Status == store.StatusAttention {
-				state = "needs you"
-			}
 		}
-		line := sText.Render(mem.Role) + sDim.Render(" · "+state)
+		line := sText.Render(mem.Role) + sDim.Render(" · "+memberState(mem, s, ok))
 		if u, ok := m.usageFor(mem.SessionID); ok {
 			if u.Model != "" {
 				line += sDim.Render(" · ") + sText.Render(u.Model)

@@ -1243,3 +1243,54 @@ func TestOnlyATeamInViewFetchesMemberUsage(t *testing.T) {
 		t.Error("the team preview didn't fetch the members' usage")
 	}
 }
+
+// memberState matches the tracker's MemberState from the member record alone:
+// a live pane keeps a reported-nothing member starting, and a cleared pane
+// (the way #28 leaves it) means stopped.
+func TestAMembersStateMatchesTheTracker(t *testing.T) {
+	live := store.Member{TeamID: "t1", Role: "lead", SessionID: "claude:L"}
+	attention := store.Member{TeamID: "t1", Role: "ui", SessionID: "claude:F"}
+	ended := store.Member{TeamID: "t1", Role: "done", SessionID: "claude:E"}
+	pane := store.Member{TeamID: "t1", Role: "pane", Pane: "%7", PanePID: 4242}
+	stopped := store.Member{TeamID: "t1", Role: "stopped"}
+	left := store.Member{TeamID: "t1", Role: "gone", LeftAt: 1}
+	for _, c := range []struct {
+		name  string
+		mem   store.Member
+		s     store.Session
+		found bool
+		want  string
+	}{
+		{"working", live, store.Session{ID: "claude:L", Status: store.StatusWorking, PID: 11}, true, "working"},
+		{"attention", attention, store.Session{ID: "claude:F", Status: store.StatusAttention, PID: 12}, true, "needs you"},
+		{"ended", ended, store.Session{ID: "claude:E", Status: store.StatusExited}, true, "ended"},
+		{"pane only", pane, store.Session{}, false, "starting"},
+		{"stopped", stopped, store.Session{}, false, "stopped"},
+		{"left", left, store.Session{}, false, "left"},
+	} {
+		if got := memberState(c.mem, c.s, c.found); got != c.want {
+			t.Errorf("%s: memberState = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The channel draws those states: a pane-only member is starting, one hive
+// has cleared is stopped.
+func TestTheChannelShowsStartingAndStoppedMembers(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	ops.snap.Members = []store.Member{
+		{TeamID: "t1", Role: "pane", Tool: "claude", Pane: "%7", PanePID: 4242, JoinedAt: 1},
+		{TeamID: "t1", Role: "gone", Tool: "claude", JoinedAt: 2},
+	}
+	m = step(t, m, refreshedMsg{sessions: nil, snap: ops.snap})
+	m = press(t, m, "enter")
+
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "pane · starting") {
+		t.Errorf("a pane-only member isn't starting:\n%s", view)
+	}
+	if !strings.Contains(view, "gone · stopped") {
+		t.Errorf("a cleared member isn't stopped:\n%s", view)
+	}
+}
