@@ -674,8 +674,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case modelsMsg:
-		if m.mode == modeNew {
-			m.form.models[msg.tool] = append([]string{}, msg.models...)
+		var models map[string][]string
+		switch m.mode {
+		case modeNew:
+			models = m.form.models
+		case modeTeam:
+			models = m.teamForm.models
+		}
+		if models != nil {
+			models[msg.tool] = append([]string{}, msg.models...)
 			if msg.err != nil {
 				m.setFlash("can't list "+msg.tool+" models: "+msg.err.Error(), true)
 			}

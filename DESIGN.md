@@ -389,8 +389,9 @@ the built-in ones have it.
 `hive models [tool] [--json]` lists what each installed tool can run, with the ratings,
 and which of its models are unrated. The new-agent form has a model field (the tool's
 default, `auto`, or one it runs, loaded without blocking the form) and, for tool `auto`,
-the mode, which ←/→ flips. `[fusion] mode` and `tool`, and the `[[model]]` ratings, are
-checked when config.toml loads, like the rest of it.
+the mode, which ←/→ flips. The new-team form's model cell takes a name typed, and ←/→
+moves it through the same choices for the row's tool. `[fusion] mode` and `tool`, and
+the `[[model]]` ratings, are checked when config.toml loads, like the rest of it.
 
 A model given by hand (`hive new --model`, a team member's `tool:model`, a template, the
 team form) is checked against that list before anything starts, since a tool handed a

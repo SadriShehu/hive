@@ -501,7 +501,7 @@ func (m Model) hintLine() string {
 		}
 		return keys("↵", "next / start", "tab", "field", "←/→", "tool / model", "esc", "cancel")
 	case modeTeam:
-		return keys("↵", "next / start", "tab", "field", "+", "row", "ctrl+d", "remove", "←/→", "work · lead · template", "esc", "cancel")
+		return keys("↵", "next / start", "tab", "field", "+", "row", "ctrl+d", "remove", "←/→", "work · lead · template · model", "esc", "cancel")
 	case modeTasks:
 		if f := m.taskEdit.form; f != nil {
 			if f.kind == taskFormDone || f.kind == taskFormBlock {
