@@ -606,3 +606,18 @@ func TestPrewarmedSessionsHideUntilUsed(t *testing.T) {
 		t.Error("a background session with a message is hidden")
 	}
 }
+
+func TestFolderMakesRelativePathsAbsolute(t *testing.T) {
+	t.Chdir(t.TempDir())
+	got, err := folder(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want || !filepath.IsAbs(got) {
+		t.Fatalf("folder(.) = %q, want %q", got, want)
+	}
+}
