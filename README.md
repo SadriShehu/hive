@@ -395,7 +395,7 @@ your terminal.
 | `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `ls [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task |
 | `hive team wait [--task n] [--from role] [--any] [--timeout d]` | block until a task is done or blocked, a message arrives, or (`--any`) the board changes; print what happened |
 | `hive team inbox [--wait] [--timeout d]` | print the messages queued for this member, on every team it is on |
-| `hive team add <team> <role>=<tool>[:<model>]` · `rm <team> <role>` · `stop <team> [--yes]` | add a member · retire one · stop them all (asks first; `--yes` skips) |
+| `hive team add <team> <role>=<tool>[:<model>]` · `rm <team> <role>` · `stop <team> [--yes]` | add a member · retire one, which reopens the tasks it had claimed · stop them all (asks first; `--yes` skips) |
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
 | `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail, members or tasks, and its tasks no longer move; `--clean` removes merged worktrees |
 | `hive team mute <team> <role>` · `unmute <team> <role>` | pause hive's delivery to one member · let it go on |

@@ -681,6 +681,34 @@ func TestAMembersPaneIsForgottenWhenItsSessionEnds(t *testing.T) {
 	}
 }
 
+func TestRetireMemberReleasesItsClaims(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	tm := theTeam(t, tr)
+	addTask(t, tr, "handlers", "backend")
+	addTask(t, tr, "schema", "backend")
+	addTask(t, tr, "table", "frontend")
+	for _, c := range []struct {
+		role string
+		n    int
+	}{{"backend", 1}, {"frontend", 3}} {
+		if _, err := tr.ClaimTask(tm, c.role, c.n, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tr.RetireMember(tm, "backend"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := boardText(t, tr, tm), "#1 handlers open ; #2 schema open backend; #3 table claimed frontend"; got != want {
+		t.Errorf("board = %q, want %q: only backend's claim reopened", got, want)
+	}
+	if posts := hivePosts(tr); !strings.Contains(posts, "#1 released: backend left: handlers") || strings.Contains(posts, "#2 released") {
+		t.Errorf("posts = %q, want #1 released", posts)
+	}
+	if _, err := tr.ClaimTask(tm, "frontend", 1, false); err != nil {
+		t.Errorf("frontend can't take the released #1: %v", err)
+	}
+}
+
 func TestRetireMemberStopsAMemberThatHasOnlyAPane(t *testing.T) {
 	tr, w, _ := newTeamWorld(t)
 	tm := theTeam(t, tr)
