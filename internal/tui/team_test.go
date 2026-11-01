@@ -803,6 +803,73 @@ func TestTeamFormNarrowWidth(t *testing.T) {
 	}
 }
 
+func TestTeamFormPicksAModelFromTheToolsList(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = press(t, m, "T")
+	m = press(t, m, "tab", "tab", "tab", "tab", "tab") // name → … → role → tool
+	for _, r := range "claude" {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m = press(t, m, "tab")
+	if _, cell, _ := m.teamForm.rowOf(m.teamForm.field); cell != memberModel {
+		t.Fatalf("cursor is in cell %d, want the model", cell)
+	}
+	if strings.Join(ops.modelsAsked, ",") != "claude" {
+		t.Fatalf("asked models of %v, want claude once the cursor is in the model cell", ops.modelsAsked)
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"‹ default ›  auto  claude-fable-5-1  claude-opus-5-5", "←/→ picks one, or type an ID or a name like opus 5.5."} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view lacks %q:\n%s", want, view)
+		}
+	}
+
+	model := func() string { return m.teamForm.members[0].model.Value() }
+	var got []string
+	for range 4 {
+		m = press(t, m, "right")
+		got = append(got, model())
+	}
+	if strings.Join(got, ",") != "auto,claude-fable-5-1,claude-opus-5-5," {
+		t.Errorf("→ cycled through %q, want auto, then claude's models, then back to the default", got)
+	}
+	m = press(t, m, "left")
+	if model() != "claude-opus-5-5" {
+		t.Errorf("← from the default = %q, want the last model", model())
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "‹ claude-opus-5-5 ›") {
+		t.Errorf("the picker doesn't mark the model in the cell:\n%s", ansi.Strip(m.View()))
+	}
+	m.teamForm.name.SetValue("api")
+	m.teamForm.members[0].role.SetValue("backend")
+	o, err := m.teamForm.options()
+	if err != nil || o.Members[0].Model != "claude-opus-5-5" {
+		t.Errorf("options = %+v, %v; want the picked model", o.Members, err)
+	}
+
+	// A name typed isn't a choice: either arrow starts over, and it stays a
+	// name for hive to resolve until then.
+	m.teamForm.members[0].model.SetValue("opus 5.5")
+	if m.teamForm.modelChoice(0) != -1 {
+		t.Errorf("a typed name is choice %d, want none", m.teamForm.modelChoice(0))
+	}
+	m = press(t, m, "left")
+	if model() != "claude-opus-5-5" {
+		t.Errorf("← from a typed name = %q, want the last choice", model())
+	}
+
+	// Moving away and back doesn't ask claude again; a narrow form keeps the
+	// picked model in sight.
+	m = press(t, m, "tab", "shift+tab")
+	if len(ops.modelsAsked) != 1 {
+		t.Errorf("asked models %v, want once per tool", ops.modelsAsked)
+	}
+	help := ansi.Strip(m.teamForm.modelHelp(0, 30)[0])
+	if !strings.HasPrefix(help, "…") || !strings.Contains(help, "‹ claude-opus-5-5 ›") {
+		t.Errorf("narrow picker = %q, want it scrolled to the model in the cell", help)
+	}
+}
+
 func TestTeamKeysLeaveOrdinarySessionsAlone(t *testing.T) {
 	m, ops := setup(t, false)
 	m = press(t, m, "p", "L", "m", "x")

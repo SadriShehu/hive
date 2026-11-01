@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -405,14 +406,80 @@ type teamForm struct {
 	folder    textinput.Model
 	goal      textarea.Model
 	members   []teamRow
+	models    map[string][]string // what each row's tool runs, once loaded; nil while loading
 }
 
 func newTeamRow(tool string) teamRow {
 	return teamRow{
 		role:   newInput("", "role"),
 		tool:   newInput("", tool),
-		model:  newInput("", "auto"),
+		model:  newInput("", modelDefault),
 		prompt: newInput("", "its part"),
+	}
+}
+
+func (r *teamRow) toolName() string { return strings.TrimSpace(r.tool.Value()) }
+
+// modelChoices lists what a row's model cell cycles through: the tool's
+// default, auto, then the models its tool runs.
+func (f teamForm) modelChoices(row int) []string {
+	return append([]string{modelDefault, fusion.Auto}, f.models[f.members[row].toolName()]...)
+}
+
+// modelChoice is where a row's model is in its choices: 0 when empty, the
+// tool's default, and -1 for a name typed that isn't one of them.
+func (f teamForm) modelChoice(row int) int {
+	model := strings.TrimSpace(f.members[row].model.Value())
+	if model == "" {
+		return 0
+	}
+	return slices.Index(f.modelChoices(row), model)
+}
+
+// cycleModel puts the next or previous choice in a row's model cell; from a
+// name typed, it starts at either end.
+func (f *teamForm) cycleModel(row, step int) {
+	choices := f.modelChoices(row)
+	i := f.modelChoice(row)
+	switch {
+	case i < 0 && step > 0:
+		i = 0
+	case i < 0:
+		i = len(choices) - 1
+	default:
+		i = (i + step + len(choices)) % len(choices)
+	}
+	model := choices[i]
+	if model == modelDefault {
+		model = ""
+	}
+	in := &f.members[row].model
+	in.SetValue(model)
+	in.CursorEnd()
+}
+
+func (f teamForm) loadingModels(row int) bool {
+	models, asked := f.models[f.members[row].toolName()]
+	return asked && models == nil
+}
+
+// teamModelsCmd loads what the focused row's tool runs, once per tool, when
+// the cursor is in its model cell.
+func (m *Model) teamModelsCmd() tea.Cmd {
+	f := &m.teamForm
+	row, cell, ok := f.rowOf(f.field)
+	if !ok || cell != memberModel {
+		return nil
+	}
+	tool := f.members[row].toolName()
+	if _, asked := f.models[tool]; asked || tool == fusion.Auto || team.ValidTool(tool) != nil {
+		return nil
+	}
+	f.models[tool] = nil
+	ops := m.ops
+	return func() tea.Msg {
+		models, err := ops.Models(tool)
+		return modelsMsg{tool: tool, models: models, err: err}
 	}
 }
 
@@ -528,7 +595,7 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 		m.setFlash("no agent found on PATH", true)
 		return m, nil
 	}
-	f := teamForm{leads: append(slices.Clone(tools), "none"), templates: m.ops.TeamTemplates()}
+	f := teamForm{leads: append(slices.Clone(tools), "none"), templates: m.ops.TeamTemplates(), models: map[string][]string{}}
 	for i, t := range f.leads {
 		if t == "claude" {
 			f.lead = i
@@ -666,7 +733,19 @@ func (f teamForm) options() (tracker.TeamOptions, error) {
 	return o, nil
 }
 
+// keyTeamForm edits the new-team form, and loads what a row's tool runs
+// once the cursor is in its model cell.
 func (m Model) keyTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	next, cmd := m.editTeamForm(msg)
+	nm, ok := next.(Model)
+	if !ok || nm.mode != modeTeam {
+		return next, cmd
+	}
+	load := nm.teamModelsCmd()
+	return nm, tea.Batch(cmd, load)
+}
+
+func (m Model) editTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	f := &m.teamForm
 	switch msg.String() {
 	case "esc":
@@ -697,6 +776,10 @@ func (m Model) keyTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tfWork:
 			f.work = !f.work
+			return m, nil
+		}
+		if row, cell, ok := f.rowOf(f.field); ok && cell == memberModel {
+			f.cycleModel(row, step)
 			return m, nil
 		}
 	case "enter":
@@ -798,9 +881,41 @@ func (m Model) teamFormLines(w, h int) []string {
 	for _, line := range goal[1:] {
 		out = append(out, strings.Repeat(" ", 10)+line)
 	}
-	out = append(out, "", sDim.Render("+ adds a member row, ctrl+d removes the focused one; roles and tools are required."),
-		sDim.Render("each member opens in its own tmux window with a brief; they report to the channel."))
+	help := []string{sDim.Render("+ adds a member row, ctrl+d removes the focused one; roles and tools are required."),
+		sDim.Render("each member opens in its own tmux window with a brief; they report to the channel.")}
+	if row, cell, ok := f.rowOf(f.field); ok && cell == memberModel {
+		help = f.modelHelp(row, w)
+	}
+	out = append(append(out, ""), help...)
 	return fit(out, w, h)
+}
+
+// modelHelp is the help while the cursor is in a row's model cell: the
+// choices ←/→ moves through, around the one in the cell, and what else
+// the cell takes.
+func (f teamForm) modelHelp(row, w int) []string {
+	tool := f.members[row].toolName()
+	if tool == fusion.Auto {
+		return []string{sDim.Render("tool auto picks the model too, for the goal and the member's part."),
+			sDim.Render("name a tool to pick its model here.")}
+	}
+	items, at := f.modelChoices(row), f.modelChoice(row)
+	shown := func(from int) string {
+		line := choices(items[from:], at-from, func(string) lipgloss.Style { return sAccent })
+		if from > 0 {
+			line = sDim.Render("…") + "  " + line
+		}
+		return line
+	}
+	from := 0
+	for from < at && ansi.StringWidth(shown(from)) > w {
+		from++
+	}
+	line := shown(from)
+	if f.loadingModels(row) {
+		line += "  " + sDim.Render("loading what it runs…")
+	}
+	return []string{line, sDim.Render("←/→ picks one, or type an ID or a name like opus 5.5.")}
 }
 
 // ---- rows and preview
