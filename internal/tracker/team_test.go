@@ -653,7 +653,7 @@ func TestStopKillsOnlyThePaneHiveOpenedForAMember(t *testing.T) {
 	if roles, err := tr.runningRoles(tm); err != nil || len(roles) != 0 {
 		t.Errorf("running roles = %v, %v; want none", roles, err)
 	}
-	if roles, err := tr.teamRunning(tm); err != nil || len(roles) != 0 {
+	if roles, err := tr.TeamRunning(tm); err != nil || len(roles) != 0 {
 		t.Errorf("running members = %v, %v; want none", roles, err)
 	}
 	if got := tr.MemberState(memberNamed(t, tr, tm, "frontend"), store.Session{}, false); got != "stopped" {

@@ -204,24 +204,17 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m, cmd := m.openTaskEditor(tm)
 		return m, cmd, true
 	case "x":
-		live := 0
-		for _, mem := range m.members(tm.ID) {
-			if s, ok := m.memberSession(mem); ok && s.PID > 0 {
-				live++
-			}
-		}
-		if live == 0 {
-			m.setFlash("nobody on "+tm.Name+" is running", true)
-			return m, nil, true
-		}
-		m.mode, m.confirm = modeConfirm, confirmation{action: actStopTeam, team: tm, below: live}
-		return m, nil, true
+		id := tm.ID
+		return m, func() tea.Msg {
+			roles, err := ops.TeamRunning(id)
+			return teamRunningMsg{team: tm, action: actStopTeam, roles: roles, err: err}
+		}, true
 	case "d":
-		if running := m.runningMembers(tm.ID); len(running) > 0 {
-			m.setFlash("stop "+joinRoles(running)+" first: a team goes to the trash once nobody runs", true)
-			return m, nil, true
-		}
-		m.mode, m.confirm = modeConfirm, confirmation{action: actTrashTeam, team: tm, session: n.Session, below: len(m.members(tm.ID))}
+		id := tm.ID
+		return m, func() tea.Msg {
+			roles, err := ops.TeamRunning(id)
+			return teamRunningMsg{team: tm, action: actTrashTeam, roles: roles, err: err}
+		}, true
 	case "c", "r", "u":
 		m.setFlash("pick a member of "+tm.Name+" for that", true)
 	case "y":
