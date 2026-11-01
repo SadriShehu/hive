@@ -36,6 +36,7 @@ type LaunchOptions struct {
 // Launched is where an agent now runs, and as what.
 type Launched struct {
 	Pane      string
+	PanePID   int    // the pane's first process, which tells the pane from a later one tmux gives its ID
 	SessionID string // known right away when the tool takes a pre-assigned ID
 	Tool      string
 	Model     string         // the model it was started with; "" for the tool's default
@@ -100,7 +101,7 @@ func (t *Tracker) Launch(ctx context.Context, o LaunchOptions) (Launched, error)
 	if err := t.Store.PutLaunch(store.Launch{Pane: pane.ID, Tool: o.Tool, ParentID: o.ParentID, Cwd: cwd, CreatedAt: now}); err != nil {
 		return Launched{}, err
 	}
-	out.Pane = pane.ID
+	out.Pane, out.PanePID = pane.ID, pane.PID
 	if o.Prompt != "" {
 		// Until the agent names its session, its pane holds the prompt.
 		key := pane.ID
@@ -174,7 +175,7 @@ func (t *Tracker) Resume(s store.Session, prompt string, o LaunchOptions) (Launc
 	err = errors.Join(
 		// If the tool continues under a new session ID, it lands in the same place.
 		t.Store.PutLaunch(store.Launch{Pane: pane.ID, Tool: s.Tool, ParentID: s.ParentID, Cwd: cwd, CreatedAt: now}),
-		t.rememberMember(s.ID, pane.ID),
+		t.rememberMember(s.ID, pane),
 		t.Store.Attach(s.ID, pane.PID, pane.ID, store.KindInteractive),
 		t.Store.SetStatus(s.ID, startStatus(prompt), now),
 		input,

@@ -204,3 +204,57 @@ func TestDeleteTeamTakesItsRows(t *testing.T) {
 		t.Errorf("the name is still taken: %v", err)
 	}
 }
+
+// A member's pane is forgotten once the session in it ends, and kept while a
+// stale end arrives after a newer status.
+func TestAMembersPaneGoesWithItsSession(t *testing.T) {
+	st := teamStore(t)
+	member := func(role string) Member {
+		t.Helper()
+		ms, err := st.Members("t1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range ms {
+			if m.Role == role {
+				return m
+			}
+		}
+		t.Fatalf("no %s", role)
+		return Member{}
+	}
+	if err := st.SetMemberPane("t1", "lead", "%2", 42); err != nil {
+		t.Fatal(err)
+	}
+	if m := member("lead"); m.Pane != "%2" || m.PanePID != 42 {
+		t.Fatalf("lead = %+v, want pane %%2 pid 42", m)
+	}
+	// Reporting in from another pane forgets the old pane's process.
+	if err := st.SetMemberSession("t1", "lead", "claude:L", "%5"); err != nil {
+		t.Fatal(err)
+	}
+	if m := member("lead"); m.Pane != "%5" || m.PanePID != 0 {
+		t.Fatalf("lead = %+v, want pane %%5 and no process", m)
+	}
+	if err := st.SetMemberSession("t1", "backend", "claude:B", "%3"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"claude:L", "claude:B"} {
+		must(t, st.Upsert(Session{ID: id, Tool: "claude", NativeID: id[7:], CreatedAt: 1, UpdatedAt: 1}))
+		must(t, st.SetStatus(id, StatusWorking, 10))
+	}
+
+	must(t, st.SetStatus("claude:L", StatusExited, 5)) // older than working: ignored
+	if m := member("lead"); m.Pane != "%5" {
+		t.Errorf("a stale end took the lead's pane: %+v", m)
+	}
+	must(t, st.SetStatus("claude:L", StatusExited, 11))
+	if gone, err := st.MarkGone("claude:B", 12); err != nil || !gone {
+		t.Fatalf("MarkGone = %v, %v", gone, err)
+	}
+	for _, role := range []string{"lead", "backend"} {
+		if m := member(role); m.Pane != "" || m.PanePID != 0 {
+			t.Errorf("%s after its session ended = %+v, want no pane", role, m)
+		}
+	}
+}

@@ -186,7 +186,8 @@ func (t *Tracker) startMember(ctx context.Context, tm store.Team, m store.Member
 		return l, err
 	}
 	err = errors.Join(
-		t.Store.SetMemberSession(tm.ID, m.Role, l.SessionID, l.Pane),
+		t.Store.SetMemberSession(tm.ID, m.Role, l.SessionID, ""),
+		t.Store.SetMemberPane(tm.ID, m.Role, l.Pane, l.PanePID),
 		t.Store.PutLaunchTeam(store.LaunchTeam{Pane: l.Pane, TeamID: tm.ID, Role: m.Role, CreatedAt: t.World.Now()}),
 	)
 	what := m.Tool
@@ -254,21 +255,32 @@ func (t *Tracker) RetireMember(tm store.Team, role string) error {
 func (t *Tracker) stopMember(m store.Member) (bool, error) {
 	if m.SessionID != "" {
 		s, ok, err := t.Store.Get(m.SessionID)
-		if err != nil {
+		if err != nil || !ok || s.PID == 0 {
 			return false, err
 		}
-		if ok && s.PID > 0 {
-			return true, t.Stop(s)
-		}
+		return true, t.Stop(s)
 	}
-	if m.Pane == "" || !t.paneExists(m.Pane) {
+	if !t.inLaunchedPane(m) {
 		return false, nil
 	}
+	var err error
 	if t.KillPane != nil {
-		return true, t.KillPane(m.Pane)
+		err = t.KillPane(m.Pane)
+	} else {
+		_, err = tmux.Run("kill-pane", "-t", m.Pane)
 	}
-	_, err := tmux.Run("kill-pane", "-t", m.Pane)
-	return true, err
+	return true, errors.Join(err, t.Store.SetMemberPane(m.TeamID, m.Role, "", 0))
+}
+
+// inLaunchedPane reports whether a member hive knows no session for yet
+// still runs in the pane hive opened for it: the pane is there, with the
+// process hive started in it. tmux starts pane IDs over when its server
+// restarts, so the ID alone can name another pane.
+func (t *Tracker) inLaunchedPane(m store.Member) bool {
+	if m.SessionID != "" || m.Pane == "" || m.PanePID == 0 {
+		return false
+	}
+	return slices.ContainsFunc(t.World.Panes(), func(p tmux.Pane) bool { return p.ID == m.Pane && p.PID == m.PanePID })
 }
 
 // StopTeam stops every member that runs and returns how many it stopped.
@@ -398,7 +410,7 @@ func (t *Tracker) memberEnv(id string) map[string]string {
 
 // rememberMember records that the window just opened for a session plays its
 // roles, so the session it reports under is linked to them.
-func (t *Tracker) rememberMember(sessionID, pane string) error {
+func (t *Tracker) rememberMember(sessionID string, pane tmux.Pane) error {
 	ms, err := t.Store.Memberships(sessionID)
 	if err != nil {
 		return err
@@ -406,8 +418,8 @@ func (t *Tracker) rememberMember(sessionID, pane string) error {
 	var errs []error
 	for _, m := range ms {
 		errs = append(errs,
-			t.Store.PutLaunchTeam(store.LaunchTeam{Pane: pane, TeamID: m.TeamID, Role: m.Role, CreatedAt: t.World.Now()}),
-			t.Store.SetMemberPane(m.TeamID, m.Role, pane))
+			t.Store.PutLaunchTeam(store.LaunchTeam{Pane: pane.ID, TeamID: m.TeamID, Role: m.Role, CreatedAt: t.World.Now()}),
+			t.Store.SetMemberPane(m.TeamID, m.Role, pane.ID, pane.PID))
 	}
 	return errors.Join(errs...)
 }
@@ -812,12 +824,15 @@ func (t *Tracker) MuteMember(tm store.Team, role string, on bool) error {
 	return t.Store.Unmute(tm.ID, role)
 }
 
-// MemberState says what a member is doing: its session's status, or that it
-// hasn't started, or ended.
-func MemberState(m store.Member, s store.Session, found bool) string {
+// MemberState says what a member is doing: its session's status; that it
+// is starting, in the pane hive opened for it; that it stopped before it
+// reported in; or that it left or ended.
+func (t *Tracker) MemberState(m store.Member, s store.Session, found bool) string {
 	switch {
 	case !m.Active():
 		return "left"
+	case m.SessionID == "" && !t.inLaunchedPane(m):
+		return "stopped"
 	case m.SessionID == "" || !found:
 		return "starting"
 	case !s.Live() && s.Status != store.StatusUnknown:

@@ -27,7 +27,7 @@ func (t *Tracker) teamRunning(tm store.Team) ([]string, error) {
 			continue
 		}
 		if m.SessionID == "" {
-			if m.Pane != "" && t.paneExists(m.Pane) {
+			if t.inLaunchedPane(m) {
 				out = append(out, m.Role)
 			}
 			continue
