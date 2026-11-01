@@ -103,6 +103,28 @@ func TestEditTaskChangesItsFieldsAndChecksTheBoard(t *testing.T) {
 	}
 }
 
+func TestEditClearingTheOwnerReleasesAClaimedTask(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	addTask(t, tr, "schema", "")
+	tm := theTeam(t, tr)
+	if _, err := tr.ClaimTask(tm, "backend", 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.EditTask(tm, 1, "schema", "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tr.Store.Task(tm.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != store.TaskOpen || got.Owner != "" {
+		t.Fatalf("#1 = %s/%q, want it open with no owner", got.Status, got.Owner)
+	}
+	if _, err := tr.ClaimTask(tm, "frontend", 1, false); err != nil {
+		t.Fatalf("frontend couldn't claim the released task: %v", err)
+	}
+}
+
 func TestDoneTellsTheLeadAndTheOwnersOfReadyTasks(t *testing.T) {
 	tr, w, sent := newTeamWorld(t)
 	backendUp(t, tr, w)
