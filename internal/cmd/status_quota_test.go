@@ -108,3 +108,53 @@ func TestStatusThenRunsTheUsersLineWithTheSameJSON(t *testing.T) {
 		t.Errorf("a command that exits 3 = %d, want 3", code)
 	}
 }
+
+// With --then, the user's status line doesn't depend on hive: even when
+// hive's database can't be opened, the command still gets the JSON and its
+// output and exit status are kept.
+func TestStatusThenWorksWhenHiveCannotOpenItsDB(t *testing.T) {
+	dir := t.TempDir()
+	blocked := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(blocked, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HIVE_HOME", blocked)
+
+	got := filepath.Join(dir, "got.json")
+	script := filepath.Join(dir, "line.sh")
+	body := "#!/bin/sh\ncat > " + got + "\nprintf 'the user line'\nexit 3\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdin
+	t.Cleanup(func() { os.Stdin = old })
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = r
+	payload := `{"rate_limits":{"five_hour":{"used_percentage":7,"resets_at":1700000000}}}`
+	if _, err := w.WriteString(payload); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	cmd := newStatusCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	code, err := runStatus(cmd, false, script)
+	if err != nil {
+		t.Fatalf("runStatus = %v, want the user's line despite the database", err)
+	}
+	if code != 3 {
+		t.Fatalf("exit code = %d, want the command's 3", code)
+	}
+	if out.String() != "the user line" {
+		t.Errorf("stdout = %q, want the user's line", out.String())
+	}
+	if data, err := os.ReadFile(got); err != nil || string(data) != payload {
+		t.Errorf("the command read %q, %v; want the same JSON", data, err)
+	}
+}
