@@ -83,7 +83,7 @@ type Model struct {
 	snap          TeamSnapshot // the teams, who is on them, what is unread
 	feed          feed         // the selected team's channel
 	channelTeam   string       // the team whose channel is open
-	channelInput  textinput.Model
+	channelInput  textarea.Model
 	channelScroll int  // lines scrolled back from the newest post
 	hideSystem    bool // leave hive's own posts out of the channel
 
@@ -390,8 +390,13 @@ func (m *Model) layoutChannel() {
 		label += "the team (@role for one)"
 	}
 	label += " › "
-	m.channelInput.Prompt = label
-	m.channelInput.Width = max(10, m.width-ansi.StringWidth(label)-1)
+	m.channelInput.SetPromptFunc(ansi.StringWidth(label), func(line int) string {
+		if line == 0 {
+			return label
+		}
+		return ""
+	})
+	m.channelInput.SetWidth(max(ansi.StringWidth(label)+10, m.width))
 }
 
 func (m *Model) layoutSend() {
@@ -413,6 +418,13 @@ func (m Model) sendRows() int {
 	return min(wrappedRows(m.input), max(1, m.height-7))
 }
 
+func (m Model) channelRows() int {
+	if m.mode != modeChannel {
+		return 0
+	}
+	return min(wrappedRows(m.channelInput), max(1, m.height-7))
+}
+
 func newInput(prompt, placeholder string) textinput.Model {
 	in := textinput.New()
 	in.Prompt = prompt
@@ -423,12 +435,8 @@ func newInput(prompt, placeholder string) textinput.Model {
 	return in
 }
 
-func newChannelInput() textinput.Model {
-	in := textinput.New()
-	in.Placeholder = "type a message · ↵ sends · esc goes back"
-	in.PromptStyle = sAccent
-	in.PlaceholderStyle = sDim
-	in.CharLimit = 16000
+func newChannelInput() textarea.Model {
+	in := newPromptArea("type a message · ↵ sends · esc goes back")
 	return in
 }
 
