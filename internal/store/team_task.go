@@ -161,9 +161,9 @@ func (s *Store) UpdateTask(old, t Task) (bool, error) {
 	return true, tx.Commit()
 }
 
-// EditTask moves a task's title, body, owner and the tasks it waits for from
-// what was read (old) to what it now is, and reports whether it did: it
-// doesn't when someone else moved the task in between.
+// EditTask moves a task's title, body, status, owner, note and the tasks it
+// waits for from what was read (old) to what it now is, and reports whether
+// it did: it doesn't when someone else moved the task in between.
 func (s *Store) EditTask(old, t Task) (bool, error) {
 	if t.After == nil {
 		t.After = []int{}
@@ -184,9 +184,9 @@ func (s *Store) EditTask(old, t Task) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE team_tasks SET title = ?, body = ?, owner = ?, after = ?, updated_at = ?
+	res, err := tx.Exec(`UPDATE team_tasks SET title = ?, body = ?, status = ?, owner = ?, after = ?, note = ?, updated_at = ?
 		WHERE team_id = ? AND n = ? AND status = ? AND owner = ? AND title = ? AND body = ? AND after = ?`,
-		t.Title, t.Body, t.Owner, string(after), t.UpdatedAt,
+		t.Title, t.Body, t.Status, t.Owner, string(after), t.Note, t.UpdatedAt,
 		old.TeamID, old.N, old.Status, old.Owner, old.Title, old.Body, string(was))
 	if err != nil {
 		return false, err

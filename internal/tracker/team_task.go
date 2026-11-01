@@ -105,6 +105,9 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 	old := tasks[i]
 	task := old
 	task.Title, task.Body, task.Owner, task.After = title, strings.TrimSpace(body), owner, after
+	if task.Status == store.TaskClaimed && task.Owner == "" {
+		task.Status, task.Note = store.TaskOpen, ""
+	}
 	task.UpdatedAt = t.World.Now()
 	ok, err := t.Store.EditTask(old, task)
 	if err != nil {
