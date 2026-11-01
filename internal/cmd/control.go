@@ -156,7 +156,7 @@ func newNewCmd() *cobra.Command {
 			opts := tracker.LaunchOptions{Tool: tool, Model: model, Mode: pickMode, Cwd: cwd, Prompt: prompt,
 				ParentID: parentID, Detached: !focus}
 			if dryRun {
-				return printDryRun(cmd.Context(), tr, opts)
+				return printDryRun(cmd.Context(), tr, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			}
 			before := time.Now().UnixMilli()
 			l, err := tr.Launch(cmd.Context(), opts)
@@ -209,24 +209,24 @@ func newNewCmd() *cobra.Command {
 
 // printDryRun prints the tool and model `hive new` would start, one line on
 // stdout for scripts, and why on stderr.
-func printDryRun(ctx context.Context, tr *tracker.Tracker, o tracker.LaunchOptions) error {
+func printDryRun(ctx context.Context, tr *tracker.Tracker, o tracker.LaunchOptions, stdout, stderr io.Writer) error {
 	pick := tracker.PickOptions{Tool: o.Tool, Model: o.Model, Mode: o.Mode, Prompt: o.Prompt, ParentID: o.ParentID}
 	if !pick.Wants() {
 		model, err := tr.ResolveModel(ctx, o.Tool, o.Model)
 		if err != nil {
 			return err
 		}
-		fmt.Println(strings.TrimSpace(o.Tool + " " + model))
+		fmt.Fprintln(stdout, strings.TrimSpace(o.Tool+" "+model))
 		return nil
 	}
 	choice, err := tr.Pick(ctx, pick)
 	if err != nil {
 		return err
 	}
-	fmt.Println(choice.Tool, choice.ID)
-	fmt.Fprintln(os.Stderr, choice.Reason)
+	fmt.Fprintln(stdout, choice.Tool, choice.ID)
+	fmt.Fprintln(stderr, choice.Reason)
 	for _, cue := range choice.Need.Cues {
-		fmt.Fprintln(os.Stderr, "  "+cue)
+		fmt.Fprintln(stderr, "  "+cue)
 	}
 	return nil
 }
