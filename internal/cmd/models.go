@@ -20,7 +20,9 @@ func newModelsCmd() *cobra.Command {
 		Long: "List the models each installed tool can run, as the tool names them, with the tier\n" +
 			"and ratings `hive new auto` picks by. A model without a rating is never picked; a\n" +
 			"[[model]] with a tier in config.toml rates it. The list comes from the tool\n" +
-			"(opencode lists its own), hive's built-in lists, and the models past sessions used.",
+			"(opencode lists its own), hive's built-in lists, and the models past sessions used.\n\n" +
+			"`hive new --model` and a team member's model take one of these IDs, or a name for one\n" +
+			"(opus 5.5 for claude-opus-5-5).",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, tr, _, err := openTracker()

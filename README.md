@@ -192,7 +192,8 @@ An `<id>` is the full ID (`claude:48873400-…`), the tool's own ID, or any uniq
 prefix of either. `hive new` starts in the current folder (`--cwd` to change it), in
 the background (`--focus` to switch to it), linked under the agent running the command
 (`--parent none` or `--parent <id>` to change that), with the tool's default model
-(`--model <name>` to set one, as the tool names it; `--model auto` to pick one). `--wait` returns once the agent has
+(`--model <name>` to set one: the tool's ID or a name for it, like `opus 5.5`, which
+`hive models <tool>` lists; `--model auto` to pick one). `--wait` returns once the agent has
 reported in, so a `hive send` right after it isn't typed before the agent can read it.
 A tool that starts its session only with its first message (opencode without `-p`)
 gets a stand-in ID, `opencode:pid-N`, which the other commands accept and which
@@ -295,6 +296,11 @@ between members.
 hive team new api-v2 --goal "add the admin API: list, invite and remove users" \
     --lead claude --member backend=claude:auto --member frontend=codex --member reviewer=opencode
 ```
+
+A member is `role=tool` (the tool's default model) or `role=tool:model`, where the model is
+the tool's ID (`claude-opus-5-5`), a name for it (`"opus 5.5"`) or `auto`. hive turns a name
+into the ID, and refuses a model the tool doesn't run before anything starts, listing the
+ones it does; `hive models <tool>` lists them too.
 
 Save that roster as a template in `~/.config/hive/config.toml` and start the next team
 with `--from`. The template gives the defaults; a flag you also pass wins, and `--member`

@@ -174,7 +174,9 @@ func newTeamNewCmd() *cobra.Command {
 			"its part, the roster and how to use `hive team`.\n\n" +
 			"--lead picks who leads: a tool (claude, claude:auto, codex:gpt-…), self (the agent running\n" +
 			"this command) or none (you lead from the tree). A member is role=tool or role=tool:model;\n" +
-			"the model can be auto. --goal - reads the goal from stdin.\n\n" +
+			"the model is the tool's ID, a name for one (opus 5.5) or auto, and one the tool doesn't\n" +
+			"run is refused before anything starts: `hive models <tool>` lists them. --goal - reads\n" +
+			"the goal from stdin.\n\n" +
 			"--from takes the goal, lead, worktrees and members of a [[team]] template in config.toml;\n" +
 			"a flag you also pass wins, and --member adds to the template's members.\n\n" +
 			"--worktrees gives each member a git worktree and branch of its own, hive/<team>/<role>,\n" +
@@ -736,7 +738,9 @@ func newTeamAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <team> <role>=<tool>[:<model>]",
 		Short: "Start one more member",
-		Args:  cobra.ExactArgs(2),
+		Long: "Start one more member. The model is the tool's ID, a name for one (opus 5.5) or auto;\n" +
+			"`hive models <tool>` lists what the tool runs.",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sp, err := team.ParseSpec(args[1])
 			if err != nil {

@@ -102,7 +102,7 @@ type Tracker struct {
 	Fusion fusion.Settings // what `auto` means when picking a model
 
 	cwds       map[string]string   // process folders, by pid@start
-	toolModels map[string][]string // what each tool runs, while NewTeam picks for several members
+	toolModels map[string][]string // what each tool runs, while NewTeam or AddMember checks and picks its members' models
 }
 
 // New returns a tracker.

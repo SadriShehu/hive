@@ -392,6 +392,15 @@ default, `auto`, or one it runs, loaded without blocking the form) and, for tool
 the mode, which ←/→ flips. `[fusion] mode` and `tool`, and the `[[model]]` ratings, are
 checked when config.toml loads, like the rest of it.
 
+A model given by hand (`hive new --model`, a team member's `tool:model`, a template, the
+team form) is checked against that list before anything starts, since a tool handed a
+name it doesn't know fails every turn: Claude Code rejected `--model "opus 5.5"`, and a
+team's members started that way answered nothing. The tool's ID passes; a name a person
+types for one (`opus 5.5`, `Opus-5.5`) becomes the ID, matched on its words: all of them,
+then the ones it ends with, then any run of them, the current generation winning a tie.
+A name that matches nothing, or several (two providers in opencode), is refused with the
+models the tool runs. `default` is the tool's default, as an empty model is.
+
 ## CLI
 
 Every tree action is also a command, so agents can run agents of their own. A session is
