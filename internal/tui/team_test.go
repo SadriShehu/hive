@@ -1022,3 +1022,89 @@ func TestALongSendPromptWraps(t *testing.T) {
 		t.Fatalf("said = %v, want the whole wrapped prompt", ops.said)
 	}
 }
+
+// The new-team form's fields wrap as they grow: a long name, folder and
+// member part keep their start and end on screen, the screen keeps its
+// height, and the whole part is what starts.
+func TestALongNewTeamFormWraps(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "T")
+	typ := func(s string) {
+		for _, r := range s {
+			m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+	}
+	check := func(what string) {
+		t.Helper()
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "START") || !strings.Contains(view, "END") {
+			t.Errorf("%s: the form scrolled its text out of view:\n%s", what, view)
+		}
+		for _, line := range strings.Split(view, "\n") {
+			if width := ansi.StringWidth(line); width > m.width {
+				t.Errorf("%s: a line is %d wide, past the %d screen:\n%s", what, width, m.width, line)
+			}
+		}
+		if got := len(strings.Split(view, "\n")); got != m.height {
+			t.Errorf("%s: view has %d lines, want %d", what, got, m.height)
+		}
+		if n := len(m.teamFormLines(m.width, m.height)); n != m.height {
+			t.Errorf("%s: form is %d lines, want %d", what, n, m.height)
+		}
+	}
+
+	typ("START " + strings.Repeat("a team name stays readable ", 4) + "END")
+	check("name")
+
+	m.teamForm.name.SetValue("wrap")
+	m.teamForm.folder.SetValue("START " + strings.Repeat("a folder path stays readable ", 4) + "END")
+	m.teamForm.folder.CursorEnd()
+	m.teamForm.focus(tfFolder)
+	check("folder")
+
+	part := "START " + strings.Repeat("the part wraps too ", 4) + "END"
+	m.teamForm.folder.SetValue(t.TempDir())
+	m.teamForm.focus(m.teamForm.membersAt() + memberPart)
+	typ(part)
+	check("part")
+
+	m.teamForm.name.SetValue("wrap")
+	m.teamForm.members[0].role.SetValue("backend")
+	m.teamForm.members[0].tool.SetValue("claude")
+	m.teamForm.focus(m.teamForm.goalField())
+	m = press(t, m, "enter")
+	if len(ops.started) != 1 {
+		t.Fatalf("started = %+v", ops.started)
+	}
+	if got := ops.started[0].Members[0].Prompt; got != part {
+		t.Fatalf("part = %q, want the whole wrapped text", got)
+	}
+}
+
+// Up and down move the caret through a wrapped team goal; tab still moves
+// between fields.
+func TestUpDownMoveTheCaretInsideTheTeamGoal(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "T")
+	m.teamForm.focus(m.teamForm.goalField())
+	for _, r := range strings.Repeat("the team goal wraps and stays editable ", 6) {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	before := cursorRow(m.teamForm.goal)
+	if before < 1 {
+		t.Fatalf("the goal didn't wrap; cursor row = %d", before)
+	}
+	m = press(t, m, "up")
+	if after := cursorRow(m.teamForm.goal); after >= before {
+		t.Fatalf("up moved the caret from row %d to %d, want it up", before, after)
+	}
+	if m.teamForm.field != m.teamForm.goalField() {
+		t.Fatalf("up left the goal for field %d, want the caret to move, not the focus", m.teamForm.field)
+	}
+	m = press(t, m, "tab")
+	if m.teamForm.field != tfTemplate {
+		t.Fatalf("tab left the goal for field %d, want around to the template", m.teamForm.field)
+	}
+}
