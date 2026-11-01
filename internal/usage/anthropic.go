@@ -33,6 +33,7 @@ var anthropicModels = []Model{
 	anthropic("claude-sonnet-4-5", TierBalanced, 3, 15, 0.30),
 	anthropic("claude-sonnet-4-0", TierBalanced, 3, 15, 0.30),
 	anthropic("claude-sonnet-4", TierBalanced, 3, 15, 0.30),
+	anthropic("claude-haiku-5-5", TierFast, 0.10, 0.50, 0.01), // $0.50 / $2.50 for a prompt over 100K tokens
 	anthropic("claude-haiku-4-5", TierFast, 1, 5, 0.10),
 	anthropic("claude-haiku-3-5", TierFast, 0.80, 4, 0.08),
 }
