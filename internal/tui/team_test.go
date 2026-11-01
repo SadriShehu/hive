@@ -1222,3 +1222,24 @@ func TestTheChannelShowsNoQuotaWhenItCannotKnow(t *testing.T) {
 		}
 	}
 }
+
+// Only a team's channel or its tree preview needs every member's usage and
+// the account quota; the plain tree keeps the selected session's own fetch.
+func TestOnlyATeamInViewFetchesMemberUsage(t *testing.T) {
+	m, ops := setup(t, false)
+	m.lastSync = now
+	before := ops.usagesAsked
+	m = step(t, m, tickMsg(now))
+	if ops.usagesAsked != before {
+		t.Errorf("the plain tree fetched member usages %d times", ops.usagesAsked-before)
+	}
+
+	m, ops = setupTeam(t)
+	ops.usagesAsked = 0
+	m.lastSync = now
+	m.quotasAt = time.Time{}
+	m = step(t, m, tickMsg(now))
+	if ops.usagesAsked == 0 {
+		t.Error("the team preview didn't fetch the members' usage")
+	}
+}
