@@ -414,15 +414,24 @@ func taskEditorRow(t store.Task, tasks []store.Task, w int, sel bool) string {
 // waits for, its body and its note.
 func taskDetail(t store.Task, tasks []store.Task, w int) []string {
 	g, gs := taskGlyph(t.Status)
-	line := gs.Render(g) + " " + sBold.Render(fmt.Sprintf("#%d %s", t.N, cleanLine(t.Title)))
-	line += sDim.Render(" · " + t.Status)
+	// The title wraps under its number, so a long one isn't cut in the
+	// detail the list row points to.
+	out := []string{}
+	for i, line := range strings.Split(ansi.Wrap(fmt.Sprintf("#%d %s", t.N, cleanLine(t.Title)), max(10, w-2), ""), "\n") {
+		prefix := "  "
+		if i == 0 {
+			prefix = gs.Render(g) + " "
+		}
+		out = append(out, prefix+sBold.Render(line))
+	}
+	meta := "  " + sDim.Render(t.Status)
 	if t.Owner != "" {
-		line += sDim.Render(" · " + t.Owner)
+		meta += sDim.Render(" · " + t.Owner)
 	}
 	if len(t.After) > 0 {
-		line += sDim.Render(" · after " + team.Numbers(t.After))
+		meta += sDim.Render(" · after " + team.Numbers(t.After))
 	}
-	out := []string{ansi.Truncate(line, w, "…")}
+	out = append(out, ansi.Truncate(meta, w, "…"))
 	wrap := func(label, body string) {
 		out = append(out, "  "+sDim.Render(label))
 		for _, l := range strings.Split(ansi.Wrap(team.Clean(body), max(10, w-4), ""), "\n") {

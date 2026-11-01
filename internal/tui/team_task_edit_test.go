@@ -229,3 +229,25 @@ func TestUpDownMoveTheCaretInsideATaskTextField(t *testing.T) {
 		t.Fatalf("tab left field %d, want the body", m.taskEdit.form.field)
 	}
 }
+
+// A long task title wraps in the detail, not only in the one-line list row.
+func TestALongTaskTitleWrapsInTheDetail(t *testing.T) {
+	m, ops := teamWithTasks(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	ops.snap.Tasks[0].Title = "START " + strings.Repeat("a long task title ", 5) + "END"
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	m = press(t, m, "e")
+
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "START") || !strings.Contains(view, "END") {
+		t.Errorf("the task detail cut its long title:\n%s", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if width := ansi.StringWidth(line); width > m.width {
+			t.Errorf("a line is %d wide, past the %d screen:\n%s", width, m.width, line)
+		}
+	}
+	if got := len(strings.Split(view, "\n")); got != m.height {
+		t.Errorf("view has %d lines, want %d", got, m.height)
+	}
+}
