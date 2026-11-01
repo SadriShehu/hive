@@ -447,7 +447,7 @@ func newTeamBoardCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			msgs, err := e.st.Messages(tm.ID, n, true)
+			msgs, err := feed(e.st, tm.ID, n)
 			if err != nil {
 				return err
 			}
@@ -520,6 +520,11 @@ func first(args []string) string {
 		return args[0]
 	}
 	return ""
+}
+
+// feed is the channel as the user reads it: private mail is read with inbox.
+func feed(st *store.Store, teamID string, n int) ([]store.Message, error) {
+	return st.Messages(teamID, n, false)
 }
 
 func printMessages(msgs []store.Message) {
@@ -631,7 +636,7 @@ func newTeamLogCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			msgs, err := e.st.Messages(tm.ID, n, true)
+			msgs, err := feed(e.st, tm.ID, n)
 			if err != nil {
 				return err
 			}
