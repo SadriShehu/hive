@@ -113,22 +113,44 @@ func teamNames(teams []store.Team) string {
 // An agent that isn't on the team writes as itself, so that nobody takes it
 // for the user: as team/role when it is on another team, else as its
 // session. Only a command run outside any agent writes as the user.
-func (e *teamEnv) sender(tm store.Team, as string) string {
+func (e *teamEnv) sender(tm store.Team, as string) (string, error) {
 	if as != "" {
-		return as
+		if err := e.checkAs(tm, as); err != nil {
+			return "", err
+		}
+		return as, nil
 	}
 	for _, r := range e.roles {
 		if r.Team.ID == tm.ID {
-			return r.Member.Role
+			return r.Member.Role, nil
 		}
 	}
 	if len(e.roles) > 0 {
-		return e.roles[0].Team.Name + "/" + e.roles[0].Member.Role
+		return e.roles[0].Team.Name + "/" + e.roles[0].Member.Role, nil
 	}
 	if e.caller != "" {
-		return e.caller
+		return e.caller, nil
 	}
-	return store.FromYou
+	return store.FromYou, nil
+}
+
+// checkAs says why --as can't name role on tm. A script run outside any agent
+// may name anyone, as for scripts; an agent may only name a role it plays on
+// the team, and never the user, so a teammate can't put words in the user's
+// mouth.
+func (e *teamEnv) checkAs(tm store.Team, as string) error {
+	if e.caller == "" && len(e.roles) == 0 {
+		return nil
+	}
+	if as == store.FromYou {
+		return errors.New("an agent can't write as you; --as names a role it plays")
+	}
+	for _, r := range e.roles {
+		if r.Team.ID == tm.ID && r.Member.Role == as {
+			return nil
+		}
+	}
+	return fmt.Errorf("--as %s: the command runs as an agent, which plays no such role on %s", as, tm.Name)
 }
 
 func (e *teamEnv) session(m store.Member) (store.Session, bool) {
@@ -565,7 +587,11 @@ func newTeamSayCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, sent, err := e.tr.Say(tm, e.sender(tm, as), args[0], text, private)
+			who, err := e.sender(tm, as)
+			if err != nil {
+				return err
+			}
+			_, sent, err := e.tr.Say(tm, who, args[0], text, private)
 			if err != nil {
 				return err
 			}
@@ -577,7 +603,7 @@ func newTeamSayCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&ref, "team", "", "the team (default: the caller's)")
-	f.StringVar(&as, "as", "", "send as this role, for scripts")
+	f.StringVar(&as, "as", "", "send as this role: a script's, or one the running agent plays")
 	f.BoolVar(&private, "private", false, "keep it out of the feed the user reads")
 	return cmd
 }
@@ -604,7 +630,11 @@ func newTeamPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, sent, err := e.tr.Post(tm, e.sender(tm, as), text)
+			who, err := e.sender(tm, as)
+			if err != nil {
+				return err
+			}
+			_, sent, err := e.tr.Post(tm, who, text)
 			if err != nil {
 				return err
 			}
@@ -615,7 +645,7 @@ func newTeamPostCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&ref, "team", "", "the team (default: the caller's)")
-	cmd.Flags().StringVar(&as, "as", "", "post as this role, for scripts")
+	cmd.Flags().StringVar(&as, "as", "", "post as this role: a script's, or one the running agent plays")
 	return cmd
 }
 
