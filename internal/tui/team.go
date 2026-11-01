@@ -1152,8 +1152,10 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	}
 	// Rate limits are the account's, not one member's: show them once per tool.
 	for _, tool := range sortedKeys(tools) {
-		if q, ok := m.quotas[tool]; ok && !q.Empty() {
-			head = append(head, "  "+sDim.Render(tool+" ")+quotaText(q, m.now()))
+		if q, ok := m.quotas[tool]; ok {
+			if text := quotaText(q, m.now()); text != "" {
+				head = append(head, "  "+sDim.Render(tool+" ")+text)
+			}
 		}
 	}
 	return head
