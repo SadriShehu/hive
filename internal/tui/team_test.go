@@ -358,6 +358,17 @@ func TestALongChannelPromptWraps(t *testing.T) {
 	}
 }
 
+func TestHelpNamesTheTeamAndChannelKeys(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = press(t, m, "?")
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"e edits its board", "d trashes it", "bare team:", "pgup/pgdn scroll the feed"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help lacks %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestChannelArrowsMoveTheCaretAndPageKeysScroll(t *testing.T) {
 	m, _ := setupTeam(t)
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
