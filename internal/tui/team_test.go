@@ -1294,3 +1294,24 @@ func TestTheChannelShowsStartingAndStoppedMembers(t *testing.T) {
 		t.Errorf("a cleared member isn't stopped:\n%s", view)
 	}
 }
+
+// With showUsage on and a narrow screen the usage panel takes the body and a
+// selected team's head is drawn there, so its usage must be fetched too.
+func TestATeamHeadInTheUsageBodyIsFetched(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.showUsage = true
+	if !m.usageTakesTheBody() {
+		t.Fatalf("setup: the usage panel doesn't take the body (preview %v)", m.previewVisible())
+	}
+	if !m.teamUsageInView() {
+		t.Fatal("a team head drawn in the usage body isn't in view")
+	}
+	m.lastSync = now
+	ops.usagesAsked = 0
+	m.quotasAt = time.Time{}
+	m = step(t, m, tickMsg(now))
+	if ops.usagesAsked == 0 {
+		t.Error("the team head in the usage body didn't fetch usage")
+	}
+}
