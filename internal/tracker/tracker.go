@@ -560,9 +560,30 @@ func (t *Tracker) Refresh() ([]store.Session, error) {
 	}
 	procs := t.World.Procs()
 	now := t.World.Now()
+	panePIDs := map[string]int{}
 	panes := map[string]bool{}
 	for _, p := range t.World.Panes() {
 		panes[p.ID] = true
+		panePIDs[p.ID] = p.PID
+	}
+	// A member that hasn't reported in is only as good as the pane hive
+	// opened for it. Once that pane is gone (tmux may reuse its ID for
+	// another pane), forget it, so the board and the TUI see it stopped
+	// rather than starting forever.
+	members, err := t.Store.AllMembers()
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range members {
+		if m.SessionID != "" || (m.Pane == "" && m.PanePID == 0) {
+			continue
+		}
+		if pid, ok := panePIDs[m.Pane]; ok && m.PanePID != 0 && pid == m.PanePID {
+			continue
+		}
+		if err := t.Store.SetMemberPane(m.TeamID, m.Role, "", 0); err != nil {
+			return nil, err
+		}
 	}
 
 	for i, s := range sessions {
