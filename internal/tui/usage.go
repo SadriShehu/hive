@@ -455,3 +455,40 @@ func modelTable(u store.Usage, w int) []string {
 	}
 	return out
 }
+
+// shortSessionID is a session's ID without its tool, at most eight characters.
+func shortSessionID(id string) string {
+	if i := strings.IndexByte(id, ':'); i >= 0 {
+		id = id[i+1:]
+	}
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return id
+}
+
+// quotaText words a tool account's rate-limit windows: "5h 7% · resets 4h54m
+// · 7d 22%". A window the tool didn't report is left out.
+func quotaText(q store.Quota, now time.Time) string {
+	var parts []string
+	resets := func(at int64) string {
+		d := time.Unix(at, 0).Sub(now)
+		if d < 0 {
+			d = 0
+		}
+		return "resets " + human.Span(d)
+	}
+	if q.FiveUsed > 0 || q.FiveReset > 0 {
+		parts = append(parts, fmt.Sprintf("5h %d%%", int(math.Round(q.FiveUsed))))
+		if q.FiveReset > 0 {
+			parts = append(parts, resets(q.FiveReset))
+		}
+	}
+	if q.SevenUsed > 0 || q.SevenReset > 0 {
+		parts = append(parts, fmt.Sprintf("7d %d%%", int(math.Round(q.SevenUsed))))
+		if q.SevenReset > 0 {
+			parts = append(parts, resets(q.SevenReset))
+		}
+	}
+	return strings.Join(parts, " · ")
+}

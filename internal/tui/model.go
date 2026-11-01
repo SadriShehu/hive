@@ -97,6 +97,8 @@ type Model struct {
 	showUsage bool
 	usages    map[string]store.Usage
 	usage     usageFetch
+	quotas    map[string]store.Quota // each tool account's last reported rate limits
+	quotasAt  time.Time
 	roots     []*tree.Node
 
 	flash    string
@@ -343,6 +345,10 @@ type (
 		err               error
 	}
 	syncedMsg struct{ err error }
+	quotasMsg struct {
+		quotas map[string]store.Quota
+		err    error
+	}
 	usagesMsg struct {
 		usages map[string]store.Usage
 		err    error
@@ -507,6 +513,14 @@ func (m *Model) syncCmd() tea.Cmd {
 	}
 }
 
+func (m Model) quotasCmd() tea.Cmd {
+	ops := m.ops
+	return func() tea.Msg {
+		quotas, err := ops.Quotas()
+		return quotasMsg{quotas: quotas, err: err}
+	}
+}
+
 func (m Model) usagesCmd() tea.Cmd {
 	ops := m.ops
 	return func() tea.Msg {
@@ -604,6 +618,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.syncing && m.now().Sub(m.lastSync) > syncEvery {
 			cmds = append(cmds, m.syncCmd())
 		}
+		// The channel and the team preview show every member's usage and
+		// the account's rate limits, refreshed on the usage cadence.
+		if m.now().Sub(m.quotasAt) >= usageEvery {
+			m.quotasAt = m.now()
+			cmds = append(cmds, m.usagesCmd(), m.quotasCmd())
+		}
 		if m.flash != "" && m.now().Sub(m.flashAt) > flashFor {
 			m.flash = ""
 		}
@@ -643,6 +663,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case usagesMsg:
 		if msg.err == nil {
 			m.usages = msg.usages
+		}
+		return m, nil
+
+	case quotasMsg:
+		if msg.err == nil {
+			m.quotas = msg.quotas
 		}
 		return m, nil
 

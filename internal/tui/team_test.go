@@ -27,6 +27,7 @@ type teamOps struct {
 	read        []string // team|id
 	feedAsked   []string // team
 
+	quotas        map[string]store.Quota
 	trashedTeams  []string
 	restoredTeams []string
 	purgedTeams   []string
@@ -46,8 +47,9 @@ type taskCall struct {
 	after                          []int
 }
 
-func (f *teamOps) Teams() (TeamSnapshot, error)  { return f.snap, nil }
-func (f *teamOps) TeamTemplates() []TeamTemplate { return f.templates }
+func (f *teamOps) Teams() (TeamSnapshot, error)            { return f.snap, nil }
+func (f *teamOps) Quotas() (map[string]store.Quota, error) { return f.quotas, nil }
+func (f *teamOps) TeamTemplates() []TeamTemplate           { return f.templates }
 func (f *teamOps) TeamFeed(team string, _ int) ([]store.Message, error) {
 	f.feedAsked = append(f.feedAsked, team)
 	return f.feed, nil
@@ -1162,5 +1164,58 @@ func TestAShortTeamFormShowsEveryMember(t *testing.T) {
 	}
 	if got := len(strings.Split(view, "\n")); got != m.height {
 		t.Errorf("view has %d lines, want %d", got, m.height)
+	}
+}
+
+// The channel shows each member's state, model, session and context, and the
+// account's rate limits once, not once per member.
+func TestTheChannelShowsMembersUsageAndTheAccountsQuota(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	ops.usages = map[string]store.Usage{
+		"claude:L": {ID: "claude:L", Model: "claude-opus-5-5", Effort: "high",
+			ContextTokens: 188_000, ContextWindow: 1_000_000},
+		"claude:B": {ID: "claude:B", Model: "claude-sonnet-5-5",
+			ContextTokens: 42_000, ContextWindow: 200_000},
+	}
+	ops.quotas = map[string]store.Quota{"claude": {Tool: "claude", FiveUsed: 7,
+		FiveReset: now.Add(4*time.Hour + 54*time.Minute).Unix(), SevenUsed: 22, At: now.Unix()}}
+	m = press(t, m, "enter")
+	m = step(t, m, tickMsg(now))
+
+	view := ansi.Strip(m.View())
+	for _, want := range []string{
+		"claude-opus-5-5", "high", "188k/1M", "19%",
+		"claude-sonnet-5-5", "42k/200k", "21%",
+		"5h 7% · resets 4h54m · 7d 22%",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the channel lacks %q:\n%s", want, view)
+		}
+	}
+	if n := strings.Count(view, "5h 7%"); n != 1 {
+		t.Errorf("the account quota shows %d times, want once:\n%s", n, view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if width := ansi.StringWidth(line); width > m.width {
+			t.Errorf("a line is %d wide, past the %d screen:\n%s", width, m.width, line)
+		}
+	}
+	if got := len(strings.Split(view, "\n")); got != m.height {
+		t.Errorf("view has %d lines, want %d", got, m.height)
+	}
+}
+
+// A tool with no reported rate limits shows no number, never a wrong one.
+func TestTheChannelShowsNoQuotaWhenItCannotKnow(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "enter")
+	m = step(t, m, tickMsg(now))
+	view := ansi.Strip(m.View())
+	for _, bad := range []string{"5h ", "7d ", "resets"} {
+		if strings.Contains(view, bad) {
+			t.Errorf("the channel invented a quota (%q):\n%s", bad, view)
+		}
 	}
 }
