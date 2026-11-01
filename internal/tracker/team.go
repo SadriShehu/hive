@@ -84,6 +84,13 @@ func (t *Tracker) NewTeam(ctx context.Context, o TeamOptions) (store.Team, []Mem
 	if err := team.CheckRoles(specs); err != nil {
 		return store.Team{}, nil, err
 	}
+	// Each tool is asked what it runs once for the team: for the models
+	// checked here and for the members picked with auto.
+	t.toolModels = map[string][]string{}
+	defer func() { t.toolModels = nil }()
+	if err := t.resolveModels(ctx, specs); err != nil {
+		return store.Team{}, nil, err
+	}
 	cwd, err := folder(o.Cwd)
 	if err != nil {
 		return store.Team{}, nil, err
@@ -114,6 +121,19 @@ func (t *Tracker) NewTeam(ctx context.Context, o TeamOptions) (store.Team, []Mem
 	return tm, out, nil
 }
 
+// resolveModels turns each member's model into the ID its tool takes, or
+// says which member asked for one hive can't place.
+func (t *Tracker) resolveModels(ctx context.Context, specs []team.Spec) error {
+	for i, sp := range specs {
+		model, err := t.ResolveModel(ctx, sp.Tool, sp.Model)
+		if err != nil {
+			return fmt.Errorf("%s: %w", sp.Role, err)
+		}
+		specs[i].Model = model
+	}
+	return nil
+}
+
 // startTeam puts a new team's members on it and starts them. It fails when
 // none starts.
 func (t *Tracker) startTeam(ctx context.Context, tm store.Team, specs []team.Spec, self *store.Session, session string) ([]MemberLaunch, error) {
@@ -137,9 +157,6 @@ func (t *Tracker) startTeam(ctx context.Context, tm store.Team, specs []team.Spe
 	if _, err := t.system(tm, "team started: "+goal); err != nil {
 		return nil, err
 	}
-	// Members picked with auto ask each tool what it runs once for the team.
-	t.toolModels = map[string][]string{}
-	defer func() { t.toolModels = nil }()
 	var out []MemberLaunch
 	var failed []string
 	for _, m := range members {
@@ -206,6 +223,13 @@ func (t *Tracker) AddMember(ctx context.Context, tm store.Team, sp team.Spec, se
 	if err := closed(tm); err != nil {
 		return store.Member{}, Launched{}, err
 	}
+	t.toolModels = map[string][]string{}
+	defer func() { t.toolModels = nil }()
+	specs := []team.Spec{sp}
+	if err := t.resolveModels(ctx, specs); err != nil {
+		return store.Member{}, Launched{}, err
+	}
+	sp = specs[0]
 	m := store.Member{TeamID: tm.ID, Role: sp.Role, Tool: sp.Tool, Model: sp.Model, Prompt: team.Clean(sp.Prompt), JoinedAt: t.World.Now()}
 	if err := t.Store.AddMember(m); err != nil {
 		return m, Launched{}, err

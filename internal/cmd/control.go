@@ -198,7 +198,7 @@ func newNewCmd() *cobra.Command {
 	_ = cmd.MarkFlagDirname("cwd") // the shell completes folders
 	f.StringVarP(&prompt, "prompt", "p", "", "the agent's first message")
 	f.StringVar(&parent, "parent", "auto", "auto (the agent running this command), none, or a session ID")
-	f.StringVarP(&model, "model", "m", "", "the model, as the tool names it; auto picks one for the prompt")
+	f.StringVarP(&model, "model", "m", "", "the model: the tool's ID or a name for one (opus 5.5); auto picks one for the prompt")
 	f.StringVar(&mode, "mode", "", "what auto picks: provider (the tool too) or model (only the model, in one tool); the config decides without it")
 	f.BoolVar(&dryRun, "dry-run", false, "only print which tool and model would start, and why")
 	f.BoolVarP(&wait, "wait", "w", false, "wait until the agent is up, then print its session ID")
@@ -212,7 +212,11 @@ func newNewCmd() *cobra.Command {
 func printDryRun(ctx context.Context, tr *tracker.Tracker, o tracker.LaunchOptions) error {
 	pick := tracker.PickOptions{Tool: o.Tool, Model: o.Model, Mode: o.Mode, Prompt: o.Prompt, ParentID: o.ParentID}
 	if !pick.Wants() {
-		fmt.Println(strings.TrimSpace(o.Tool + " " + o.Model))
+		model, err := tr.ResolveModel(ctx, o.Tool, o.Model)
+		if err != nil {
+			return err
+		}
+		fmt.Println(strings.TrimSpace(o.Tool + " " + model))
 		return nil
 	}
 	choice, err := tr.Pick(ctx, pick)

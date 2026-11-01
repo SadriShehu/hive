@@ -63,6 +63,12 @@ func (t *Tracker) Launch(ctx context.Context, o LaunchOptions) (Launched, error)
 		}
 		o.Tool, o.Model = choice.Tool, choice.ID
 		out.Choice = &choice
+	} else if o.Model != "" {
+		model, err := t.ResolveModel(ctx, o.Tool, o.Model)
+		if err != nil {
+			return Launched{}, err
+		}
+		o.Model = model
 	}
 	spec := t.spec(o.Tool)
 	switch {
