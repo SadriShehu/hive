@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -198,6 +199,9 @@ var migrations = []string{
 	teamMutesSchema,
 	// Teams in the trash.
 	teamTrashSchema,
+	// The process a member's pane was opened with, so that a pane ID tmux
+	// gave to another pane since isn't taken for the member's.
+	`ALTER TABLE team_members ADD COLUMN pane_pid INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // Open opens (creating if needed) the database at path.
@@ -271,7 +275,8 @@ func (s *Store) migrate() (err error) {
 		return err
 	}
 	for i := version; i < len(migrations); i++ {
-		if _, err := conn.ExecContext(ctx, migrations[i]); err != nil {
+		// A column added already was added by the same migration, run before.
+		if _, err := conn.ExecContext(ctx, migrations[i]); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("migration %d: %w", i+1, err)
 		}
 	}
@@ -444,13 +449,27 @@ func (s *Store) Attach(id string, pid int, pane, kind string) error {
 
 // SetStatus records status as of at, unless a newer status is already
 // recorded; events from one agent can arrive out of order. Exiting also
-// forgets the process and pane. Activity time (updated_at) is the caller's.
+// forgets the process and pane, the session's and its members'. Activity
+// time (updated_at) is the caller's.
 func (s *Store) SetStatus(id, status string, at int64) error {
 	q := `UPDATE sessions SET status = ?, status_at = ?`
 	if status == StatusExited {
 		q += `, pid = 0, pane = ''`
 	}
-	_, err := s.db.Exec(q+` WHERE id = ? AND status_at <= ?`, status, at, id, at)
+	res, err := s.db.Exec(q+` WHERE id = ? AND status_at <= ?`, status, at, id, at)
+	if err != nil || status != StatusExited {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return err
+	}
+	return s.forgetMemberPanes(id)
+}
+
+// forgetMemberPanes drops the pane of the members a session played once it
+// has ended: tmux may give the pane's ID to another pane.
+func (s *Store) forgetMemberPanes(id string) error {
+	_, err := s.db.Exec(`UPDATE team_members SET pane = '', pane_pid = 0 WHERE session_id = ?`, id)
 	return err
 }
 
@@ -465,7 +484,10 @@ func (s *Store) MarkGone(id string, at int64) (bool, error) {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil || n == 0 {
+		return false, err
+	}
+	return true, s.forgetMemberPanes(id)
 }
 
 // EndOthersOnPID marks every other top-level session running as pid exited:

@@ -392,7 +392,7 @@ func newTeamLsCmd() *cobra.Command {
 				row := teamRow{Team: t, Members: []memberRow{}, Tasks: team.Count(tasks)}
 				for _, m := range ms {
 					s, ok := e.session(m)
-					row.Members = append(row.Members, memberRow{m, tracker.MemberState(m, s, ok)})
+					row.Members = append(row.Members, memberRow{m, e.tr.MemberState(m, s, ok)})
 				}
 				rows = append(rows, row)
 			}
@@ -465,7 +465,7 @@ func newTeamBoardCmd() *cobra.Command {
 			rows := []memberRow{}
 			for _, m := range ms {
 				s, ok := e.session(m)
-				rows = append(rows, memberRow{m, tracker.MemberState(m, s, ok), counts[m.Role], m.Role == tm.LeadRole})
+				rows = append(rows, memberRow{m, e.tr.MemberState(m, s, ok), counts[m.Role], m.Role == tm.LeadRole})
 			}
 			worktrees := teamWorktrees(e.tr, tm)
 			if asJSON {

@@ -482,7 +482,11 @@ filter and demo.
   the team with the error in the channel; if no member's window opens, the team isn't
   kept. `--wait` returns once each member has reported its session, so the roster it
   prints names them for `hive send` and the like. Until it reports, `hive team stop` and
-  `hive team rm` end the window it was started in, so a pane-only member can be stopped.
+  `hive team rm` end the window it was started in, so a pane-only member can be stopped,
+  but only while that pane still runs the process hive opened it with: tmux starts pane
+  IDs over when its server restarts, so the ID alone may name someone else's pane. A
+  member's pane is forgotten when hive ends it or its session ends, and a member with
+  no session and no such pane shows as stopped, not starting.
 - **Linking.** `launch_teams` records the pane hive opened for a role; the first session
   that reports from that pane within 10 minutes takes the role, as with a launch record.
   Older records are dropped, since pane IDs start over when tmux restarts. Claude and

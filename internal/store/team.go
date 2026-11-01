@@ -56,7 +56,8 @@ type Member struct {
 	Model     string `json:"model,omitempty"`
 	Prompt    string `json:"prompt,omitempty"` // the member's own part of the brief
 	Cwd       string `json:"cwd,omitempty"`
-	Pane      string `json:"pane,omitempty"` // where it was last started, until its session is known
+	Pane      string `json:"pane,omitempty"`     // where it was last started, until its session ends
+	PanePID   int    `json:"pane_pid,omitempty"` // the pane's first process when hive opened it
 	JoinedAt  int64  `json:"joined_at"`
 	LeftAt    int64  `json:"left_at,omitempty"` // retired with `hive team rm`
 }
@@ -277,7 +278,7 @@ func (s *Store) SetTeamStatus(id, status string, at int64) error {
 	return err
 }
 
-const memberColumns = `team_id, role, session_id, tool, model, prompt, cwd, pane, joined_at, left_at`
+const memberColumns = `team_id, role, session_id, tool, model, prompt, cwd, pane, joined_at, left_at, pane_pid`
 
 func scanMembers(rows *sql.Rows) ([]Member, error) {
 	defer rows.Close()
@@ -285,7 +286,7 @@ func scanMembers(rows *sql.Rows) ([]Member, error) {
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(&m.TeamID, &m.Role, &m.SessionID, &m.Tool, &m.Model, &m.Prompt, &m.Cwd, &m.Pane,
-			&m.JoinedAt, &m.LeftAt); err != nil {
+			&m.JoinedAt, &m.LeftAt, &m.PanePID); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -303,8 +304,8 @@ func (s *Store) AddMember(m Member) error {
 	if live > 0 {
 		return fmt.Errorf("the team has a %s already", m.Role)
 	}
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO team_members (`+memberColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-		m.TeamID, m.Role, m.SessionID, m.Tool, m.Model, m.Prompt, m.Cwd, m.Pane, m.JoinedAt)
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO team_members (`+memberColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+		m.TeamID, m.Role, m.SessionID, m.Tool, m.Model, m.Prompt, m.Cwd, m.Pane, m.JoinedAt, m.PanePID)
 	return err
 }
 
@@ -345,10 +346,11 @@ func (s *Store) Memberships(sessionID string) ([]Member, error) {
 }
 
 // SetMemberSession records the session now playing a role, and the pane it
-// was started in.
+// runs in. A new pane forgets the old one's process.
 func (s *Store) SetMemberSession(teamID, role, sessionID, pane string) error {
-	_, err := s.db.Exec(`UPDATE team_members SET session_id = ?, pane = CASE WHEN ? <> '' THEN ? ELSE pane END
-		WHERE team_id = ? AND role = ?`, sessionID, pane, pane, teamID, role)
+	_, err := s.db.Exec(`UPDATE team_members SET session_id = ?, pane = CASE WHEN ? <> '' THEN ? ELSE pane END,
+		pane_pid = CASE WHEN ? <> '' AND ? <> pane THEN 0 ELSE pane_pid END
+		WHERE team_id = ? AND role = ?`, sessionID, pane, pane, pane, pane, teamID, role)
 	return err
 }
 
@@ -359,9 +361,10 @@ func (s *Store) SetMemberTool(teamID, role, tool, model string) error {
 	return err
 }
 
-// SetMemberPane records where a member was last started.
-func (s *Store) SetMemberPane(teamID, role, pane string) error {
-	_, err := s.db.Exec(`UPDATE team_members SET pane = ? WHERE team_id = ? AND role = ?`, pane, teamID, role)
+// SetMemberPane records where a member was last started, and the pane's
+// first process; "" and 0 say it has no pane now.
+func (s *Store) SetMemberPane(teamID, role, pane string, pid int) error {
+	_, err := s.db.Exec(`UPDATE team_members SET pane = ?, pane_pid = ? WHERE team_id = ? AND role = ?`, pane, pid, teamID, role)
 	return err
 }
 

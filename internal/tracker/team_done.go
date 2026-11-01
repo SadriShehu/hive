@@ -65,7 +65,7 @@ func (t *Tracker) runningRoles(tm store.Team) ([]string, error) {
 	var out []string
 	for _, m := range members {
 		if m.SessionID == "" {
-			if m.Pane != "" && t.paneExists(m.Pane) {
+			if t.inLaunchedPane(m) {
 				out = append(out, m.Role)
 			}
 			continue
