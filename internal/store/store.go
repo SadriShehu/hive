@@ -202,6 +202,9 @@ var migrations = []string{
 	// The process a member's pane was opened with, so that a pane ID tmux
 	// gave to another pane since isn't taken for the member's.
 	`ALTER TABLE team_members ADD COLUMN pane_pid INTEGER NOT NULL DEFAULT 0;`,
+	// The rate-limit windows each tool's account last reported, for the
+	// channel view. Like the trash, it can run twice.
+	quotaSchema,
 }
 
 // Open opens (creating if needed) the database at path.
