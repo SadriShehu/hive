@@ -34,8 +34,9 @@ type fakeOps struct {
 	purged   []string
 	copied   []string
 
-	usages     map[string]store.Usage
-	usageAsked []string
+	usages      map[string]store.Usage
+	usagesAsked int
+	usageAsked  []string
 
 	fusion      fusion.Settings
 	modelsAsked []string
@@ -100,6 +101,7 @@ func (f *fakeOps) Models(tool string) ([]string, error) {
 	}[tool], nil
 }
 func (f *fakeOps) Usages() (map[string]store.Usage, error) {
+	f.usagesAsked++
 	return f.usages, nil
 }
 func (f *fakeOps) Usage(_ context.Context, s store.Session) (store.Usage, error) {
