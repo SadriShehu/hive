@@ -96,6 +96,9 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 	if slices.Contains(after, n) {
 		return store.Task{}, fmt.Errorf("#%d can't wait for itself", n)
 	}
+	if team.Cycles(n, after, tasks) {
+		return store.Task{}, fmt.Errorf("#%d can't wait for a task that waits for it", n)
+	}
 	if after == nil {
 		after = []int{}
 	}

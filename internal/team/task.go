@@ -45,6 +45,40 @@ func CheckAfter(after []int, tasks []store.Task) error {
 	return nil
 }
 
+// Cycles reports whether making task n wait for after would make it wait,
+// directly or through other tasks, for itself.
+func Cycles(n int, after []int, tasks []store.Task) bool {
+	seen := map[int]bool{}
+	var waitsFor func(int) bool
+	waitsFor = func(task int) bool {
+		if task == n {
+			return true
+		}
+		if seen[task] {
+			return false
+		}
+		seen[task] = true
+		for _, t := range tasks {
+			if t.N != task {
+				continue
+			}
+			for _, next := range t.After {
+				if waitsFor(next) {
+					return true
+				}
+			}
+			break
+		}
+		return false
+	}
+	for _, task := range after {
+		if waitsFor(task) {
+			return true
+		}
+	}
+	return false
+}
+
 // Waiting lists the tasks t waits for that aren't done.
 func Waiting(t store.Task, tasks []store.Task) []int {
 	var out []int
