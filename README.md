@@ -99,7 +99,7 @@ transcript for a headless run, a subagent or a finished session.
 | `x` | stop it (asks first); a window hive opened closes with it |
 | `d` | move it and everything under it to the trash (asks first) |
 | `t` | the trash: `r` restores, `d` deletes for good, from its tool too (asks first) |
-| `/` | filter by title, folder or ID, across all history; `team:<name or ID>` shows a team's subtree |
+| `/` | filter by title, folder or ID, across all history; `team:<name or ID>` shows a team's subtree, a bare `team:` every team |
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
 | `u` | show / hide what the session used: model, tokens, price, context, tools, skills |
@@ -323,6 +323,9 @@ tool = "codex"
 hive team new admin-api --from api
 ```
 
+The team folder is stored as an absolute path, so a relative `cwd` or `--cwd` resolves
+where you run the command.
+
 Press `T` in the tree for the same in a form: one row per member (role, tool, model and
 its part of the brief), with `+` to add a row and `ctrl+d` to remove the focused one, a
 template row to fill it from config.toml, and a work row for the shared folder or a
@@ -357,17 +360,20 @@ is done, so nobody polls.
 Press `e` on a team to open its board full screen: `j`/`k` (or the arrows) move, `n` adds a
 task, `e`/`↵` edits the selected one, `d` marks it done with an optional note, `b` marks it
 blocked and asks why, and `esc` goes back to the tree, or from a form back to the board.
-The form takes a title, an optional body, an owner role and the tasks it waits for (`1,2`);
-the selected task's body and note are shown under the list.
+The form takes a title, an optional body, an owner role and the tasks it waits for (`1,2`).
+An edit can't make a task wait on itself through a cycle, and clearing the owner of a
+claimed task reopens it. The selected task's body and note are shown under the list.
 
 Members post progress with `hive team post`; hive adds its own posts (a member started,
 needs you, stopped); you answer with `s`, or on the channel's live line. A message to a
-member is typed into its pane when it is idle. If it is working, or waiting on you, it
-waits and is typed when the turn ends, so a message never answers a permission prompt. A
-plain post goes to the channel
-only; it reaches a pane only when it names a teammate with `@role`. Every delivered line
-starts with `[team · from role]`, so it can't run a slash command in the member's TUI, and
-holds no control characters, so it can't reach the TUI as keys.
+member is typed into its pane when it is idle. If it is working, it waits for its turn to
+end; if it is waiting on you, it waits until you answer and the member next goes idle, so a
+message never answers a permission prompt. A plain post goes to the channel only; it
+reaches a pane only when it names a teammate with `@role`. Every delivered line starts with
+`[team · from role]`, so it can't run a slash command in the member's TUI, and holds no
+control characters, so it can't reach the TUI as keys. hive also strips control characters
+from team text it draws in the board, the channel and the tree, so a teammate can't paint
+your terminal.
 
 | Key, on a team | Does |
 | --- | --- |
@@ -382,16 +388,16 @@ holds no control characters, so it can't reach the TUI as keys.
 
 | Command | Does |
 | --- | --- |
-| `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--wait` waits for each member's session ID |
+| `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
 | `hive team ls` · `board [team]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts · the channel (all take `--json`) |
-| `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate (`--private` keeps it out of your feed) |
+| `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print its number; its owner hears from hive when it is ready |
-| `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `ls [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, naming them |
+| `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `ls [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task |
 | `hive team wait [--task n] [--from role] [--any] [--timeout d]` | block until a task is done or blocked, a message arrives, or (`--any`) the board changes; print what happened |
-| `hive team inbox [--wait]` | print the messages queued for this member, on every team it is on |
-| `hive team add` · `rm` · `stop` | add a member · retire one · stop them all |
+| `hive team inbox [--wait] [--timeout d]` | print the messages queued for this member, on every team it is on |
+| `hive team add <team> <role>=<tool>[:<model>]` · `rm <team> <role>` · `stop <team> [--yes]` | add a member · retire one · stop them all (asks first; `--yes` skips) |
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
-| `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail; `--clean` removes merged worktrees |
+| `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail, members or tasks; `--clean` removes merged worktrees |
 | `hive team mute <team> <role>` · `unmute <team> <role>` | pause hive's delivery to one member · let it go on |
 
 Inside a member the team and the role are implied; an agent on two teams names the one
@@ -411,16 +417,18 @@ rather than taking someone's work. The brief names each member's branch, and cha
 committed in the team's folder aren't in the worktrees.
 
 **Done.** `hive team done <team>` marks the goal met: the team stays in the tree, dimmed
-and folded with its channel, and messages, posts and new members are refused from then
-on. It stops nobody; `hive team stop` does that. `--clean` removes the worktrees whose
-branches are merged into the branch the folder had when the team started, with their
-branches. Anything with commits to merge or changes not committed stays, and
-`hive team board` lists it under "worktrees"; run `done --clean` again once it is dealt
-with.
+and folded with its channel, and messages, posts, new members and new tasks are refused
+from then on. Mail already queued is dropped. It stops nobody; `hive team stop` does that.
+`--clean` removes the worktrees whose branches are merged into the branch the folder had
+when the team started, with their branches. Anything with commits to merge, changes not
+committed, or a member still running stays, and `hive team board` lists it under
+"worktrees"; run `done --clean` again once it is dealt with.
 
 **Waiting for the start.** `hive team new --wait` returns once each member has reported
 its session, so the roster it prints names them; a tool that starts its session only with
-its first message gets a stand-in ID, as `hive new --wait` gives one.
+its first message gets a stand-in ID, as `hive new --wait` gives one. Until a member reports,
+`hive team stop` and `hive team rm` end the window it was started in, so a member that only
+has a pane can still be stopped.
 
 **Mute.** `hive team mute <team> <role>` stops hive from typing that member's mail into
 its pane, for two members that write to each other without end. The mail still queues,

@@ -465,7 +465,7 @@ filter and demo.
 | How you follow progress | a channel: members and hive post, you answer in the same feed. A post reaches a pane only when it names a member |
 | How work is split | numbered tasks with an owner and the tasks each waits for. hive tells an owner when its task is ready, so nobody polls |
 | Where members work | one shared folder by default. `--worktrees` gives each member a worktree and branch of its own; the lead stays in the folder and merges |
-| When a team is done | when someone runs `hive team done`, you by default: the lead posts that the goal is met. done stops nobody |
+| When a team is done | when someone runs `hive team done`, you by default: the lead posts that the goal is met. The team takes no more mail, members or tasks, and done stops nobody |
 | Channel view | the feed in the preview pane; `↵` on a team opens it full screen with a live input line |
 
 ### Members and roles
@@ -481,7 +481,8 @@ filter and demo.
   one `hive team new` asks each tool what it runs only once. A failed member stays on
   the team with the error in the channel; if no member's window opens, the team isn't
   kept. `--wait` returns once each member has reported its session, so the roster it
-  prints names them for `hive send` and the like.
+  prints names them for `hive send` and the like. Until it reports, `hive team stop` and
+  `hive team rm` end the window it was started in, so a pane-only member can be stopped.
 - **Linking.** `launch_teams` records the pane hive opened for a role; the first session
   that reports from that pane within 10 minutes takes the role, as with a launch record.
   Older records are dropped, since pane IDs start over when tmux restarts. Claude and
@@ -528,8 +529,9 @@ prompt = "handlers"
 ```
 
 The template's name is unique and follows a team name's rules; every member's role is a
-valid role and appears once, including the lead's; and a member names a tool. A broken
-config changes nothing, as everywhere else.
+valid role and appears once, including the lead's; and a member names a tool. The folder is
+stored absolute, so a relative `cwd` resolves where `hive team new` runs. A broken config
+changes nothing, as everywhere else.
 
 ### The brief
 
@@ -552,9 +554,9 @@ happens to be called `lead`: who leads goes by the team's lead role alone.
   cost no tokens, and the feed has news even when an agent forgets to post. `m` hides
   them.
 - **Messages.** `hive team say <role|all>` writes to teammates; `all` leaves the sender
-  out, and a member can't write to itself. `--private` keeps one out of your feed. What
-  you write with `s` in the tree, or on the channel's live line, goes through the same
-  mailbox.
+  out, and a member can't write to itself. `--private` keeps one out of the feed you read
+  (`board`, `log` and the tree); `inbox` still reads it. What you write with `s` in the
+  tree, or on the channel's live line, goes through the same mailbox.
 - **Unread.** `team_reads` keeps the last message you have seen per team; the node shows
   what others wrote since.
 
@@ -582,7 +584,9 @@ nothing prints into the agent. An agent that would rather read its mail runs
 every other control character turned into spaces. Starting with `[`, a line can't run a
 slash command (`/exit`), a shell escape (`!`) or a memory shortcut (`#`) in the
 recipient's TUI; holding no escape, it can't end tmux's bracketed paste early and reach
-the TUI as keys. Several messages go as one paste, one line each, with one Enter.
+the TUI as keys. Several messages go as one paste, one line each, with one Enter. Text hive
+draws in the board, the channel and the tree has other control characters stripped too, so a
+teammate can't paint the user's terminal.
 
 ### The task board
 
@@ -590,11 +594,12 @@ the TUI as keys. Several messages go as one paste, one line each, with one Enter
   (#1, #2, …), with a title, details (`--body`), an owner (a role) and the tasks it waits
   for (`--after 1,2`). It can wait only for tasks already on the board, so tasks never wait
   for each other in a ring. A task is open, claimed, done or blocked; its note says what
-  done changed, or why it is blocked.
+  done changed, or why it is blocked. A done team takes no new tasks.
 - **Claiming.** `claim <n>` makes a task the caller's. It is refused, with the reason,
   for a task that waits for one that isn't done (naming them), that is another member's
-  or claimed by one, and on a paused team; `--force` overrides all but the pause and a task
-  that is done. Taking one over with `--force` is news to the member that held it. Only a
+  or claimed by one, and on a paused or done team; `--force` overrides all but the pause,
+  a done team and a task that is done. Taking one over with `--force` is news to the member
+  that held it. Only a
   member claims (`--as role` for scripts). Two claims at once can't both win: a move
   applies only over the task as it was read, and the loser is told who has it.
 - **Closing.** `done <n> [--note]` and `block <n> --why` are posted by hive. When an agent
@@ -604,7 +609,8 @@ the TUI as keys. Several messages go as one paste, one line each, with one Enter
   the mailbox and out of your feed, since the post already names them: `#5 admin table
   view is yours, and ready (#4 done by backend: …). hive team task claim 5 takes it.` A
   task added with an owner and nothing left to wait for is told at once. Whoever closed a
-  task reads what became ready in the command's output instead.
+  task reads what became ready in the command's output instead. On a done team a task can
+  still be closed, but that adds no post or mail.
 - **Waiting.** `hive team wait` looks at the board twice a second, as `hive wait` does,
   and prints what happened: a task as hive words it, a message in its envelope. With no
   flag it returns when any task is done or blocked, or mail comes for the caller; `--task
@@ -621,8 +627,9 @@ the TUI as keys. Several messages go as one paste, one line each, with one Enter
   marks it done with an optional note, `b` marks it blocked with a required why, and
   `esc` goes back to the tree, or from a form back to the board. The user acts as `you`
   on the API: the owner must be a role on the team, and `after` must name tasks already
-  on the board, as when one is added. An edit is applied over the task as it was read,
-  and loses, naming who has it, when someone moved it meanwhile.
+  on the board, as when one is added. An edit also can't make a task wait on itself through
+  a cycle, and clearing the owner of a claimed task reopens it. An edit is applied over the
+  task as it was read, and loses, naming who has it, when someone moved it meanwhile.
 
 ### In the tree
 
@@ -684,9 +691,10 @@ records where each member works, and the brief names it.
 ### Done
 
 `hive team done <team>` marks the goal met: the status turns `done`, hive posts who did
-it, and the mail still queued is dropped. Messages, posts and new members are refused
-from then on ("api is done; it takes no more messages or members"), from the shell, from
-a member and from the tree. Running it again does nothing more, but cleans with `--clean`.
+it, and the mail still queued is dropped. Messages, posts, new members and new tasks are
+refused from then on ("api is done; it takes no more messages, members or tasks"), from the
+shell, from a member and from the tree. A task already on the board can still be closed,
+but that adds no post or mail. Running it again does nothing more, but cleans with `--clean`.
 
 - **It stops nobody.** The agent that runs it may well be the lead, which stopping every
   member would end mid-command; stopping is `hive team stop`'s, which asks first. done
