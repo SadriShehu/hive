@@ -173,8 +173,9 @@ func TestResolveModelTurnsANameIntoTheToolsID(t *testing.T) {
 		{"claude", "claude-opus-4-8", "claude-opus-4-8"},  // in the price catalog, not the tool's current list
 		{"claude", "sonnet[1m]", "claude-sonnet-5-5[1m]"}, // a long-context suffix stays on the ID
 		{"claude", "claude-sonnet-5-5[1m]", "claude-sonnet-5-5[1m]"},
-		{"claude", "opusplan", "opusplan"}, // an alias Claude Code takes as it is
-		{"bare", "x", "x"},                 // no list to check against: passed through
+		{"claude", "opusplan", "opusplan"},                                             // an alias Claude Code takes as it is
+		{"bare", "x", "x"},                                                             // no list to check against: passed through
+		{"opencode", "google-vertex/claude-opus-4-8", "google-vertex/claude-opus-4-8"}, // a catalog ID from a provider opencode lists
 		{"claude", "", ""},
 		{"claude", "default", ""},
 		{"claude", fusion.Auto, fusion.Auto},
@@ -198,6 +199,10 @@ func TestResolveModelRefusesWhatItCantPlace(t *testing.T) {
 	}{
 		{"claude", "opus 5.7", []string{`claude has no model "opus 5.7"`, "it runs claude-fable-5-1, claude-sonnet-5-5, claude-haiku-4-5, claude-opus-4.6-fast, claude-opus-5-5", "[[agent]] models in config.toml"}},
 		{"claude", "--", []string{`claude has no model "--"`}},
+		{"claude", "gpt-5-5", []string{`claude has no model "gpt-5-5"`}}, // another tool's family
+		{"claude", "gemini-3-pro-preview", []string{`claude has no model "gemini-3-pro-preview"`}},
+		{"claude", "deepseek/deepseek-v4-pro", []string{`claude has no model "deepseek/deepseek-v4-pro"`}},
+		{"opencode", "anthropic/claude-opus-4-8", []string{`opencode has no model "anthropic/claude-opus-4-8"`}},
 		{"opencode", "opus 5.5", []string{`could be any of opencode's google-vertex/claude-opus-5-5@default, google-vertex-anthropic/claude-opus-5-5@default`, "name one"}},
 		{"plain", "gpt-6-pro", []string{"{model}"}},
 		{"nope", "x", []string{`doesn't know "nope"`}},
