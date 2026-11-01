@@ -436,7 +436,7 @@ func newTeamLsCmd() *cobra.Command {
 				if r.Tasks.Total > 0 {
 					state += fmt.Sprintf(" · %d/%d tasks done", r.Tasks.Done, r.Tasks.Total)
 				}
-				fmt.Printf("%s · %s · %s\n", r.Name, state, truncate(team.Clean(r.Goal), 60))
+				fmt.Println(teamRowText(r.Name, state, r.Goal))
 				for _, m := range r.Members {
 					if m.Active() {
 						fmt.Printf("  %-10s %-9s %s\n", m.Role, m.Tool, m.State)
@@ -520,11 +520,8 @@ func newTeamBoardCmd() *cobra.Command {
 				if !m.Active() {
 					continue
 				}
-				fmt.Printf("  %-10s %-9s %-9s %d posts", m.Role, m.Tool, m.State, m.Messages)
-				if t, ok := team.Held(m.Role, tasks); ok {
-					fmt.Printf("  #%d %s", t.N, truncate(t.Title, 40))
-				}
-				fmt.Println()
+				held, hasHeld := team.Held(m.Role, tasks)
+				fmt.Println(memberBoardText(m.Role, m.Tool, m.State, m.Messages, held, hasHeld))
 			}
 			fmt.Println("\ntasks")
 			printTasks(tasks, false)
@@ -947,4 +944,19 @@ func startDeliver(id string) {
 		return
 	}
 	c.Process.Release()
+}
+
+// teamRowText words a team for `hive team ls`, with its whole goal.
+func teamRowText(name, state, goal string) string {
+	return fmt.Sprintf("%s · %s · %s", name, state, team.Clean(goal))
+}
+
+// memberBoardText words a member on `hive team board`, with the whole title
+// of the task it holds.
+func memberBoardText(role, tool, state string, posts int, held store.Task, hasHeld bool) string {
+	line := fmt.Sprintf("  %-10s %-9s %-9s %d posts", role, tool, state, posts)
+	if hasHeld {
+		line += fmt.Sprintf("  #%d %s", held.N, team.Clean(held.Title))
+	}
+	return line
 }

@@ -1108,3 +1108,29 @@ func TestUpDownMoveTheCaretInsideTheTeamGoal(t *testing.T) {
 		t.Fatalf("tab left the goal for field %d, want around to the template", m.teamForm.field)
 	}
 }
+
+// A long team goal and a long member part wrap in the channel head instead of
+// running off the edge, and the view keeps its height.
+func TestALongTeamGoalAndPartWrap(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	ops.snap.Teams[0].Goal = "START " + strings.Repeat("what the team is for ", 5) + "END"
+	ops.snap.Members[0].Prompt = "START " + strings.Repeat("what this member owns ", 5) + "END"
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	m = press(t, m, "enter")
+
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"START", "END"} {
+		if strings.Count(view, want) < 2 {
+			t.Errorf("the channel lacks the goal's and the part's %q:\n%s", want, view)
+		}
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if width := ansi.StringWidth(line); width > m.width {
+			t.Errorf("a line is %d wide, past the %d screen:\n%s", width, m.width, line)
+		}
+	}
+	if got := len(strings.Split(view, "\n")); got != m.height {
+		t.Errorf("view has %d lines, want %d", got, m.height)
+	}
+}

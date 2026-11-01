@@ -184,3 +184,15 @@ func TestTheFeedHidesPrivateMessages(t *testing.T) {
 		t.Fatalf("inbox = %+v, want the private message", pending)
 	}
 }
+
+// A long goal and a long held-task title are printed whole, not cut short.
+func TestTeamTextIsNotCutShort(t *testing.T) {
+	goal := "add the admin API " + strings.Repeat("with a long description ", 6) + "END"
+	if got := teamRowText("api", "active", goal); !strings.Contains(got, goal) {
+		t.Errorf("ls line = %q, want the whole goal", got)
+	}
+	title := "write the docs " + strings.Repeat("for every endpoint ", 5) + "END"
+	if got := memberBoardText("backend", "claude", "working", 2, store.Task{N: 4, Title: title}, true); !strings.Contains(got, title) {
+		t.Errorf("board line = %q, want the whole held title", got)
+	}
+}
