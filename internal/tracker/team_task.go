@@ -120,7 +120,17 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 		task.Status, task.Note = store.TaskOpen, ""
 	}
 	task.UpdatedAt = t.World.Now()
-	ok, err := t.Store.EditTask(old, task)
+	// The checks above read a board that may be stale by now, so the store
+	// re-reads it inside the write and checks the ring again.
+	ok, err := t.Store.UpdateTaskChecked(old, task, func(tasks []store.Task) error {
+		if err := team.CheckAfter(after, tasks); err != nil {
+			return err
+		}
+		if team.Cycles(n, after, tasks) {
+			return fmt.Errorf("#%d can't wait for a task that waits for it", n)
+		}
+		return nil
+	})
 	if err != nil {
 		return store.Task{}, err
 	}
@@ -177,8 +187,17 @@ func (t *Tracker) ClaimTask(tm store.Team, by string, n int, force bool) (store.
 	}
 	task := old
 	task.Status, task.Owner, task.Note, task.UpdatedAt = store.TaskClaimed, by, "", t.World.Now()
-	if err := t.moveTask(old, task); err != nil {
+	// CanClaim read a board that may be stale: re-check it under the write,
+	// so a claim can't race an edit that makes the task wait, or another
+	// member's claim.
+	ok, err := t.Store.UpdateTaskChecked(old, task, func(tasks []store.Task) error {
+		return team.CanClaim(old, by, tasks, force)
+	})
+	if err != nil {
 		return store.Task{}, err
+	}
+	if !ok {
+		return store.Task{}, t.stale(old)
 	}
 	// Taken over with --force: the member that held it hears of it.
 	var to []string
