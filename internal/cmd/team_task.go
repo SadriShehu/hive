@@ -70,7 +70,7 @@ func newTeamTaskCmd() *cobra.Command {
 			"Inside a member, the team and the role are implied.",
 	}
 	cmd.PersistentFlags().StringVar(&f.team, "team", "", "the team (default: the caller's)")
-	cmd.PersistentFlags().StringVar(&f.as, "as", "", "act as this role, for scripts")
+	cmd.PersistentFlags().StringVar(&f.as, "as", "", "act as this role: a script's, or one the running agent plays")
 	cmd.AddCommand(newTaskAddCmd(f), newTaskClaimCmd(f), newTaskDoneCmd(f), newTaskBlockCmd(f), newTaskLsCmd(f))
 	return cmd
 }
