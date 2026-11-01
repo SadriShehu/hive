@@ -98,6 +98,10 @@ type Tracker struct {
 	HasPane  func(pane string) bool
 	KillPane func(pane string) error
 
+	// StartWindow replaces the tmux call that opens a window for a new agent,
+	// for tests; it is tmux.NewWindow when nil.
+	StartWindow func(tmux.Window) (tmux.Pane, error)
+
 	Models usage.Catalog
 	Fusion fusion.Settings // what `auto` means when picking a model
 

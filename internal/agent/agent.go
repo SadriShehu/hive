@@ -106,6 +106,10 @@ type Spec struct {
 	// model flag takes them. A ModelLister adds what the tool offers right
 	// now, and history adds what its sessions used.
 	Models []string
+
+	// ModelAliases are names the tool's model flag takes besides a model ID
+	// (Claude Code's "opusplan"). hive passes them through unchanged.
+	ModelAliases []string
 }
 
 // TakesModel reports whether the start command has a {model} placeholder,
