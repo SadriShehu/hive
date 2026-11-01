@@ -82,7 +82,7 @@ func (t *Tracker) runningRoles(tm store.Team) ([]string, error) {
 // closed says why a team takes no more mail, or returns nil.
 func closed(tm store.Team) error {
 	if tm.Status == store.TeamDone {
-		return fmt.Errorf("%s is done; it takes no more messages or members", tm.Name)
+		return fmt.Errorf("%s is done; it takes no more messages, members or tasks", tm.Name)
 	}
 	return nil
 }

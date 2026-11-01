@@ -686,6 +686,8 @@ func (t *Tracker) deliver(id string, roles []Role) (string, error) {
 		case !pending:
 		case !r.Member.Active():
 			why = "queued; it left the team"
+		case r.Team.Status == store.TeamDone:
+			why = "queued; the team is done"
 		case r.Team.Paused:
 			why = "queued; the team is paused"
 		case muted:

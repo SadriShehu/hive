@@ -391,6 +391,62 @@ func TestASessionOnTwoTeamsGetsMailFromBothInOnePaste(t *testing.T) {
 	}
 }
 
+func TestDeliverSkipsADoneTeamButStillDeliversAnActiveOne(t *testing.T) {
+	tr, w, sent := newTeamWorld(t)
+	backendUp(t, tr, w)
+	claudeHook(t, tr, w, 100, "A", agent.Prompt) // working
+
+	web := store.Team{ID: "t2", Name: "web", Cwd: "/work", Status: store.TeamActive, LeadRole: "lead", CreatedAt: 10, UpdatedAt: 10}
+	if err := tr.Store.CreateTeam(web); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Store.AddMember(store.Member{TeamID: "t2", Role: "lead", Tool: "claude", SessionID: "claude:A", JoinedAt: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.DoneTeam(web, store.FromYou, false); err != nil {
+		t.Fatal(err)
+	}
+	// Queue mail for the done team directly, and one for the active team.
+	msg := store.Message{TeamID: "t2", From: store.FromYou, To: "lead", Body: "web stale", Kind: store.MsgSay, At: 11}
+	if _, err := tr.Store.AddMessage(msg, []string{"lead"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tr.Say(theTeam(t, tr), "lead", "backend", "api mail", false); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeHook(t, tr, w, 100, "A", agent.Idle)
+	if _, err := tr.Deliver("claude:A", 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(*sent) != 1 || (*sent)[0].text != "[api · from lead] api mail" {
+		t.Fatalf("typed %+v, want only the active team's mail", *sent)
+	}
+	if pending, err := tr.Store.HasPending("t2", "lead"); err != nil || !pending {
+		t.Fatalf("done team's mail: pending=%v, %v; want it left queued", pending, err)
+	}
+}
+
+func TestADoneTeamAddsNoTaskPostOrReadyNote(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	tm := theTeam(t, tr)
+	addTask(t, tr, "first", "")
+	addTask(t, tr, "second", "frontend", 1)
+	if _, err := tr.DoneTeam(tm, store.FromYou, false); err != nil {
+		t.Fatal(err)
+	}
+	before := hivePosts(tr)
+	if _, _, _, err := tr.DoneTask(tm, "lead", 1, "done after the team"); err != nil {
+		t.Fatal(err)
+	}
+	if got := hivePosts(tr); got != before {
+		t.Fatalf("a done team gained task posts: %q -> %q", before, got)
+	}
+	if pending, err := tr.Store.HasPending(tm.ID, "frontend"); err != nil || pending {
+		t.Fatalf("frontend got a ready note from a done team: pending=%v, %v", pending, err)
+	}
+}
+
 func TestAnExpiredLaunchRecordLinksNothing(t *testing.T) {
 	tr, w, _ := newTeamWorld(t)
 	// hive started the backend in %1 long ago, and it never reported in;
