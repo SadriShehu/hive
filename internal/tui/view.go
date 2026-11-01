@@ -16,7 +16,16 @@ import (
 	"github.com/sadrishehu/hive/internal/tracker"
 )
 
-func (m Model) bodyHeight() int { return max(1, m.height-3-max(0, m.sendRows()-1)) }
+func (m Model) bodyHeight() int {
+	hints := 1
+	switch m.mode {
+	case modeSend:
+		hints = m.sendRows()
+	case modeChannel:
+		hints = m.channelRows()
+	}
+	return max(1, m.height-2-hints)
+}
 
 func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
 
@@ -448,7 +457,11 @@ func (f form) folderLines(rows int) []string {
 
 func (m Model) hintLines() []string {
 	if m.mode == modeChannel {
-		return []string{ansi.Truncate(m.channelInput.View(), m.width, "")}
+		var out []string
+		for _, line := range visibleRows(m.channelInput, m.channelRows()) {
+			out = append(out, ansi.Truncate(line, m.width, ""))
+		}
+		return out
 	}
 	if m.mode != modeSend {
 		return []string{ansi.Truncate(m.hintLine(), m.width, "…")}

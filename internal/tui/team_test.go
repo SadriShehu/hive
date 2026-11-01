@@ -310,6 +310,41 @@ func TestSendingFromTheChannelStaysOpen(t *testing.T) {
 	}
 }
 
+func TestALongChannelPromptWraps(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "enter")
+
+	text := "START " + strings.Repeat("a long prompt stays readable ", 6) + "END"
+	for _, r := range text {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if rows := m.channelRows(); rows < 2 {
+		t.Fatalf("channel rows = %d, want the prompt to take several lines", rows)
+	}
+	hints := m.hintLines()
+	if len(hints) < 2 {
+		t.Fatalf("hint lines = %d, want a wrapped live line", len(hints))
+	}
+	joined := ansi.Strip(strings.Join(hints, "\n"))
+	if !strings.Contains(joined, "START") || !strings.Contains(joined, "END") {
+		t.Errorf("the live line scrolled its prompt out of view:\n%s", joined)
+	}
+	for _, line := range hints {
+		if width := ansi.StringWidth(line); width > m.width {
+			t.Errorf("hint line is %d wide, past the %d screen:\n%s", width, m.width, line)
+		}
+	}
+	if got := len(strings.Split(m.View(), "\n")); got != m.height {
+		t.Errorf("view has %d lines, want %d", got, m.height)
+	}
+
+	m = press(t, m, "enter")
+	if len(ops.said) != 1 || ops.said[0] != "t1|all|"+text {
+		t.Fatalf("said = %v, want the whole wrapped prompt", ops.said)
+	}
+}
+
 func TestAChannelMarksReadWhileThePreviewIsHidden(t *testing.T) {
 	for _, narrow := range []bool{false, true} {
 		m, ops := setupTeam(t)
