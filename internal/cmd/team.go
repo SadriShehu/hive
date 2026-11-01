@@ -32,7 +32,7 @@ func newTeamCmd() *cobra.Command {
 		Long: "A team is a named group of agents working on one goal in one folder. Each member is a\n" +
 			"real session in its own tmux window; hive keeps who is on the team, the channel they\n" +
 			"post their progress to, and the messages between them. A message to a member that is\n" +
-			"working waits, and is typed into its pane when its turn ends.\n\n" +
+			"working waits, and is typed into its pane when it next goes idle.\n\n" +
 			"Members are addressed by role (lead, backend, …). Inside a member, the team and the\n" +
 			"role are implied.",
 	}
@@ -547,7 +547,7 @@ func newTeamSayCmd() *cobra.Command {
 		Use:   "say <role|all> [text...]",
 		Short: "Message a teammate or everyone; it is typed into their pane when they are idle",
 		Long: "Write to a teammate (or all). If the recipient is idle in a pane, hive types the message there\n" +
-			"now. If it is working or waiting on you, the message waits and is typed when its turn ends.\n" +
+			"now. If it is working or waiting on you, the message waits and is typed when it next goes idle.\n" +
 			"It also shows in the channel. --private keeps it out of the feed the user reads.\n" +
 			"With no text, or \"-\", the message is read from stdin.",
 		Args: cobra.MinimumNArgs(1),
