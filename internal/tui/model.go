@@ -369,6 +369,14 @@ type (
 		quit bool
 		task int // a task the change left selected in the task editor
 	}
+	// teamRunningMsg is what a fresh look at a team's agents found, for x and
+	// d: a pane-only member counts as running too.
+	teamRunningMsg struct {
+		team   store.Team
+		action string
+		roles  []string
+		err    error
+	}
 )
 
 // New returns the TUI model.
@@ -687,6 +695,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setFlash(msg.text, false)
 		return m, m.refreshCmd()
+
+	case teamRunningMsg:
+		if msg.err != nil {
+			m.setFlash(msg.err.Error(), true)
+			return m, nil
+		}
+		switch msg.action {
+		case actStopTeam:
+			if len(msg.roles) == 0 {
+				m.setFlash("nobody on "+msg.team.Name+" is running", true)
+				return m, nil
+			}
+			m.mode, m.confirm = modeConfirm, confirmation{action: actStopTeam, team: msg.team, below: len(msg.roles)}
+		case actTrashTeam:
+			if len(msg.roles) > 0 {
+				m.setFlash("stop "+joinRoles(msg.roles)+" first: a team goes to the trash once nobody runs", true)
+				return m, nil
+			}
+			m.mode, m.confirm = modeConfirm, confirmation{action: actTrashTeam, team: msg.team, below: len(m.members(msg.team.ID))}
+		}
+		return m, nil
 
 	case tea.MouseMsg:
 		return m.mouse(msg)

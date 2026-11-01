@@ -53,6 +53,7 @@ type Ops interface {
 	TeamStop(teamID string) (int, error)
 	TeamStart(o tracker.TeamOptions) (string, error)
 	TeamRead(teamID string, upTo int64) error
+	TeamRunning(teamID string) ([]string, error) // roles whose agents run, panes only too
 	TeamTaskAdd(teamID, title, body, owner string, after []int) (store.Task, error)
 	TeamTaskEdit(teamID string, n int, title, body, owner string, after []int) (store.Task, error)
 	TeamTaskDone(teamID string, n int, note string) (store.Task, error)
@@ -258,6 +259,14 @@ func (o *liveOps) TeamStop(teamID string) (int, error) {
 		return 0, err
 	}
 	return o.tracker().StopTeam(tm)
+}
+
+func (o *liveOps) TeamRunning(teamID string) ([]string, error) {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return nil, err
+	}
+	return o.tracker().TeamRunning(tm)
 }
 
 func (o *liveOps) TeamStart(opts tracker.TeamOptions) (string, error) {

@@ -31,6 +31,8 @@ type teamOps struct {
 	restoredTeams []string
 	purgedTeams   []string
 
+	running []string // the roles a fresh look finds running, panes only too
+
 	taskAdded   []taskCall
 	taskEdited  []taskCall
 	taskDone    []taskCall
@@ -70,6 +72,9 @@ func (f *teamOps) TeamStart(o tracker.TeamOptions) (string, error) {
 func (f *teamOps) TeamRead(team string, id int64) error {
 	f.read = append(f.read, team+"|"+string(rune('0'+id)))
 	return nil
+}
+func (f *teamOps) TeamRunning(team string) ([]string, error) {
+	return f.running, nil
 }
 func (f *teamOps) TrashTeam(tm store.Team) ([]store.Session, error) {
 	f.trashedTeams = append(f.trashedTeams, tm.ID)
@@ -173,6 +178,7 @@ func setupTeam(t *testing.T) (Model, *fakeOps) {
 	t.Helper()
 	ops := &fakeOps{sessions: teamSessions()}
 	ops.snap, ops.feed = teamSnapshot(), teamFeed()
+	ops.running = []string{"lead", "backend", "frontend"}
 	m := New(ops, false)
 	m.now = func() time.Time { return now }
 	m = step(t, m, tea.WindowSizeMsg{Width: 160, Height: 30})
@@ -484,6 +490,7 @@ func stoppedTeam(t *testing.T, m Model, ops *fakeOps) Model {
 	for i := range ops.sessions {
 		ops.sessions[i].Status, ops.sessions[i].PID = store.StatusExited, 0
 	}
+	ops.running = nil
 	return step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
 }
 
@@ -526,6 +533,31 @@ func TestATeamGoesToTheTrashWithItsMembers(t *testing.T) {
 	}
 	if !strings.Contains(m.flash, "restored team api-v2 and its 3 members") {
 		t.Errorf("flash = %q", m.flash)
+	}
+}
+
+// A member whose pane hive opened hasn't reported in yet: it still runs, so
+// x asks to stop it and d refuses to trash the team until it does.
+func TestAPaneOnlyMemberCountsAsRunning(t *testing.T) {
+	m, ops := setupTeam(t)
+	for i := range ops.sessions {
+		ops.sessions[i].Status, ops.sessions[i].PID = store.StatusExited, 0
+	}
+	ops.snap.Members[1].SessionID = "" // backend hasn't reported in; its pane is there
+	ops.running = []string{"backend"}  // as a fresh look at processes and panes finds
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+
+	m = press(t, m, "x")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "stop the 1 running members of api-v2?") {
+		t.Fatalf("x didn't count the pane-only member as running:\n%s", view)
+	}
+	m = press(t, m, "n")
+	m = press(t, m, "d")
+	if !strings.Contains(m.flash, "stop backend first") {
+		t.Fatalf("d flash = %q, want it refused while the pane-only member runs", m.flash)
+	}
+	if m.mode == modeConfirm {
+		t.Error("d asked to trash the team while a member still runs")
 	}
 }
 
