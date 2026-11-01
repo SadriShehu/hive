@@ -1326,7 +1326,7 @@ func (m Model) selected() (store.Session, bool) {
 // teamUsageInView reports whether a team's channel or its tree preview is on
 // screen, the only places that show every member's usage and the quota.
 func (m Model) teamUsageInView() bool {
-	if m.mode == modeChannel {
+	if m.mode == modeChannel || m.usageTakesTheBody() {
 		return true
 	}
 	n := m.selectedNode()
