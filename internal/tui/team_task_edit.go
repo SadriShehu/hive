@@ -498,7 +498,7 @@ func (m Model) taskFormLines(w, h int) []string {
 
 // fieldRows is how many rows a wrapped form field draws, at most most.
 func fieldRows(area textarea.Model, most int) int {
-	return max(1, min(most, len(strings.Split(area.View(), "\n"))))
+	return max(1, len(visibleRows(area, most)))
 }
 
 // fieldLines draws a form field whose text wraps: the label with the first
