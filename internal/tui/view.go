@@ -31,7 +31,8 @@ func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
 
 func (m Model) usageTakesTheBody() bool {
 	return m.showUsage && m.showPreview && !m.previewVisible() &&
-		m.mode != modeNew && m.mode != modeHelp && m.mode != modeChannel && m.mode != modeTasks
+		m.mode != modeNew && m.mode != modeHelp && m.mode != modeChannel && m.mode != modeTasks &&
+		m.mode != modeTeam
 }
 
 func (m Model) treeWidth() int {
