@@ -3,6 +3,7 @@ package tracker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -429,17 +430,26 @@ func TestDeliverSkipsADoneTeamButStillDeliversAnActiveOne(t *testing.T) {
 	}
 }
 
-func TestADoneTeamAddsNoTaskPostOrReadyNote(t *testing.T) {
+func TestADoneTeamRefusesTaskMovesAndAddsNoPostOrReadyNote(t *testing.T) {
 	tr, _, _ := newTeamWorld(t)
 	tm := theTeam(t, tr)
 	addTask(t, tr, "first", "")
 	addTask(t, tr, "second", "frontend", 1)
+	addTask(t, tr, "third", "")
 	if _, err := tr.DoneTeam(tm, store.FromYou, false); err != nil {
 		t.Fatal(err)
 	}
-	before := hivePosts(tr)
-	if _, _, _, err := tr.DoneTask(tm, "lead", 1, "done after the team"); err != nil {
-		t.Fatal(err)
+	before, boardBefore := hivePosts(tr), boardText(t, tr, tm)
+	_, _, _, done := tr.DoneTask(tm, "lead", 1, "done after the team")
+	_, _, block := tr.BlockTask(tm, "lead", 2, "after the team")
+	_, edit := tr.EditTask(tm, 3, "renamed", "", "backend", nil)
+	for name, err := range map[string]error{"DoneTask": done, "BlockTask": block, "EditTask": edit} {
+		if err == nil || !strings.Contains(err.Error(), "api is done") {
+			t.Errorf("%s on a done team = %v, want it refused", name, err)
+		}
+	}
+	if got := boardText(t, tr, tm); got != boardBefore {
+		t.Errorf("a done team's board changed: %q -> %q", boardBefore, got)
 	}
 	if got := hivePosts(tr); got != before {
 		t.Fatalf("a done team gained task posts: %q -> %q", before, got)
@@ -447,6 +457,20 @@ func TestADoneTeamAddsNoTaskPostOrReadyNote(t *testing.T) {
 	if pending, err := tr.Store.HasPending(tm.ID, "frontend"); err != nil || pending {
 		t.Fatalf("frontend got a ready note from a done team: pending=%v, %v", pending, err)
 	}
+}
+
+// boardText is each task's number, title, status and owner.
+func boardText(t *testing.T, tr *Tracker, tm store.Team) string {
+	t.Helper()
+	tasks, err := tr.Store.Tasks(tm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, task := range tasks {
+		out = append(out, fmt.Sprintf("#%d %s %s %s", task.N, task.Title, task.Status, task.Owner))
+	}
+	return strings.Join(out, "; ")
 }
 
 func TestAnExpiredLaunchRecordLinksNothing(t *testing.T) {

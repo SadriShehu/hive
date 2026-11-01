@@ -85,6 +85,9 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 	if err != nil {
 		return store.Task{}, err
 	}
+	if err := closed(tm); err != nil {
+		return store.Task{}, err
+	}
 	i, err := findTask(tasks, n)
 	if err != nil {
 		return store.Task{}, err
@@ -174,6 +177,9 @@ func (t *Tracker) DoneTask(tm store.Team, by string, n int, note string) (store.
 	if err != nil {
 		return store.Task{}, nil, nil, err
 	}
+	if err := closed(tm); err != nil {
+		return store.Task{}, nil, nil, err
+	}
 	i, err := findTask(tasks, n)
 	if err != nil {
 		return store.Task{}, nil, nil, err
@@ -222,6 +228,9 @@ func (t *Tracker) BlockTask(tm store.Team, by string, n int, why string) (store.
 	}
 	tm, members, tasks, err := t.board(tm.ID)
 	if err != nil {
+		return store.Task{}, nil, err
+	}
+	if err := closed(tm); err != nil {
 		return store.Task{}, nil, err
 	}
 	i, err := findTask(tasks, n)
