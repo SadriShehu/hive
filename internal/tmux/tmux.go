@@ -61,7 +61,7 @@ func Panes() ([]Pane, error) {
 		return nil, nil
 	}
 	out, err := command("list-panes", "-a", "-F",
-		"#{pane_id}\t#{pane_pid}\t#{session_name}\t#{window_index}\t#{window_name}").Output()
+		"#{pane_id}:#{pane_pid}:#{session_name}:#{window_index}:#{window_name}").Output()
 	if err != nil {
 		if _, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, nil // no server running
@@ -70,7 +70,7 @@ func Panes() ([]Pane, error) {
 	}
 	var panes []Pane
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		f := strings.Split(line, "\t")
+		f := strings.SplitN(line, ":", 5)
 		if len(f) < 5 {
 			continue
 		}
@@ -159,7 +159,7 @@ func NewWindow(w Window) (Pane, error) {
 		place = append(place, "-e", k+"="+w.Env[k])
 	}
 
-	args := []string{"new-window", "-d", "-P", "-F", "#{pane_id}\t#{window_index}", "-t", session + ":"}
+	args := []string{"new-window", "-d", "-P", "-F", "#{pane_id}:#{window_index}", "-t", session + ":"}
 	if w.Name != "" {
 		args = append(args, "-n", w.Name)
 	}
@@ -168,7 +168,7 @@ func NewWindow(w Window) (Pane, error) {
 	if err != nil {
 		return Pane{}, err
 	}
-	id, window, _ := strings.Cut(out, "\t")
+	id, window, _ := strings.Cut(out, ":")
 	pane := Pane{ID: id, Session: session, Window: window, Name: w.Name}
 
 	label := safeLabel(w.Name, w.Argv[0])

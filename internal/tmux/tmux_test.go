@@ -83,6 +83,51 @@ func TestWindowsPasteAndCapture(t *testing.T) {
 	}
 }
 
+// withoutLocale runs the rest of the test with LANG and LC_ALL unset, as a
+// C/POSIX environment does. tmux 3.8 replaces a tab in a format's output with
+// an underscore there, so a parser that depends on one breaks.
+func withoutLocale(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"LANG", "LC_ALL", "LC_CTYPE"} {
+		if v, ok := os.LookupEnv(k); ok {
+			t.Cleanup(func() { os.Setenv(k, v) })
+		} else {
+			t.Cleanup(func() { os.Unsetenv(k) })
+		}
+		os.Unsetenv(k)
+	}
+}
+
+func TestFormatsSurviveACLocale(t *testing.T) {
+	withoutLocale(t)
+	isolated(t)
+
+	pane, err := NewWindow(Window{
+		Session: "base", Name: "c-locale", Detached: true,
+		Argv: []string{"sleep", "30"},
+	})
+	if err != nil {
+		t.Fatalf("NewWindow under a C locale: %v", err)
+	}
+	if !strings.HasPrefix(pane.ID, "%") || pane.Window == "" {
+		t.Fatalf("pane = %+v, want a pane id and window index", pane)
+	}
+	panes, err := Panes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range panes {
+		if p.ID != pane.ID {
+			continue
+		}
+		if p.Session != "base" || p.Window != pane.Window || p.Name != "c-locale" || p.PID == 0 {
+			t.Fatalf("pane = %+v, want session base, window %s, name c-locale", p, pane.Window)
+		}
+		return
+	}
+	t.Fatalf("Panes did not list %s: %+v", pane.ID, panes)
+}
+
 func TestFocusRefusesWithoutAClient(t *testing.T) {
 	isolated(t)
 	panes, _ := Panes()
