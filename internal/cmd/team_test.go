@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -95,5 +96,38 @@ func TestFindTeamTemplateUnknown(t *testing.T) {
 	_, err = findTeamTemplate(adapters.Config{}, "api")
 	if err == nil || !strings.Contains(err.Error(), "api") || !strings.Contains(err.Error(), "[[team]]") {
 		t.Fatalf("empty config err = %v", err)
+	}
+}
+
+func TestTheFeedHidesPrivateMessages(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "hive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tm := store.Team{ID: "t1", Name: "api", Cwd: "/work", Status: store.TeamActive, CreatedAt: 1, UpdatedAt: 1}
+	if err := st.CreateTeam(tm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddMessage(store.Message{TeamID: tm.ID, From: "lead", Body: "public", Kind: store.MsgPost, At: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddMessage(store.Message{TeamID: tm.ID, From: "lead", To: "backend", Body: "secret", Kind: store.MsgSay, Private: true, At: 2}, []string{"backend"}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := feed(st, tm.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 || msgs[0].Body != "public" {
+		t.Fatalf("feed = %+v, want only the public post", msgs)
+	}
+	pending, err := st.Pending(tm.ID, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].Body != "secret" {
+		t.Fatalf("inbox = %+v, want the private message", pending)
 	}
 }
