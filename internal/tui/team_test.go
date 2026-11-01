@@ -1208,14 +1208,17 @@ func TestTheChannelShowsMembersUsageAndTheAccountsQuota(t *testing.T) {
 
 // A tool with no reported rate limits shows no number, never a wrong one.
 func TestTheChannelShowsNoQuotaWhenItCannotKnow(t *testing.T) {
-	m, _ := setupTeam(t)
+	m, ops := setupTeam(t)
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	// Both windows reset in the past: their old percentages mean nothing now.
+	ops.quotas = map[string]store.Quota{"claude": {Tool: "claude", FiveUsed: 92,
+		FiveReset: now.Add(-time.Hour).Unix(), SevenUsed: 30, SevenReset: now.Add(-time.Minute).Unix()}}
 	m = press(t, m, "enter")
 	m = step(t, m, tickMsg(now))
 	view := ansi.Strip(m.View())
 	for _, bad := range []string{"5h ", "7d ", "resets"} {
 		if strings.Contains(view, bad) {
-			t.Errorf("the channel invented a quota (%q):\n%s", bad, view)
+			t.Errorf("the channel showed a stale quota (%q):\n%s", bad, view)
 		}
 	}
 }
