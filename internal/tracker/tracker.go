@@ -92,10 +92,11 @@ type Tracker struct {
 	// wait: it runs inside a hook.
 	OnDeliverable func(s store.Session)
 
-	// Type and HasPane replace the tmux calls that type into a pane, for
-	// tests.
-	Type    func(pane, text string) error
-	HasPane func(pane string) bool
+	// Type, HasPane and KillPane replace the tmux calls that type into,
+	// look for and close a pane, for tests.
+	Type     func(pane, text string) error
+	HasPane  func(pane string) bool
+	KillPane func(pane string) error
 
 	Models usage.Catalog
 	Fusion fusion.Settings // what `auto` means when picking a model

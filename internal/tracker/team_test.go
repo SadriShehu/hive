@@ -486,3 +486,48 @@ func TestNewTeamIsNotKeptWhenNoMemberStarts(t *testing.T) {
 		t.Errorf("members started as %s, want the lead first, then in the order given", got)
 	}
 }
+
+func TestStopTeamStopsAMemberThatHasOnlyAPane(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	tm := theTeam(t, tr)
+	if err := tr.Store.SetMemberSession(tm.ID, "backend", "", "%1"); err != nil {
+		t.Fatal(err)
+	}
+	var killed []string
+	tr.KillPane = func(pane string) error { killed = append(killed, pane); return nil }
+
+	n, err := tr.StopTeam(tm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(killed) != 1 || killed[0] != "%1" {
+		t.Fatalf("stopped %d, killed %v; want the backend's pane only", n, killed)
+	}
+}
+
+func TestRetireMemberStopsAMemberThatHasOnlyAPane(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	tm := theTeam(t, tr)
+	if err := tr.Store.SetMemberSession(tm.ID, "frontend", "", "%3"); err != nil {
+		t.Fatal(err)
+	}
+	tr.HasPane = func(pane string) bool { return pane == "%3" }
+	var killed []string
+	tr.KillPane = func(pane string) error { killed = append(killed, pane); return nil }
+
+	if err := tr.RetireMember(tm, "frontend"); err != nil {
+		t.Fatal(err)
+	}
+	if len(killed) != 1 || killed[0] != "%3" {
+		t.Fatalf("killed %v, want the frontend's pane", killed)
+	}
+	ms, err := tr.Store.Members(tm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.Role == "frontend" && m.Active() {
+			t.Fatal("frontend is still active after being retired")
+		}
+	}
+}
