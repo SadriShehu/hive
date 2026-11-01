@@ -44,7 +44,7 @@ func findTask(tasks []store.Task, n int) (int, error) {
 // AddTask puts a task on a team's board, added by by. An owner whose task is
 // ready as it is added is told so.
 func (t *Tracker) AddTask(tm store.Team, by, title, body, owner string, after []int) (store.Task, []Sent, error) {
-	title = strings.TrimSpace(title)
+	title = strings.TrimSpace(team.Clean(title))
 	if title == "" {
 		return store.Task{}, nil, errors.New("a task needs a title")
 	}
@@ -60,7 +60,7 @@ func (t *Tracker) AddTask(tm store.Team, by, title, body, owner string, after []
 		return store.Task{}, nil, err
 	}
 	now := t.World.Now()
-	task, err := t.Store.AddTask(store.Task{TeamID: tm.ID, Title: title, Body: strings.TrimSpace(body), Owner: owner,
+	task, err := t.Store.AddTask(store.Task{TeamID: tm.ID, Title: title, Body: strings.TrimSpace(team.Clean(body)), Owner: owner,
 		After: after, CreatedBy: by, CreatedAt: now, UpdatedAt: now})
 	if err != nil || owner == "" || owner == by || !team.Ready(task, tasks) {
 		return task, nil, err
@@ -74,7 +74,7 @@ func (t *Tracker) AddTask(tm store.Team, by, title, body, owner string, after []
 // must name tasks already on the board, as when a task is added. It loses,
 // naming who moved it, when another member changed the task meanwhile.
 func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, after []int) (store.Task, error) {
-	title = strings.TrimSpace(title)
+	title = strings.TrimSpace(team.Clean(title))
 	if title == "" {
 		return store.Task{}, errors.New("a task needs a title")
 	}
@@ -104,7 +104,7 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 	}
 	old := tasks[i]
 	task := old
-	task.Title, task.Body, task.Owner, task.After = title, strings.TrimSpace(body), owner, after
+	task.Title, task.Body, task.Owner, task.After = title, strings.TrimSpace(team.Clean(body)), owner, after
 	if task.Status == store.TaskClaimed && task.Owner == "" {
 		task.Status, task.Note = store.TaskOpen, ""
 	}
@@ -163,6 +163,7 @@ func (t *Tracker) ClaimTask(tm store.Team, by string, n int, force bool) (store.
 // lead when an agent leads, and tells the owner of each task it made ready.
 // It returns the tasks that became ready.
 func (t *Tracker) DoneTask(tm store.Team, by string, n int, note string) (store.Task, []store.Task, []Sent, error) {
+	note = team.Clean(note)
 	tm, members, tasks, err := t.board(tm.ID)
 	if err != nil {
 		return store.Task{}, nil, nil, err
@@ -209,7 +210,7 @@ func (t *Tracker) DoneTask(tm store.Team, by string, n int, note string) (store.
 // BlockTask marks a task blocked, saying why. hive posts it, to the lead
 // when an agent leads.
 func (t *Tracker) BlockTask(tm store.Team, by string, n int, why string) (store.Task, []Sent, error) {
-	why = strings.TrimSpace(why)
+	why = strings.TrimSpace(team.Clean(why))
 	if why == "" {
 		return store.Task{}, nil, errors.New("say why it is blocked: --why \"…\"")
 	}

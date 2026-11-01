@@ -75,6 +75,9 @@ func ParseSpec(s string) (Spec, error) {
 	if tool == "" {
 		return Spec{}, fmt.Errorf("member %q has no tool", s)
 	}
+	if err := ValidTool(tool); err != nil {
+		return Spec{}, err
+	}
 	return Spec{Role: role, Tool: tool, Model: model}, nil
 }
 
@@ -164,6 +167,21 @@ func flat(text string) string {
 		}
 		return r
 	}, text))
+}
+
+// Clean keeps line breaks and tabs, and drops every other control character.
+// It is for text the user's terminal draws: a teammate must not be able to
+// post an escape sequence that the terminal runs.
+func Clean(text string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, text)
 }
 
 // Envelope words a message for the recipient's prompt. Every line starts with

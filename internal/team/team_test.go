@@ -23,6 +23,7 @@ func TestParseSpec(t *testing.T) {
 		{"all=claude", Spec{}, true}, // addresses everyone
 		{"you=claude", Spec{}, true},
 		{"Back End=claude", Spec{}, true},
+		{"backend=My Tool", Spec{}, true},
 	} {
 		got, err := ParseSpec(c.in)
 		if (err != nil) != c.bad || got != c.want {
@@ -31,6 +32,18 @@ func TestParseSpec(t *testing.T) {
 	}
 	if err := CheckRoles([]Spec{{Role: "a"}, {Role: "a"}}); err == nil {
 		t.Error("CheckRoles accepted a role twice")
+	}
+}
+
+func TestCleanKeepsLinesAndDropsOtherControlCharacters(t *testing.T) {
+	got := Clean("keep\nthis\ttab\x1b]52;c;bm90IHNhZmU=\x07\x00\u009b")
+	if !strings.HasPrefix(got, "keep\nthis\ttab") {
+		t.Errorf("Clean lost the text: %q", got)
+	}
+	for _, r := range got {
+		if r != '\n' && r != '\t' && unicode.IsControl(r) {
+			t.Errorf("Clean left control character %q in %q", r, got)
+		}
 	}
 }
 

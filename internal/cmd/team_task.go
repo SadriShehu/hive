@@ -271,13 +271,13 @@ func printTasks(tasks []store.Task, bodies bool) {
 		if w := team.Waiting(t, tasks); len(w) > 0 && !t.Closed() {
 			extra = "waits for " + team.Numbers(w)
 		}
-		line := fmt.Sprintf("  %-4s %-8s %-10s %s", fmt.Sprintf("#%d", t.N), t.Status, t.Owner, t.Title)
+		line := fmt.Sprintf("  %-4s %-8s %-10s %s", fmt.Sprintf("#%d", t.N), t.Status, team.Clean(t.Owner), team.Clean(t.Title))
 		if extra != "" {
-			line += " · " + extra
+			line += " · " + team.Clean(extra)
 		}
 		fmt.Println(line)
 		if bodies && t.Body != "" {
-			fmt.Println("       " + strings.ReplaceAll(t.Body, "\n", "\n       "))
+			fmt.Println("       " + strings.ReplaceAll(team.Clean(t.Body), "\n", "\n       "))
 		}
 	}
 }
