@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -388,10 +387,10 @@ const (
 )
 
 type teamRow struct {
-	role   textinput.Model
-	tool   textinput.Model
-	model  textinput.Model
-	prompt textinput.Model
+	role   textarea.Model
+	tool   textarea.Model
+	model  textarea.Model
+	prompt textarea.Model
 }
 
 type teamForm struct {
@@ -402,8 +401,8 @@ type teamForm struct {
 	templates []TeamTemplate
 	template  int // 0 is none; i+1 is templates[i]
 	field     int
-	name      textinput.Model
-	folder    textinput.Model
+	name      textarea.Model
+	folder    textarea.Model
 	goal      textarea.Model
 	members   []teamRow
 	models    map[string][]string // what each row's tool runs, once loaded; nil while loading
@@ -411,10 +410,10 @@ type teamForm struct {
 
 func newTeamRow(tool string) teamRow {
 	return teamRow{
-		role:   newInput("", "role"),
-		tool:   newInput("", tool),
-		model:  newInput("", modelDefault),
-		prompt: newInput("", "its part"),
+		role:   newPromptArea("role"),
+		tool:   newPromptArea(tool),
+		model:  newPromptArea(modelDefault),
+		prompt: newPromptArea("its part"),
 	}
 }
 
@@ -501,7 +500,7 @@ func (f teamForm) rowOf(field int) (row, cell int, ok bool) {
 	return d / memberCells, d % memberCells, true
 }
 
-func (r *teamRow) input(cell int) *textinput.Model {
+func (r *teamRow) input(cell int) *textarea.Model {
 	switch cell {
 	case memberRole:
 		return &r.role
@@ -525,15 +524,15 @@ func memberWidths(w int) (role, tool, model, part int) {
 
 func (f *teamForm) layout(w int) {
 	f.width = w
-	f.name.Width = max(10, w-12)
-	f.folder.Width = max(10, w-12)
+	f.name.SetWidth(max(10, w-12))
+	f.folder.SetWidth(max(10, w-12))
 	f.goal.SetWidth(max(10, w-12))
 	role, tool, model, part := memberWidths(w)
 	for i := range f.members {
-		f.members[i].role.Width = role
-		f.members[i].tool.Width = tool
-		f.members[i].model.Width = model
-		f.members[i].prompt.Width = part
+		f.members[i].role.SetWidth(role)
+		f.members[i].tool.SetWidth(tool)
+		f.members[i].model.SetWidth(model)
+		f.members[i].prompt.SetWidth(part)
 	}
 }
 
@@ -601,8 +600,8 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 			f.lead = i
 		}
 	}
-	f.name = newInput("", "api-v2")
-	f.folder = newInput("", "folder")
+	f.name = newPromptArea("api-v2")
+	f.folder = newPromptArea("folder")
 	f.goal = newPromptArea("what the team is for, and who owns what")
 	f.members = []teamRow{newTeamRow("claude")}
 	dir := ""
@@ -751,10 +750,20 @@ func (m Model) editTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mode = modeNormal
 		return m, nil
-	case "tab", "down":
+	case "tab":
 		return m, f.focus((f.field + 1) % f.slots())
-	case "shift+tab", "up":
+	case "shift+tab":
 		return m, f.focus((f.field + f.slots() - 1) % f.slots())
+	case "up", "down":
+		// In a field that holds a lot of text, up and down move the caret
+		// through its wrapped lines; tab moves between fields.
+		if a := f.longField(); a == nil || a.Value() == "" {
+			step := 1
+			if msg.String() == "up" {
+				step = -1
+			}
+			return m, f.focus((f.field + step + f.slots()) % f.slots())
+		}
 	case "+":
 		f.addMember()
 		return m, f.focus(f.field)
@@ -815,43 +824,118 @@ func (m Model) editTeamForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// memberWindow is the member rows to draw: all of them when they fit, else a
-// window that keeps the focused row on screen.
-func (f teamForm) memberWindow(room int) (start, end int) {
-	n := len(f.members)
-	room = max(1, room)
-	if n <= room {
-		return 0, n
+// memberCellRows is the most rows one member cell draws before its text
+// scrolls with the caret.
+const memberCellRows = 4
+
+// memberHeight is how many lines a member's row takes.
+func (f teamForm) memberHeight(i, w int) int {
+	role, tool, model, part := memberWidths(w)
+	row := &f.members[i]
+	height := 1
+	for _, c := range []struct {
+		area  textarea.Model
+		width int
+	}{{row.role, role}, {row.tool, tool}, {row.model, model}, {row.prompt, part}} {
+		height = max(height, fieldRows(c.area, memberCellRows))
 	}
+	return height
+}
+
+// memberWindow is the member rows to draw: as many as fit in room lines,
+// keeping the focused row on screen.
+func (f teamForm) memberWindow(room, w int) (start, end int) {
+	n := len(f.members)
+	if n == 0 {
+		return 0, 0
+	}
+	room = max(1, room)
 	focus := 0
 	if r, _, ok := f.rowOf(f.field); ok {
 		focus = r
 	}
-	start = min(max(0, focus-room+1), n-room)
-	return start, start + room
+	start, end = focus, focus+1
+	used := f.memberHeight(focus, w)
+	for end < n && used+f.memberHeight(end, w) <= room {
+		used += f.memberHeight(end, w)
+		end++
+	}
+	for start > 0 && used+f.memberHeight(start-1, w) <= room {
+		used += f.memberHeight(start-1, w)
+		start--
+	}
+	return start, end
 }
 
-func (f teamForm) memberLine(i int, w int) string {
+// memberLines draws one member's row: its cells side by side, each wrapped
+// within its own column when it is long.
+func (f teamForm) memberLines(i, w int) []string {
+	role, tool, model, part := memberWidths(w)
+	row := &f.members[i]
+	cells := []struct {
+		area  textarea.Model
+		width int
+	}{{row.role, role}, {row.tool, tool}, {row.model, model}, {row.prompt, part}}
+	height := 1
+	views := make([][]string, len(cells))
+	for j, c := range cells {
+		views[j] = visibleRows(c.area, memberCellRows)
+		height = max(height, len(views[j]))
+	}
 	mark := "  "
 	if r, _, ok := f.rowOf(f.field); ok && r == i {
 		mark = sAccent.Render("› ")
 	}
-	role, tool, model, part := memberWidths(w)
-	cell := func(s string, width int) string { return pad(ansi.Truncate(s, width, ""), width) }
-	row := &f.members[i]
-	return mark + sDim.Render(fmt.Sprintf("%d ", i+1)) +
-		cell(row.role.View(), role) + " " + cell(row.tool.View(), tool) + " " +
-		cell(row.model.View(), model) + " " + cell(row.prompt.View(), part)
+	number := sDim.Render(fmt.Sprintf("%d ", i+1))
+	indent := strings.Repeat(" ", ansi.StringWidth(mark)+ansi.StringWidth(number))
+	out := make([]string, height)
+	for k := range height {
+		var b strings.Builder
+		if k == 0 {
+			b.WriteString(mark + number)
+		} else {
+			b.WriteString(indent)
+		}
+		for j, c := range cells {
+			line := ""
+			if k < len(views[j]) {
+				line = views[j][k]
+			}
+			b.WriteString(pad(ansi.Truncate(line, c.width, ""), c.width))
+			if j < len(cells)-1 {
+				b.WriteString(" ")
+			}
+		}
+		out[k] = b.String()
+	}
+	return out
+}
+
+// longField is the focused field that holds a lot of text, whose caret up and
+// down move through; nil when the focus is a table cell or a choice.
+func (f *teamForm) longField() *textarea.Model {
+	switch f.field {
+	case tfName:
+		return &f.name
+	case tfFolder:
+		return &f.folder
+	}
+	if f.field == f.goalField() {
+		return &f.goal
+	}
+	return nil
 }
 
 func (m Model) teamFormLines(w, h int) []string {
 	f := m.teamForm
-	field := func(i int, name, value string) string {
-		mark := "  "
+	mark := func(i int) string {
 		if f.field == i {
-			mark = sAccent.Render("› ")
+			return sAccent.Render("› ")
 		}
-		return mark + sDim.Render(fmt.Sprintf("%-8s", name)) + value
+		return "  "
+	}
+	single := func(i int, name, value string) string {
+		return mark(i) + sDim.Render(fmt.Sprintf("%-8s", name)) + value
 	}
 	leadLine := choices(f.leads, f.lead, func(t string) lipgloss.Style { return toolStyle(t) })
 	if f.leads[f.lead] == "none" {
@@ -861,26 +945,25 @@ func (m Model) teamFormLines(w, h int) []string {
 	if h < 20 {
 		goalLines = 1
 	}
-	// Eight lines before the member rows, and the goal and help below them.
-	room := max(1, h-12-goalLines)
-	start, end := f.memberWindow(room)
+	nameRows := fieldRows(f.name, 3)
+	folderRows := fieldRows(f.folder, 3)
 	role, tool, model, _ := memberWidths(w)
 	out := []string{sBold.Render("New team"), "",
-		field(tfTemplate, "template", f.templateLine()),
-		field(tfName, "name", f.name.View()),
-		field(tfFolder, "folder", f.folder.View()),
-		field(tfWork, "work", f.workLine()),
-		field(tfLead, "lead", leadLine),
-		"  " + sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"),
+		single(tfTemplate, "template", f.templateLine()),
 	}
+	out = append(out, fieldLines(mark(tfName), "name", f.name, 8, w, nameRows)...)
+	out = append(out, fieldLines(mark(tfFolder), "folder", f.folder, 8, w, folderRows)...)
+	out = append(out, single(tfWork, "work", f.workLine()), single(tfLead, "lead", leadLine),
+		"  "+sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"))
+	// The member rows take what is left above the goal and the help.
+	after := 1 + goalLines + 1 + 2
+	room := max(1, h-len(out)-after)
+	start, end := f.memberWindow(room, w)
 	for i := start; i < end; i++ {
-		out = append(out, f.memberLine(i, w))
+		out = append(out, f.memberLines(i, w)...)
 	}
-	goal := visibleRows(f.goal, goalLines)
-	out = append(out, "", field(f.goalField(), "goal", goal[0]))
-	for _, line := range goal[1:] {
-		out = append(out, strings.Repeat(" ", 10)+line)
-	}
+	out = append(out, "")
+	out = append(out, fieldLines(mark(f.goalField()), "goal", f.goal, 8, w, goalLines)...)
 	help := []string{sDim.Render("+ adds a member row, ctrl+d removes the focused one; roles and tools are required."),
 		sDim.Render("each member opens in its own tmux window with a brief; they report to the channel.")}
 	if row, cell, ok := f.rowOf(f.field); ok && cell == memberModel {
