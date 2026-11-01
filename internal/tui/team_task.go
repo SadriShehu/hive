@@ -25,7 +25,7 @@ func (m Model) tasks(teamID string) []store.Task {
 // heldTitle is "#4 title" for the task a member works on, or "".
 func (m Model) heldTitle(teamID, role string) string {
 	if t, ok := team.Held(role, m.tasks(teamID)); ok {
-		return fmt.Sprintf("#%d %s", t.N, oneLine.Replace(t.Title))
+		return fmt.Sprintf("#%d %s", t.N, cleanLine(t.Title))
 	}
 	return ""
 }
@@ -98,9 +98,9 @@ func taskLine(t store.Task, tasks []store.Task, w int) string {
 	if waits := team.Waiting(t, tasks); len(waits) > 0 && !t.Closed() {
 		right = strings.TrimSpace("after " + team.Numbers(waits) + "  " + right)
 	}
-	title := oneLine.Replace(t.Title)
+	title := cleanLine(t.Title)
 	if t.Status == store.TaskBlocked && t.Note != "" {
-		title += " — " + oneLine.Replace(t.Note)
+		title += " — " + cleanLine(t.Note)
 	}
 	titleStyle := sText
 	if t.Status == store.TaskDone {

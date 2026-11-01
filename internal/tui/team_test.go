@@ -227,6 +227,19 @@ func TestSelectingATeamShowsItsChannelAndMarksItRead(t *testing.T) {
 	}
 }
 
+func TestAControlSequenceInAPostDoesNotReachTheFeed(t *testing.T) {
+	m, _ := setupTeam(t)
+	m.feed.msgs = []store.Message{{TeamID: "t1", From: "backend", Kind: store.MsgPost,
+		Body: "before\x1b]52;c;bm90IHNhZmU=\x07after"}}
+	got := strings.Join(m.feedLines(m.snap.Teams[0], 100), "\n")
+	if strings.ContainsAny(got, "\x1b\x07\x00\x9b") {
+		t.Fatalf("the feed kept a control byte: %q", got)
+	}
+	if !strings.Contains(got, "before") || !strings.Contains(got, "after") {
+		t.Fatalf("the feed lost the text: %q", got)
+	}
+}
+
 func TestEnterOnATeamOpensItsChannel(t *testing.T) {
 	m, ops := setupTeam(t)
 	ops.snap.Tasks = []store.Task{{TeamID: "t1", N: 1, Title: "schema for admin users", Status: store.TaskClaimed, Owner: "backend"}}

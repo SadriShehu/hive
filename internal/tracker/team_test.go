@@ -242,6 +242,25 @@ func TestPostReachesNoPaneUnlessItNamesSomeone(t *testing.T) {
 	}
 }
 
+func TestPostKeepsControlCharactersOutOfTheChannel(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	tm := theTeam(t, tr)
+	msg, _, err := tr.Post(tm, "lead", "before\x1b]52;c;bm90IHNhZmU=\x07after")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(msg.Body, "\x1b\x07\x00\x9b") {
+		t.Fatalf("stored post kept a control byte: %q", msg.Body)
+	}
+	stored, err := tr.Store.Messages(tm.ID, 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || strings.ContainsAny(stored[0].Body, "\x1b\x07") {
+		t.Fatalf("stored post = %+v", stored)
+	}
+}
+
 func TestSayRefusesTheSenderAndLeavesItOutOfAll(t *testing.T) {
 	tr, w, sent := newTeamWorld(t)
 	backendUp(t, tr, w)
