@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +19,7 @@ import (
 
 func newStatusCmd() *cobra.Command {
 	var forTmux bool
+	var then string
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "One line for a status bar: how many agents need you, work, or are idle",
@@ -38,6 +41,13 @@ func newStatusCmd() *cobra.Command {
 			// the rate limits it reports for the channel view.
 			data := readStatusInput()
 			captureRateLimits(st, data)
+			if then != "" {
+				// Hand the same JSON to the user's own status line, and
+				// keep its line and exit status exactly as it was.
+				code := runThen(then, data, cmd.OutOrStdout(), cmd.ErrOrStderr())
+				st.Close()
+				os.Exit(code)
+			}
 			style := ansiStyles
 			switch {
 			case forTmux:
@@ -52,6 +62,7 @@ func newStatusCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&forTmux, "tmux", false, "color it with tmux style tags, for the status line")
+	cmd.Flags().StringVar(&then, "then", "", "run this status-line command with the same JSON, after recording its rate limits")
 	return cmd
 }
 
@@ -190,4 +201,21 @@ func captureRateLimits(st *store.Store, data []byte) {
 	if !q.Empty() {
 		st.SetQuota(q)
 	}
+}
+
+// runThen runs the user's own status-line command with the JSON hive read,
+// and returns its exit status, so the status line looks exactly as it did.
+// Its stdout and stderr go straight out.
+func runThen(command string, data []byte, stdout, stderr io.Writer) int {
+	c := exec.Command("sh", "-c", command)
+	c.Stdin = bytes.NewReader(data)
+	c.Stdout, c.Stderr = stdout, stderr
+	if err := c.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			return exit.ExitCode()
+		}
+		fmt.Fprintln(stderr, "hive status --then:", err)
+		return 1
+	}
+	return 0
 }

@@ -135,6 +135,12 @@ without the tree open:
   If you set `status-right` yourself, add `#(hive status --tmux)` to your own value.
   Avoid `set -ag`, which adds another copy each time tmux.conf is loaded. tmux runs the
   count every `status-interval` (15s unless set).
+
+  Claude Code sends its rate limits only to its status line. If you already have one
+  (say `~/.claude/statusline.py`), set `statusLine.command` to
+  `hive status --then ~/.claude/statusline.py`: hive records the limits for the team
+  channel, then runs your command with the same JSON and prints its line as before.
+  hive doesn't edit your settings.
 - **A desktop notification**, if you ask for one in the config file:
 
   ```toml
@@ -343,7 +349,9 @@ for one), `↵` sends, `esc` goes back to the tree, and the prompt wraps: `↑/�
 caret once you have typed, and `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) scroll the feed. Each
 member's row shows its state, model and effort, short session ID and how full its context
 is; the account's rate-limit windows (`5h 7% · resets 4h54m · 7d 22%`) show once per tool,
-when the tool reports them (`hive status` records Claude Code's).
+when the tool reports them. Claude Code sends them only to its status line: point that
+command at `hive status --then <your status line>` to keep your line and let hive record
+them.
 
 ```
 ⬡ api-v2 · add the admin API: list, invite and remove users
