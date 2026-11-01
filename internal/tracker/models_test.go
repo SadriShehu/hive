@@ -3,6 +3,7 @@ package tracker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,5 +150,63 @@ func TestPickPrefersTheParentsToolAndNeedsAModelFlag(t *testing.T) {
 	fromParent, err := tr.Pick(ctx, PickOptions{Tool: fusion.Auto, Prompt: "rename the variable", ParentID: "opencode:P"})
 	if err != nil || fromParent.Tool != "opencode" {
 		t.Errorf("model mode without a configured tool takes the parent's: %v, %v", fromParent, err)
+	}
+}
+
+func TestResolveModelTurnsANameIntoTheToolsID(t *testing.T) {
+	tr := modelWorld(t)
+	ctx := context.Background()
+	for _, c := range []struct{ tool, model, want string }{
+		{"claude", "claude-opus-5-5", "claude-opus-5-5"},
+		{"claude", "opus 5.5", "claude-opus-5-5"},
+		{"claude", "Opus 5.5", "claude-opus-5-5"},
+		{"claude", "opus-5.5", "claude-opus-5-5"},
+		{"claude", "Claude Sonnet 5.5", "claude-sonnet-5-5"},
+		{"claude", "sonnet", "claude-sonnet-5-5"},
+		{"claude", "opus 4.6", "claude-opus-4.6-fast"},
+		{"claude", "", ""},
+		{"claude", "default", ""},
+		{"claude", fusion.Auto, fusion.Auto},
+		{"opencode", "deepseek v4 pro", "deepseek/deepseek-v4-pro"},
+		{"opencode", "google-vertex/claude-opus-5-5@default", "google-vertex/claude-opus-5-5@default"},
+		{fusion.Auto, "anything", "anything"},
+	} {
+		got, err := tr.ResolveModel(ctx, c.tool, c.model)
+		if err != nil || got != c.want {
+			t.Errorf("ResolveModel(%s, %q) = %q, %v; want %q", c.tool, c.model, got, err, c.want)
+		}
+	}
+}
+
+func TestResolveModelRefusesWhatItCantPlace(t *testing.T) {
+	tr := modelWorld(t)
+	ctx := context.Background()
+	for _, c := range []struct {
+		tool, model string
+		want        []string
+	}{
+		{"claude", "opus 5.7", []string{`claude has no model "opus 5.7"`, "it runs claude-fable-5-1, claude-sonnet-5-5, claude-haiku-4-5, claude-opus-4.6-fast, claude-opus-5-5"}},
+		{"claude", "--", []string{`claude has no model "--"`}},
+		{"opencode", "opus 5.5", []string{`could be any of opencode's google-vertex/claude-opus-5-5@default, google-vertex-anthropic/claude-opus-5-5@default`, "name one"}},
+		{"plain", "gpt-6-pro", []string{"{model}"}},
+		{"nope", "x", []string{`doesn't know "nope"`}},
+	} {
+		_, err := tr.ResolveModel(ctx, c.tool, c.model)
+		for _, want := range c.want {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("ResolveModel(%s, %q) = %v; want it to say %q", c.tool, c.model, err, want)
+			}
+		}
+	}
+}
+
+func TestALongModelListIsCutInTheError(t *testing.T) {
+	var ids []string
+	for i := range 20 {
+		ids = append(ids, fmt.Sprintf("m-%d", i))
+	}
+	got := listModels("opencode", ids)
+	if !strings.HasPrefix(got, "m-0, m-1,") || !strings.HasSuffix(got, "m-11 and 8 more (`hive models opencode` lists them)") {
+		t.Errorf("listModels = %q", got)
 	}
 }

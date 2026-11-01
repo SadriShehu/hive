@@ -735,3 +735,25 @@ func TestRetireMemberStopsAMemberThatHasOnlyAPane(t *testing.T) {
 		}
 	}
 }
+
+func TestNewTeamRefusesAModelItCantPlaceBeforeAnythingStarts(t *testing.T) {
+	tr, _ := newWorld(t)
+	o := TeamOptions{Name: "api", Cwd: t.TempDir(), Lead: &team.Spec{Tool: "claude", Model: "opus 5.5"},
+		Members: []team.Spec{{Role: "backend", Tool: "claude", Model: "opus 5.7"}}}
+	_, _, err := tr.NewTeam(context.Background(), o)
+	if err == nil || !strings.Contains(err.Error(), `backend: claude has no model "opus 5.7"; it runs claude-fable-5-1, claude-opus-5-5`) {
+		t.Fatalf("NewTeam = %v, want the member, the model and what claude runs", err)
+	}
+	if teams, _ := tr.Store.Teams(); len(teams) != 0 {
+		t.Fatalf("teams = %+v, want none recorded", teams)
+	}
+	if _, _, err := tr.AddMember(context.Background(), store.Team{ID: "t", Name: "api", Status: store.TeamActive},
+		team.Spec{Role: "qa", Tool: "claude", Model: "opus 5.7"}, ""); err == nil || !strings.Contains(err.Error(), `qa: claude has no model "opus 5.7"`) {
+		t.Fatalf("AddMember = %v, want the model refused", err)
+	}
+
+	specs := []team.Spec{{Role: "lead", Tool: "claude", Model: "Opus 5.5"}, {Role: "fast", Tool: "claude", Model: "haiku"}}
+	if err := tr.resolveModels(context.Background(), specs); err != nil || specs[0].Model != "claude-opus-5-5" || specs[1].Model != "claude-haiku-5-5" {
+		t.Errorf("resolveModels = %+v, %v; want the IDs claude takes", specs, err)
+	}
+}

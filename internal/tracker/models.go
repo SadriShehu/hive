@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"slices"
+	"strings"
+	"unicode"
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/fusion"
@@ -72,6 +74,99 @@ func (t *Tracker) ToolModels(ctx context.Context, tool string) ([]string, error)
 		t.toolModels[tool] = models
 	}
 	return models, nil
+}
+
+// modelDefault is what a person types for the tool's own default model.
+const modelDefault = "default"
+
+// ResolveModel turns the model a person asked tool for into the ID its
+// model flag takes: "" or "default" is the tool's default (""), auto stays
+// auto, an ID the tool runs stays as it is, and a name for one ("opus 5.5",
+// "Opus-5.5") becomes that ID. A model hive can't place, or one that could
+// be several, is an error that lists what the tool runs.
+func (t *Tracker) ResolveModel(ctx context.Context, tool, model string) (string, error) {
+	model = strings.TrimSpace(model)
+	switch {
+	case model == "" || strings.EqualFold(model, modelDefault):
+		return "", nil
+	case model == fusion.Auto, tool == "" || tool == fusion.Auto:
+		return model, nil
+	}
+	a := t.adapter(tool)
+	if a == nil {
+		return "", fmt.Errorf("hive doesn't know %q", tool)
+	}
+	if !a.Spec().TakesModel() {
+		return "", fmt.Errorf("hive can't set the model for %s: its start command has no {model}; add one in config.toml", tool)
+	}
+	ids, err := t.ToolModels(ctx, tool)
+	if err != nil {
+		return "", fmt.Errorf("can't check model %q for %s: %w", model, tool, err)
+	}
+	found := matchModel(model, ids, a.Spec().Models)
+	switch {
+	case len(found) == 1:
+		return found[0], nil
+	case len(found) > 1:
+		return "", fmt.Errorf("model %q could be any of %s's %s; name one", model, tool, strings.Join(found, ", "))
+	case len(ids) == 0:
+		return "", fmt.Errorf("%s has no model %q, and hive knows none it runs; add them to its [[agent]] models in config.toml", tool, model)
+	}
+	return "", fmt.Errorf("%s has no model %q; it runs %s", tool, model, listModels(tool, ids))
+}
+
+// listModels names the models a tool runs, the first dozen of a long list.
+func listModels(tool string, ids []string) string {
+	const most = 12
+	if len(ids) <= most {
+		return strings.Join(ids, ", ")
+	}
+	return fmt.Sprintf("%s and %d more (`hive models %s` lists them)", strings.Join(ids[:most], ", "), len(ids)-most, tool)
+}
+
+// matchModel finds the IDs a name stands for, best match first: the ID
+// itself, its words in any case and spelling (claude opus 5.5), the words
+// it ends with (opus 5.5), then words anywhere in it (opus). The first kind
+// that finds any wins; when it finds several, the one the tool lists as
+// current wins, or all of them come back.
+func matchModel(name string, ids, current []string) []string {
+	if slices.Contains(ids, name) {
+		return []string{name}
+	}
+	want := modelWords(name)
+	if want == "" {
+		return nil
+	}
+	kinds := []func(have string) bool{
+		func(have string) bool { return have == want },
+		func(have string) bool { return strings.HasSuffix(" "+have, " "+want) },
+		func(have string) bool { return strings.Contains(" "+have+" ", " "+want+" ") },
+	}
+	for _, matches := range kinds {
+		var found, now []string
+		for _, id := range ids {
+			if matches(modelWords(id)) {
+				found = append(found, id)
+				if slices.Contains(current, id) {
+					now = append(now, id)
+				}
+			}
+		}
+		if len(found) > 1 && len(now) == 1 {
+			return now
+		}
+		if len(found) > 0 {
+			return found
+		}
+	}
+	return nil
+}
+
+// modelWords spells a model's name as lower-case words, its version a word
+// per number: "anthropic/claude-opus-4.6@default" is "anthropic claude opus 4 6".
+func modelWords(s string) string {
+	s, _, _ = strings.Cut(strings.ToLower(s), "@")
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }), " ")
 }
 
 func dedupe(list []string) []string {
