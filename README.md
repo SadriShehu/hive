@@ -333,7 +333,8 @@ The team folder is stored as an absolute path, so a relative `cwd` or `--cwd` re
 where you run the command.
 
 Press `T` in the tree for the same in a form: one row per member (role, tool, model and
-its part of the brief), with `+` to add a row and `ctrl+d` to remove the focused one, a
+its part of the brief; in the model cell `←/→` picks default, auto or one of the models the
+row's tool runs, or type a name), with `+` to add a row and `ctrl+d` to remove the focused one, a
 template row to fill it from config.toml, and a work row for the shared folder or a
 worktree per member. The team is a node in the tree with its members under it, each
 titled by the task it holds; select it and the preview is the board and the channel.
