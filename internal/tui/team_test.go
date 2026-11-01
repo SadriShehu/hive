@@ -1333,3 +1333,21 @@ func TestATeamHeadInTheUsageBodyIsFetched(t *testing.T) {
 		t.Errorf("a plain session fetched every usage %d times", ops.usagesAsked)
 	}
 }
+
+// The new-team form is a full form, not usage: with the usage panel on and a
+// narrow window it must still show over the body.
+func TestTheNewTeamFormShowsOverTheUsageBody(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.showUsage = true
+	m = press(t, m, "T")
+	if m.mode != modeTeam {
+		t.Fatalf("T opened mode %v, want the new-team form", m.mode)
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"New team", "goal", "what the team is for"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the usage body hid the form (%q missing):\n%s", want, view)
+		}
+	}
+}
