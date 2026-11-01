@@ -988,3 +988,37 @@ func TestTeamFilterWorksInTheTrash(t *testing.T) {
 		t.Fatalf("team:t2 in the trash = %s, want %s", got, want)
 	}
 }
+
+// The message prompt on a team wraps as it grows, like the channel's: the
+// whole text stays visible and is what hive sends.
+func TestALongSendPromptWraps(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "s")
+
+	text := "START " + strings.Repeat("a long message stays readable ", 6) + "END"
+	for _, r := range text {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if rows := m.sendRows(); rows < 2 {
+		t.Fatalf("send rows = %d, want the prompt to take several lines", rows)
+	}
+	hints := m.hintLines()
+	joined := ansi.Strip(strings.Join(hints, "\n"))
+	if !strings.Contains(joined, "START") || !strings.Contains(joined, "END") {
+		t.Errorf("the send prompt scrolled its text out of view:\n%s", joined)
+	}
+	for _, line := range hints {
+		if width := ansi.StringWidth(line); width > m.width {
+			t.Errorf("hint line is %d wide, past the %d screen:\n%s", width, m.width, line)
+		}
+	}
+	if got := len(strings.Split(m.View(), "\n")); got != m.height {
+		t.Errorf("view has %d lines, want %d", got, m.height)
+	}
+
+	m = press(t, m, "enter")
+	if len(ops.said) != 1 || !strings.HasSuffix(ops.said[0], "|"+text) {
+		t.Fatalf("said = %v, want the whole wrapped prompt", ops.said)
+	}
+}
