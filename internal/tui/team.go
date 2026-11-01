@@ -271,19 +271,21 @@ func (m Model) keyChannel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.channelInput.Reset()
 		m.sendTo = sendTarget{team: m.channelTeam, to: store.ToAll}
 		return m, tea.Batch(m.mailbox(text), m.feedCmd(m.channelTeam))
-	case "up", "pgup", "ctrl+u":
-		step := 1
-		if msg.String() != "up" {
-			step = max(1, m.bodyHeight()/2)
-		}
-		m.channelScroll = min(m.channelMaxScroll(), m.channelScroll+step)
+	case "pgup", "ctrl+u":
+		m.channelScroll = min(m.channelMaxScroll(), m.channelScroll+max(1, m.bodyHeight()/2))
 		return m, nil
-	case "down", "pgdown", "ctrl+d":
-		step := 1
-		if msg.String() != "down" {
-			step = max(1, m.bodyHeight()/2)
+	case "pgdown", "ctrl+d":
+		m.channelScroll = max(0, m.channelScroll-max(1, m.bodyHeight()/2))
+		return m, nil
+	case "up", "down":
+		if m.channelInput.Value() != "" {
+			break // the caret moves through the wrapped text
 		}
-		m.channelScroll = max(0, m.channelScroll-step)
+		if msg.String() == "up" {
+			m.channelScroll = min(m.channelMaxScroll(), m.channelScroll+1)
+		} else {
+			m.channelScroll = max(0, m.channelScroll-1)
+		}
 		return m, nil
 	}
 	var cmd tea.Cmd

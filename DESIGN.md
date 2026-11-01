@@ -636,7 +636,8 @@ task it holds (`backend · #4 handlers…`), else by what its session does.
 `↵` on a team opens its channel full screen: the team's name, goal, roster and state, the
 task board and the feed, with a live line at the bottom. Typing writes to everyone
 (`@role` for one), `↵` sends through the same mailbox as `s`, `esc` goes back to the tree,
-and `↑/↓` scrolls the feed. The channel marks its team read while it is open, preview or
+and the prompt wraps: `↑/↓` move the caret once typing, and `pgup`/`pgdn` (or `ctrl+u`/
+`ctrl+d`) scroll the feed. The channel marks its team read while it is open, preview or
 no preview.
 
 | Key, on a team | Does |

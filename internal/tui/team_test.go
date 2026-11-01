@@ -358,6 +358,30 @@ func TestALongChannelPromptWraps(t *testing.T) {
 	}
 }
 
+func TestChannelArrowsMoveTheCaretAndPageKeysScroll(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "enter")
+	for _, r := range strings.Repeat("wrapped words stay editable ", 5) {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	before := cursorRow(m.channelInput)
+	if before < 1 {
+		t.Fatalf("the prompt didn't wrap; cursor row = %d", before)
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if after := cursorRow(m.channelInput); after >= before {
+		t.Fatalf("up moved the caret from row %d to %d, want it up", before, after)
+	}
+	if m.channelScroll != 0 {
+		t.Fatalf("typing and moving the caret scrolled the feed to %d", m.channelScroll)
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.channelScroll == 0 {
+		t.Fatal("pgup didn't scroll the feed")
+	}
+}
+
 func TestAChannelMarksReadWhileThePreviewIsHidden(t *testing.T) {
 	for _, narrow := range []bool{false, true} {
 		m, ops := setupTeam(t)

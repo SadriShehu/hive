@@ -329,7 +329,8 @@ template row to fill it from config.toml, and a work row for the shared folder o
 worktree per member. The team is a node in the tree with its members under it, each
 titled by the task it holds; select it and the preview is the board and the channel.
 `↵` opens the channel full screen with a live line: type to write to everyone (`@role`
-for one), `↵` sends, `esc` goes back to the tree, and `↑/↓` scrolls the feed.
+for one), `↵` sends, `esc` goes back to the tree, and the prompt wraps: `↑/↓` move the
+caret once you have typed, and `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) scroll the feed.
 
 ```
 ⬡ api-v2 · add the admin API: list, invite and remove users
