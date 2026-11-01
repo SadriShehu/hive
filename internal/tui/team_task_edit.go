@@ -366,7 +366,7 @@ func taskEditorRow(t store.Task, tasks []store.Task, w int, sel bool) string {
 		right += " · after " + team.Numbers(waits)
 	}
 	right = ansi.Truncate(right, max(12, w/2), "…")
-	title := oneLine.Replace(t.Title)
+	title := cleanLine(t.Title)
 	titleStyle := sText
 	if t.Status == store.TaskDone {
 		titleStyle = sDim
@@ -386,7 +386,7 @@ func taskEditorRow(t store.Task, tasks []store.Task, w int, sel bool) string {
 // waits for, its body and its note.
 func taskDetail(t store.Task, tasks []store.Task, w int) []string {
 	g, gs := taskGlyph(t.Status)
-	line := gs.Render(g) + " " + sBold.Render(fmt.Sprintf("#%d %s", t.N, oneLine.Replace(t.Title)))
+	line := gs.Render(g) + " " + sBold.Render(fmt.Sprintf("#%d %s", t.N, cleanLine(t.Title)))
 	line += sDim.Render(" · " + t.Status)
 	if t.Owner != "" {
 		line += sDim.Render(" · " + t.Owner)
@@ -397,7 +397,7 @@ func taskDetail(t store.Task, tasks []store.Task, w int) []string {
 	out := []string{ansi.Truncate(line, w, "…")}
 	wrap := func(label, body string) {
 		out = append(out, "  "+sDim.Render(label))
-		for _, l := range strings.Split(ansi.Wrap(body, max(10, w-4), ""), "\n") {
+		for _, l := range strings.Split(ansi.Wrap(team.Clean(body), max(10, w-4), ""), "\n") {
 			out = append(out, "  "+sText.Render(l))
 		}
 	}

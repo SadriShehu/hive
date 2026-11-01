@@ -96,7 +96,7 @@ func (t *Tracker) NewTeam(ctx context.Context, o TeamOptions) (store.Team, []Mem
 		workspace = store.WorkspaceWorktrees
 	}
 	now := t.World.Now()
-	tm := store.Team{ID: newTeamID(), Name: o.Name, Goal: strings.TrimSpace(o.Goal), Cwd: cwd,
+	tm := store.Team{ID: newTeamID(), Name: o.Name, Goal: strings.TrimSpace(team.Clean(o.Goal)), Cwd: cwd,
 		Workspace: workspace, CreatedBy: o.CreatedBy, Status: store.TeamActive,
 		LeadRole: lead, CreatedAt: now, UpdatedAt: now}
 	if err := t.Store.CreateTeam(tm); err != nil {
@@ -118,7 +118,7 @@ func (t *Tracker) NewTeam(ctx context.Context, o TeamOptions) (store.Team, []Mem
 // none starts.
 func (t *Tracker) startTeam(ctx context.Context, tm store.Team, specs []team.Spec, self *store.Session, session string) ([]MemberLaunch, error) {
 	for _, sp := range specs {
-		m := store.Member{TeamID: tm.ID, Role: sp.Role, Tool: sp.Tool, Model: sp.Model, Prompt: sp.Prompt, JoinedAt: tm.CreatedAt}
+		m := store.Member{TeamID: tm.ID, Role: sp.Role, Tool: sp.Tool, Model: sp.Model, Prompt: team.Clean(sp.Prompt), JoinedAt: tm.CreatedAt}
 		if self != nil && sp.Role == tm.LeadRole {
 			m.SessionID = self.ID
 		}
@@ -205,7 +205,7 @@ func (t *Tracker) AddMember(ctx context.Context, tm store.Team, sp team.Spec, se
 	if err := closed(tm); err != nil {
 		return store.Member{}, Launched{}, err
 	}
-	m := store.Member{TeamID: tm.ID, Role: sp.Role, Tool: sp.Tool, Model: sp.Model, Prompt: sp.Prompt, JoinedAt: t.World.Now()}
+	m := store.Member{TeamID: tm.ID, Role: sp.Role, Tool: sp.Tool, Model: sp.Model, Prompt: team.Clean(sp.Prompt), JoinedAt: t.World.Now()}
 	if err := t.Store.AddMember(m); err != nil {
 		return m, Launched{}, err
 	}
@@ -350,7 +350,7 @@ func (t *Tracker) SetLead(tm store.Team, role string) error {
 
 // system adds hive's own post to the channel.
 func (t *Tracker) system(tm store.Team, body string) (store.Message, error) {
-	return t.Store.AddMessage(store.Message{TeamID: tm.ID, From: store.FromHive, Body: body,
+	return t.Store.AddMessage(store.Message{TeamID: tm.ID, From: store.FromHive, Body: team.Clean(body),
 		Kind: store.MsgSystem, At: t.World.Now()}, nil)
 }
 
@@ -593,7 +593,7 @@ type Sent struct {
 
 // Say writes to a teammate or to everyone, as from, and tries to deliver it.
 func (t *Tracker) Say(tm store.Team, from, to, body string, private bool) (store.Message, []Sent, error) {
-	body = strings.TrimSpace(body)
+	body = strings.TrimSpace(team.Clean(body))
 	if body == "" {
 		return store.Message{}, nil, errors.New("nothing to say")
 	}
@@ -623,7 +623,7 @@ func (t *Tracker) Say(tm store.Team, from, to, body string, private bool) (store
 // Post writes to the channel as from. It reaches a pane only when the body
 // names a teammate with @role.
 func (t *Tracker) Post(tm store.Team, from, body string) (store.Message, []Sent, error) {
-	body = strings.TrimSpace(body)
+	body = strings.TrimSpace(team.Clean(body))
 	if body == "" {
 		return store.Message{}, nil, errors.New("nothing to post")
 	}

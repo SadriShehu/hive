@@ -22,6 +22,10 @@ import (
 // feedMessages is how many channel messages the feed loads.
 const feedMessages = 200
 
+// cleanLine puts text from a teammate on one line and drops control
+// characters, so the terminal draws it and runs none of it.
+func cleanLine(s string) string { return oneLine.Replace(team.Clean(s)) }
+
 // A team's channel, as loaded for the selected team node.
 type feed struct {
 	teamID string
@@ -91,7 +95,7 @@ func (m Model) memberTitle(n *tree.Node) string {
 	if s.Title == "" && strings.HasPrefix(s.LastPrompt, "You are "+n.Role+" on the hive team") {
 		for _, mem := range m.snap.Members {
 			if mem.TeamID == n.TeamID && mem.Role == n.Role && mem.Prompt != "" {
-				return strings.Join(strings.Fields(mem.Prompt), " ")
+				return strings.Join(strings.Fields(team.Clean(mem.Prompt)), " ")
 			}
 		}
 		return "(waiting for work)"
@@ -865,7 +869,7 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	goalW := avail - ansi.StringWidth(name) - 2
 	line := on(sDim).Render(r.prefix+fold) + on(gs).Render(g) + sp + on(nameStyle).Render(name)
 	if goalW >= 6 && t.Goal != "" {
-		line += on(sDim).Render("  " + pad(ansi.Truncate(oneLine.Replace(t.Goal), goalW, "…"), goalW))
+		line += on(sDim).Render("  " + pad(ansi.Truncate(cleanLine(t.Goal), goalW, "…"), goalW))
 	} else {
 		line += on(sDim).Render(strings.Repeat(" ", max(0, avail-ansi.StringWidth(name)+0)))
 	}
@@ -893,7 +897,7 @@ func (m Model) teamHead(t store.Team, w int) []string {
 		where += " · a worktree per member"
 	}
 	head := []string{
-		sAccent.Bold(true).Render("⬡ "+t.Name) + sDim.Render(" · "+ansi.Truncate(oneLine.Replace(t.Goal), max(1, w-len(t.Name)-5), "…")),
+		sAccent.Bold(true).Render("⬡ "+t.Name) + sDim.Render(" · "+ansi.Truncate(cleanLine(t.Goal), max(1, w-len(t.Name)-5), "…")),
 		sDim.Render(ansi.Truncate(fmt.Sprintf("%d members · led by %s · %s · started %s ago",
 			len(members), led, where, age(m.now(), t.CreatedAt)), w, "…")),
 	}
@@ -1010,9 +1014,9 @@ func (m Model) feedLines(t store.Team, w int) []string {
 	}
 	who := func(msg store.Message) string {
 		if msg.To != "" {
-			return msg.From + " → " + msg.To
+			return team.Clean(msg.From) + " → " + team.Clean(msg.To)
 		}
-		return msg.From
+		return team.Clean(msg.From)
 	}
 	whoW := 0
 	for _, msg := range msgs {
@@ -1036,7 +1040,7 @@ func (m Model) feedLines(t store.Team, w int) []string {
 		case tools[msg.From] != "":
 			nameStyle = toolStyle(tools[msg.From]).Bold(true)
 		}
-		lines := strings.Split(ansi.Wrap(msg.Body, max(10, w-prefixW), ""), "\n")
+		lines := strings.Split(ansi.Wrap(team.Clean(msg.Body), max(10, w-prefixW), ""), "\n")
 		for i, l := range lines {
 			if i == 0 {
 				out = append(out, sDim.Render(time.UnixMilli(msg.At).Format("15:04"))+" "+

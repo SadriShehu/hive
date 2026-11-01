@@ -412,7 +412,7 @@ func newTeamLsCmd() *cobra.Command {
 				if r.Tasks.Total > 0 {
 					state += fmt.Sprintf(" · %d/%d tasks done", r.Tasks.Done, r.Tasks.Total)
 				}
-				fmt.Printf("%s · %s · %s\n", r.Name, state, truncate(r.Goal, 60))
+				fmt.Printf("%s · %s · %s\n", r.Name, state, truncate(team.Clean(r.Goal), 60))
 				for _, m := range r.Members {
 					if m.Active() {
 						fmt.Printf("  %-10s %-9s %s\n", m.Role, m.Tool, m.State)
@@ -489,7 +489,7 @@ func newTeamBoardCmd() *cobra.Command {
 			}
 			fmt.Printf("%s · %s · led by %s\n%s\n", tm.Name, state, lead, homePath(tm.Cwd))
 			if tm.Goal != "" {
-				fmt.Printf("goal: %s\n", tm.Goal)
+				fmt.Printf("goal: %s\n", team.Clean(tm.Goal))
 			}
 			fmt.Println("\nmembers")
 			for _, m := range rows {
@@ -527,11 +527,11 @@ func printMessages(msgs []store.Message) {
 		fmt.Println("  (nothing yet)")
 	}
 	for _, m := range msgs {
-		who := m.From
+		who := team.Clean(m.From)
 		if m.To != "" {
-			who += " → " + m.To
+			who += " → " + team.Clean(m.To)
 		}
-		fmt.Printf("  %s  %-22s %s\n", time.UnixMilli(m.At).Format("15:04"), who, strings.ReplaceAll(m.Body, "\n", "\n"+strings.Repeat(" ", 31)))
+		fmt.Printf("  %s  %-22s %s\n", time.UnixMilli(m.At).Format("15:04"), who, strings.ReplaceAll(team.Clean(m.Body), "\n", "\n"+strings.Repeat(" ", 31)))
 	}
 }
 
