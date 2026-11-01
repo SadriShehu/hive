@@ -798,3 +798,22 @@ func TestRefreshForgetsAMembersPaneOnceItIsGone(t *testing.T) {
 		}
 	}
 }
+
+// When hive can't see tmux (no server, or not on PATH), an empty pane list
+// says nothing about the members: keep a pane-only member's record, so team
+// stop can still find it. With panes visible but not the member's, clear it.
+func TestRefreshKeepsPanesWhenItCannotSeeTmux(t *testing.T) {
+	tr, w, _ := newTeamWorld(t)
+	tm := theTeam(t, tr)
+	if err := tr.Store.SetMemberPane(tm.ID, "frontend", "%3", 300); err != nil {
+		t.Fatal(err)
+	}
+	w.panes = nil // tmux isn't there, or the list failed
+	if _, err := tr.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	frontend := memberNamed(t, tr, tm, "frontend")
+	if frontend.Pane != "%3" || frontend.PanePID != 300 {
+		t.Fatalf("an empty pane list forgot the member's pane: %+v", frontend)
+	}
+}

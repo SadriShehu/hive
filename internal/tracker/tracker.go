@@ -569,20 +569,25 @@ func (t *Tracker) Refresh() ([]store.Session, error) {
 	// A member that hasn't reported in is only as good as the pane hive
 	// opened for it. Once that pane is gone (tmux may reuse its ID for
 	// another pane), forget it, so the board and the TUI see it stopped
-	// rather than starting forever.
-	members, err := t.Store.AllMembers()
-	if err != nil {
-		return nil, err
-	}
-	for _, m := range members {
-		if m.SessionID != "" || (m.Pane == "" && m.PanePID == 0) {
-			continue
-		}
-		if pid, ok := panePIDs[m.Pane]; ok && m.PanePID != 0 && pid == m.PanePID {
-			continue
-		}
-		if err := t.Store.SetMemberPane(m.TeamID, m.Role, "", 0); err != nil {
+	// rather than starting forever. Only when the pane list can be trusted:
+	// an empty one means tmux isn't there (no server, not on PATH, or a
+	// failed list), and clearing then would leave hive unable to stop that
+	// member. A stale record is harmless: stop checks the pane's PID.
+	if len(panePIDs) > 0 {
+		members, err := t.Store.AllMembers()
+		if err != nil {
 			return nil, err
+		}
+		for _, m := range members {
+			if m.SessionID != "" || (m.Pane == "" && m.PanePID == 0) {
+				continue
+			}
+			if pid, ok := panePIDs[m.Pane]; ok && m.PanePID != 0 && pid == m.PanePID {
+				continue
+			}
+			if err := t.Store.SetMemberPane(m.TeamID, m.Role, "", 0); err != nil {
+				return nil, err
+			}
 		}
 	}
 
