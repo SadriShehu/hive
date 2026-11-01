@@ -63,6 +63,28 @@ func (t *Tracker) onAnotherTeam(sessionID, teamID string) (bool, error) {
 	return false, nil
 }
 
+// onTrashedTeam reports whether a session plays a role on another team still
+// in the trash: purging this team leaves it, so the other can restore it.
+func (t *Tracker) onTrashedTeam(sessionID, teamID string) (bool, error) {
+	ms, err := t.Store.Memberships(sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range ms {
+		if m.TeamID == teamID {
+			continue
+		}
+		trashed, err := t.Store.TeamTrashed(m.TeamID)
+		if err != nil {
+			return false, err
+		}
+		if trashed {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // addIDs appends the sessions in family to ids, once each.
 func addIDs(ids []string, family []store.Session) []string {
 	for _, s := range family {
@@ -117,7 +139,9 @@ func (t *Tracker) TrashTeam(tm store.Team) ([]store.Session, error) {
 	return family, nil
 }
 
-// RestoreTeam takes a team and its members' sessions out of the trash.
+// RestoreTeam takes a team and its members' sessions out of the trash. A
+// retired member's session stays where the user left it: the team no longer
+// plays it.
 func (t *Tracker) RestoreTeam(tm store.Team) ([]store.Session, error) {
 	members, err := t.Store.Members(tm.ID)
 	if err != nil {
@@ -126,7 +150,7 @@ func (t *Tracker) RestoreTeam(tm store.Team) ([]store.Session, error) {
 	var family []store.Session
 	var ids []string
 	for _, m := range members {
-		if m.SessionID == "" {
+		if !m.Active() || m.SessionID == "" {
 			continue
 		}
 		f, err := t.Store.Family(m.SessionID, true)
@@ -143,8 +167,10 @@ func (t *Tracker) RestoreTeam(tm store.Team) ([]store.Session, error) {
 }
 
 // PurgeTeam deletes a team in the trash for good: its members' sessions, each
-// through its tool, then the team. It stops at the first session its tool
-// fails to delete, which stays in the trash with the team.
+// through its tool, then the team. A retired member's session and one another
+// trashed team still plays stay, so that team can restore it. It stops at the
+// first session its tool fails to delete, which stays in the trash with the
+// team.
 func (t *Tracker) PurgeTeam(ctx context.Context, tm store.Team) (Purged, error) {
 	var out Purged
 	members, err := t.Store.Members(tm.ID)
@@ -152,7 +178,7 @@ func (t *Tracker) PurgeTeam(ctx context.Context, tm store.Team) (Purged, error) 
 		return out, err
 	}
 	for _, m := range members {
-		if m.SessionID == "" {
+		if !m.Active() || m.SessionID == "" {
 			continue
 		}
 		s, ok, err := t.Store.Get(m.SessionID)
@@ -161,6 +187,11 @@ func (t *Tracker) PurgeTeam(ctx context.Context, tm store.Team) (Purged, error) 
 		}
 		if !ok {
 			continue
+		}
+		if shared, err := t.onTrashedTeam(s.ID, tm.ID); err != nil {
+			return out, err
+		} else if shared {
+			continue // another trashed team can still restore it
 		}
 		if f, err := t.Store.Family(s.ID, true); err != nil {
 			return out, err
