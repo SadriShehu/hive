@@ -33,6 +33,26 @@ func TestSenderNeverPassesAnAgentOffAsTheUser(t *testing.T) {
 	}
 }
 
+// A message to a working member waits until it next goes idle, not until its
+// current turn ends: the help must say so on the team and say commands.
+func TestTeamHelpSaysMailWaitsUntilItGoesIdle(t *testing.T) {
+	team := newTeamCmd()
+	check := func(name, long string) {
+		t.Helper()
+		if strings.Contains(long, "turn ends") || !strings.Contains(long, "goes idle") {
+			t.Errorf("%s help = %q, want it to say the message waits until the member goes idle", name, long)
+		}
+	}
+	check("team", team.Long)
+	for _, c := range team.Commands() {
+		if c.Name() == "say" {
+			check("say", c.Long)
+			return
+		}
+	}
+	t.Fatal("the team command has no say subcommand")
+}
+
 func TestTemplateTeamDefaultsAndOverrides(t *testing.T) {
 	tpl := adapters.Team{
 		Name:      "api",
