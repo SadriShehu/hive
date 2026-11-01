@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -28,6 +32,9 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 			defer st.Close()
+			// Claude Code pipes its status JSON into the status line; keep
+			// the rate limits it reports for the channel view.
+			captureRateLimits(st)
 			style := ansiStyles
 			switch {
 			case forTmux:
@@ -87,4 +94,46 @@ func statusText(sessions []store.Session, style styles) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// rateWindow is one of Claude Code's rate-limit windows, as its status JSON
+// reports it.
+type rateWindow struct {
+	UsedPercentage float64 `json:"used_percentage"`
+	ResetsAt       int64   `json:"resets_at"`
+}
+
+// captureRateLimits reads the status JSON Claude Code writes to the status
+// line's stdin, and records the rate limits it carries. It does nothing when
+// stdin is a terminal (a person runs it), when no JSON comes, or when the
+// tool sent none. Claude is the tool that reports them this way, so they go
+// under its name.
+func captureRateLimits(st *store.Store) {
+	fi, err := os.Stdin.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice != 0 {
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	if err != nil || len(data) == 0 {
+		return
+	}
+	var payload struct {
+		RateLimits *struct {
+			Five  *rateWindow `json:"five_hour"`
+			Seven *rateWindow `json:"seven_day"`
+		} `json:"rate_limits"`
+	}
+	if json.Unmarshal(data, &payload) != nil || payload.RateLimits == nil {
+		return
+	}
+	q := store.Quota{Tool: "claude", At: time.Now().Unix()}
+	if w := payload.RateLimits.Five; w != nil {
+		q.FiveUsed, q.FiveReset = w.UsedPercentage, w.ResetsAt
+	}
+	if w := payload.RateLimits.Seven; w != nil {
+		q.SevenUsed, q.SevenReset = w.UsedPercentage, w.ResetsAt
+	}
+	if !q.Empty() {
+		st.SetQuota(q)
+	}
 }
