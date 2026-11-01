@@ -364,6 +364,10 @@ func folder(dir string) (string, error) {
 		return paths.Home(), nil
 	}
 	dir = paths.Expand(dir)
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
 	fi, err := os.Stat(dir)
 	if err != nil || !fi.IsDir() {
 		return "", fmt.Errorf("no such folder: %s", dir)
