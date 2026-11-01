@@ -9,10 +9,10 @@ import (
 	"github.com/sadrishehu/hive/internal/store"
 )
 
-// teamRunning returns the roles of a team whose agents run, as of a fresh
+// TeamRunning returns the roles of a team whose agents run, as of a fresh
 // look at the processes: a member that hasn't reported in runs as long as
-// its pane is there.
-func (t *Tracker) teamRunning(tm store.Team) ([]string, error) {
+// the pane hive opened for it is still there.
+func (t *Tracker) TeamRunning(tm store.Team) ([]string, error) {
 	t.World.Forget()
 	if _, err := t.Refresh(); err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func addIDs(ids []string, family []store.Session) []string {
 // of the trash stays, so one agent on two teams isn't taken away from the
 // other. The tools keep their copies, and RestoreTeam brings it all back.
 func (t *Tracker) TrashTeam(tm store.Team) ([]store.Session, error) {
-	if running, err := t.teamRunning(tm); err != nil {
+	if running, err := t.TeamRunning(tm); err != nil {
 		return nil, err
 	} else if len(running) > 0 {
 		return nil, fmt.Errorf("%s still has %s running; stop them first", tm.Name, joinRoles(running))

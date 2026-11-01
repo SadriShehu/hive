@@ -8,18 +8,6 @@ import (
 	"github.com/sadrishehu/hive/internal/tree"
 )
 
-// runningMembers returns the roles of a team whose sessions run, as the tree
-// last saw them.
-func (m Model) runningMembers(teamID string) []string {
-	var out []string
-	for _, mem := range m.members(teamID) {
-		if s, ok := m.memberSession(mem); ok && s.Live() {
-			out = append(out, mem.Role)
-		}
-	}
-	return out
-}
-
 // trashedTeamOf returns the team a node in the trash belongs to: the team's
 // own node, or a member's.
 func (m Model) trashedTeamOf(n *tree.Node) (store.Team, bool) {
