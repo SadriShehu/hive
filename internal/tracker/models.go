@@ -125,12 +125,55 @@ func (t *Tracker) ResolveModel(ctx context.Context, tool, model string) (string,
 		return "", fmt.Errorf("model %q could be any of %s's %s; name one", model, tool, strings.Join(found, ", "))
 	}
 	// The tool's list is what it names now; the price catalog also knows IDs
-	// older versions of the tool still take (Claude Code keeps old IDs).
-	if m, ok := t.Models.Match(base); ok {
-		return m.Name + long, nil
+	// older versions of the tool still take (Claude Code keeps old IDs), but
+	// only ones from the tool's own provider.
+	if id, ok := t.catalogModel(base, ids); ok {
+		return id + long, nil
 	}
 	return "", fmt.Errorf("%s has no model %q; it runs %s; add one to its [[agent]] models in config.toml if the tool takes it",
 		tool, model, listModels(tool, ids))
+}
+
+// catalogModel finds a model the price catalog knows, but only when it
+// belongs to the same provider the tool's own models come from: claude-*
+// for claude, gpt-* for codex, and a provider/id for a tool that lists them
+// (opencode's deepseek/…). So claude can't take gpt-5-5.
+func (t *Tracker) catalogModel(base string, ids []string) (string, bool) {
+	m, ok := t.Models.Match(base)
+	if !ok || !sameProvider(base, m.Name, ids) {
+		return "", false
+	}
+	// Keep the provider the person named, as opencode spells its models.
+	if i := strings.IndexByte(base, '/'); i >= 0 {
+		return base[:i+1] + m.Name, true
+	}
+	return m.Name, true
+}
+
+// provider is the part of a model name that says whose it is: before the
+// slash in a provider/id, else the first word of a family name.
+func provider(id string) string {
+	if i := strings.IndexByte(id, '/'); i >= 0 {
+		return id[:i]
+	}
+	if i := strings.IndexByte(id, '-'); i > 0 {
+		return id[:i]
+	}
+	return ""
+}
+
+// sameProvider reports whether a catalog model named name belongs to the
+// tool, given the models the tool lists. A provider/id input is checked by
+// its provider; a plain family name by the catalog's spelling.
+func sameProvider(input, name string, ids []string) bool {
+	want := provider(input)
+	if !strings.Contains(input, "/") {
+		want = provider(name)
+	}
+	if want == "" {
+		return false
+	}
+	return slices.ContainsFunc(ids, func(id string) bool { return provider(id) == want })
 }
 
 // listModels names the models a tool runs, the first dozen of a long list.
