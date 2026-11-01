@@ -340,12 +340,18 @@ worktree per member. The team is a node in the tree with its members under it, e
 titled by the task it holds; select it and the preview is the board and the channel.
 `↵` opens the channel full screen with a live line: type to write to everyone (`@role`
 for one), `↵` sends, `esc` goes back to the tree, and the prompt wraps: `↑/↓` move the
-caret once you have typed, and `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) scroll the feed.
+caret once you have typed, and `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) scroll the feed. Each
+member's row shows its state, model and effort, short session ID and how full its context
+is; the account's rate-limit windows (`5h 7% · resets 4h54m · 7d 22%`) show once per tool,
+when the tool reports them (`hive status` records Claude Code's).
 
 ```
 ⬡ api-v2 · add the admin API: list, invite and remove users
 4 members · led by lead · ~/src/app · started 25m ago
-● lead  ◉ backend  ◆ frontend  ◉ reviewer
+● lead · working · claude-opus-5-5 high · context 188k/1M 19% · a1b2c3d4 · plan the API
+◉ backend · idle · claude-sonnet-5-5 · context 42k/200k 21% · e5f6a7b8 · the handlers
+◆ frontend · needs you · codex-gpt-6-luna · the table view
+claude 5h 7% · resets 4h54m · 7d 22%
 ──────────────────────────────────────────────────────────────
 ✓ #1 schema for admin users                            backend
 ● #2 handlers for /admin/users                         backend

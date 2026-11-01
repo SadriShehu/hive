@@ -41,6 +41,7 @@ type Ops interface {
 	Fusion() fusion.Settings              // what auto means
 	Usages() (map[string]store.Usage, error)
 	Usage(ctx context.Context, s store.Session) (store.Usage, error)
+	Quotas() (map[string]store.Quota, error) // each tool account's last reported rate limits
 
 	// Teams. The user writes to a team as "you", through the same mailbox
 	// the members use.
@@ -118,6 +119,8 @@ func (o *liveOps) tracker() *tracker.Tracker {
 }
 
 func (o *liveOps) Usages() (map[string]store.Usage, error) { return o.tracker().AllUsage() }
+
+func (o *liveOps) Quotas() (map[string]store.Quota, error) { return o.st.Quotas() }
 
 func (o *liveOps) Usage(ctx context.Context, s store.Session) (store.Usage, error) {
 	return o.tracker().Usage(ctx, s)

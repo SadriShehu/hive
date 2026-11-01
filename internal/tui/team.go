@@ -1108,26 +1108,65 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	} else if t.Paused {
 		head = append(head, sError.Render("⏸ paused: no mail is delivered · p resumes"))
 	}
+	tools := map[string]bool{}
 	for _, mem := range members {
 		s, ok := m.memberSession(mem)
 		g, gs := "◌", sDim
+		state := "starting"
 		if ok {
 			g, gs = glyph(s)
+			state = s.Status
+			if s.Status == store.StatusAttention {
+				state = "needs you"
+			}
+		}
+		line := sText.Render(mem.Role) + sDim.Render(" · "+state)
+		if u, ok := m.usageFor(mem.SessionID); ok {
+			if u.Model != "" {
+				line += sDim.Render(" · ") + sText.Render(u.Model)
+			}
+			if u.Effort != "" {
+				line += sText.Render(" " + u.Effort)
+			}
+			if context := contextLine(u, w, 10); context != "" {
+				line += sDim.Render(" · ") + context
+			}
+		} else if mem.Model != "" && mem.Model != fusion.Auto {
+			line += sDim.Render(" · " + mem.Model)
+		}
+		if id := shortSessionID(mem.SessionID); id != "" {
+			line += sDim.Render(" · " + id)
 		}
 		// The member's part is long text: it wraps under its role.
-		text := mem.Role
 		if part := strings.TrimSpace(cleanLine(mem.Prompt)); part != "" {
-			text += " · " + part
+			line += sDim.Render(" · ") + sText.Render(part)
 		}
-		for i, line := range strings.Split(ansi.Wrap(text, max(10, w-4), ""), "\n") {
+		for i, wrapped := range strings.Split(ansi.Wrap(line, max(10, w-4), ""), "\n") {
 			prefix := "    "
 			if i == 0 {
 				prefix = "  " + gs.Render(g) + " "
 			}
-			head = append(head, prefix+sText.Render(line))
+			head = append(head, prefix+wrapped)
+		}
+		tools[mem.Tool] = true
+	}
+	// Rate limits are the account's, not one member's: show them once per tool.
+	for _, tool := range sortedKeys(tools) {
+		if q, ok := m.quotas[tool]; ok && !q.Empty() {
+			head = append(head, "  "+sDim.Render(tool+" ")+quotaText(q, m.now()))
 		}
 	}
 	return head
+}
+
+// sortedKeys lists a set's keys in order, so the lines don't jump around.
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // teamPreviewLines shows the team and its channel.
