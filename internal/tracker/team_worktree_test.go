@@ -354,6 +354,12 @@ func TestADoneTeamTakesNoMoreMail(t *testing.T) {
 	if _, _, err := tr.AddMember(context.Background(), tm, team.Spec{Role: "docs", Tool: "claude"}, ""); err == nil {
 		t.Error("a member joined a done team")
 	}
+	if _, _, err := tr.AddTask(tm, "lead", "one more", "", "", nil); err == nil || !strings.Contains(err.Error(), "is done") {
+		t.Errorf("AddTask on a done team = %v, want it refused", err)
+	}
+	if _, err := tr.ClaimTask(tm, "backend", 1, true); err == nil || !strings.Contains(err.Error(), "is done") {
+		t.Errorf("ClaimTask on a done team = %v, want it refused", err)
+	}
 	claudeHook(t, tr, w, 100, "A", agent.Idle)
 	if how, _ := tr.Deliver("claude:A", 0); len(*sent) != 0 {
 		t.Fatalf("Deliver = %q, typed %+v into a member of a done team", how, *sent)
