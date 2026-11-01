@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
+	"github.com/sadrishehu/hive/internal/tmux"
 )
 
 // typed records what a tracker typed into panes.
@@ -105,7 +107,7 @@ func TestMemberResumedUnderANewSessionKeepsItsRole(t *testing.T) {
 	// The agent is reopened in a new window, and continues under another ID
 	// in another process, as Codex and opencode do.
 	claudeHook(t, tr, w, 100, "A", agent.End)
-	if err := tr.rememberMember("claude:A", "%2"); err != nil {
+	if err := tr.rememberMember("claude:A", tmux.Pane{ID: "%2", PID: 95}); err != nil {
 		t.Fatal(err)
 	}
 	w.add(96, 95, "claude")
@@ -562,11 +564,30 @@ func TestNewTeamIsNotKeptWhenNoMemberStarts(t *testing.T) {
 	}
 }
 
+// memberNamed returns the team's member in role.
+func memberNamed(t *testing.T, tr *Tracker, tm store.Team, role string) store.Member {
+	t.Helper()
+	ms, err := tr.Store.Members(tm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.Role == role {
+			return m
+		}
+	}
+	t.Fatalf("no %s on %s", role, tm.Name)
+	return store.Member{}
+}
+
 func TestStopTeamStopsAMemberThatHasOnlyAPane(t *testing.T) {
 	tr, _, _ := newTeamWorld(t)
 	tm := theTeam(t, tr)
-	if err := tr.Store.SetMemberSession(tm.ID, "backend", "", "%1"); err != nil {
+	if err := tr.Store.SetMemberPane(tm.ID, "backend", "%1", 90); err != nil {
 		t.Fatal(err)
+	}
+	if got := tr.MemberState(memberNamed(t, tr, tm, "backend"), store.Session{}, false); got != "starting" {
+		t.Fatalf("backend in its pane is %q, want starting", got)
 	}
 	var killed []string
 	tr.KillPane = func(pane string) error { killed = append(killed, pane); return nil }
@@ -578,15 +599,71 @@ func TestStopTeamStopsAMemberThatHasOnlyAPane(t *testing.T) {
 	if n != 1 || len(killed) != 1 || killed[0] != "%1" {
 		t.Fatalf("stopped %d, killed %v; want the backend's pane only", n, killed)
 	}
+	backend := memberNamed(t, tr, tm, "backend")
+	if backend.Pane != "" || tr.MemberState(backend, store.Session{}, false) != "stopped" {
+		t.Errorf("backend after stop: pane %q, %q; want no pane, stopped", backend.Pane, tr.MemberState(backend, store.Session{}, false))
+	}
+}
+
+func TestStopKillsOnlyThePaneHiveOpenedForAMember(t *testing.T) {
+	tr, w, _ := newTeamWorld(t)
+	tm := theTeam(t, tr)
+	// The backend ran as Claude A in %1 and ended; tmux has since given %1
+	// to another pane.
+	if err := errors.Join(
+		tr.Store.Upsert(store.Session{ID: "claude:A", Tool: "claude", NativeID: "A", Status: store.StatusExited, CreatedAt: 1, UpdatedAt: 1}),
+		tr.Store.SetMemberSession(tm.ID, "backend", "claude:A", "%1"),
+		// The frontend never reported in, and %2 runs something else now.
+		tr.Store.SetMemberPane(tm.ID, "frontend", "%2", 4242),
+		// The lead's pane was recorded before hive kept its process.
+		tr.Store.SetMemberPane(tm.ID, "lead", "%1", 0),
+	); err != nil {
+		t.Fatal(err)
+	}
+	var killed []string
+	tr.KillPane = func(pane string) error { killed = append(killed, pane); return nil }
+
+	if n, err := tr.StopTeam(tm); err != nil || n != 0 || len(killed) != 0 {
+		t.Fatalf("StopTeam = %d, %v, killed %v; want no pane killed: none is a member's", n, err, killed)
+	}
+	if roles, err := tr.runningRoles(tm); err != nil || len(roles) != 0 {
+		t.Errorf("running roles = %v, %v; want none", roles, err)
+	}
+	if roles, err := tr.teamRunning(tm); err != nil || len(roles) != 0 {
+		t.Errorf("running members = %v, %v; want none", roles, err)
+	}
+	if got := tr.MemberState(memberNamed(t, tr, tm, "frontend"), store.Session{}, false); got != "stopped" {
+		t.Errorf("frontend is %q, want stopped: its pane is gone", got)
+	}
+	w.panes = append(w.panes, tmux.Pane{ID: "%9", PID: 4242})
+	if err := tr.Store.SetMemberPane(tm.ID, "frontend", "%9", 4242); err != nil {
+		t.Fatal(err)
+	}
+	if roles, err := tr.runningRoles(tm); err != nil || strings.Join(roles, ",") != "frontend" {
+		t.Errorf("running roles = %v, %v; want the frontend, in the pane hive opened", roles, err)
+	}
+}
+
+func TestAMembersPaneIsForgottenWhenItsSessionEnds(t *testing.T) {
+	tr, w, _ := newTeamWorld(t)
+	backendUp(t, tr, w)
+	tm := theTeam(t, tr)
+	if err := tr.Store.SetMemberPane(tm.ID, "backend", "%1", 90); err != nil {
+		t.Fatal(err)
+	}
+	claudeHook(t, tr, w, 100, "A", agent.End)
+	if backend := memberNamed(t, tr, tm, "backend"); backend.Pane != "" || backend.PanePID != 0 {
+		t.Errorf("backend after its session ended: pane %q pid %d; want none", backend.Pane, backend.PanePID)
+	}
 }
 
 func TestRetireMemberStopsAMemberThatHasOnlyAPane(t *testing.T) {
-	tr, _, _ := newTeamWorld(t)
+	tr, w, _ := newTeamWorld(t)
 	tm := theTeam(t, tr)
-	if err := tr.Store.SetMemberSession(tm.ID, "frontend", "", "%3"); err != nil {
+	w.panes = append(w.panes, tmux.Pane{ID: "%3", PID: 300})
+	if err := tr.Store.SetMemberPane(tm.ID, "frontend", "%3", 300); err != nil {
 		t.Fatal(err)
 	}
-	tr.HasPane = func(pane string) bool { return pane == "%3" }
 	var killed []string
 	tr.KillPane = func(pane string) error { killed = append(killed, pane); return nil }
 
