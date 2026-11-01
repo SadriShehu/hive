@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
@@ -40,24 +39,25 @@ type taskEditor struct {
 }
 
 // taskForm edits one task, or adds one: title, body, owner and after; for
-// done and block, just the note.
+// done and block, just the note. Every field wraps rather than scrolling its
+// text out of view.
 type taskForm struct {
 	kind  taskFormKind
 	n     int // the task edited, done or blocked
 	field int
-	title textinput.Model
+	title textarea.Model
 	body  textarea.Model
-	owner textinput.Model
-	after textinput.Model
+	owner textarea.Model
+	after textarea.Model
 	note  textarea.Model
 }
 
 func newTaskForm(kind taskFormKind, n, w int) *taskForm {
 	f := &taskForm{kind: kind, n: n}
-	f.title = newInput("", "what needs doing")
+	f.title = newPromptArea("what needs doing")
 	f.body = newPromptArea("details (optional)")
-	f.owner = newInput("", "a role, or blank")
-	f.after = newInput("", "1,2; blank for none")
+	f.owner = newPromptArea("a role, or blank")
+	f.after = newPromptArea("1,2; blank for none")
 	f.note = newPromptArea("what changed (optional)")
 	if kind == taskFormBlock {
 		f.note.Placeholder = "why it is blocked"
@@ -67,9 +67,9 @@ func newTaskForm(kind taskFormKind, n, w int) *taskForm {
 }
 
 func (f *taskForm) layout(w int) {
-	f.title.Width = max(10, w-12)
-	f.owner.Width = max(10, w-12)
-	f.after.Width = max(10, w-12)
+	f.title.SetWidth(max(10, w-12))
+	f.owner.SetWidth(max(10, w-12))
+	f.after.SetWidth(max(10, w-12))
 	f.body.SetWidth(max(10, w-12))
 	f.note.SetWidth(max(10, w-12))
 }
@@ -103,6 +103,24 @@ func (f *taskForm) focus(field int) tea.Cmd {
 		return f.after.Focus()
 	}
 	return nil
+}
+
+// area is the field the form is on, which takes the caret keys.
+func (f *taskForm) area() *textarea.Model {
+	if f.kind == taskFormDone || f.kind == taskFormBlock {
+		return &f.note
+	}
+	switch f.field {
+	case taskFieldTitle:
+		return &f.title
+	case taskFieldBody:
+		return &f.body
+	case taskFieldOwner:
+		return &f.owner
+	case taskFieldAfter:
+		return &f.after
+	}
+	return &f.note
 }
 
 func (f *taskForm) update(msg tea.KeyMsg) tea.Cmd {
@@ -241,10 +259,20 @@ func (m Model) keyTaskForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.taskEdit.form = nil
 		return m, nil
-	case "tab", "down":
+	case "tab":
 		return m, f.focus((f.field + 1) % f.fields())
-	case "shift+tab", "up":
+	case "shift+tab":
 		return m, f.focus((f.field + f.fields() - 1) % f.fields())
+	case "up", "down":
+		// Inside a field that has text, up and down move the caret through
+		// its wrapped lines; tab moves between fields.
+		if f.area().Value() == "" {
+			step := 1
+			if msg.String() == "up" {
+				step = -1
+			}
+			return m, f.focus((f.field + step + f.fields()) % f.fields())
+		}
 	case "enter":
 		if f.field < f.fields()-1 {
 			return m, f.focus(f.field + 1)
@@ -429,36 +457,53 @@ func (m Model) taskFormLines(w, h int) []string {
 	if tm.Name != "" {
 		heading += sDim.Render(" · " + tm.Name)
 	}
-	field := func(i int, name, value string) string {
-		mark := "  "
+	mark := func(i int) string {
 		if f.field == i {
-			mark = sAccent.Render("› ")
+			return sAccent.Render("› ")
 		}
-		return mark + sDim.Render(fmt.Sprintf("%-8s", name)) + value
+		return "  "
 	}
 	out := []string{sBold.Render(heading), ""}
 	if f.kind == taskFormDone || f.kind == taskFormBlock {
-		note := visibleRows(f.note, max(1, h-formChromeRows-1))
-		out = append(out, field(0, map[taskFormKind]string{taskFormDone: "note", taskFormBlock: "why"}[f.kind], note[0]))
-		for _, line := range note[1:] {
-			out = append(out, strings.Repeat(" ", 10)+line)
-		}
+		label := map[taskFormKind]string{taskFormDone: "note", taskFormBlock: "why"}[f.kind]
+		out = append(out, fieldLines(mark(0), label, f.note, 8, w, max(1, h-formChromeRows-1))...)
 		out = append(out, "", sDim.Render("hive posts it to the channel, and to the lead when an agent leads."))
 		return fit(out, w, h)
 	}
-	body := visibleRows(f.body, max(1, min(6, h-formChromeRows)))
+	// Each field grows a few rows to show its text; the body takes what is
+	// left, so the form keeps the screen's height.
+	titleRows := fieldRows(f.title, 5)
+	ownerRows := fieldRows(f.owner, 2)
+	afterRows := fieldRows(f.after, 2)
+	bodyRows := max(1, min(6, h-4-titleRows-ownerRows-afterRows))
+	out = append(out, fieldLines(mark(taskFieldTitle), "title", f.title, 8, w, titleRows)...)
+	out = append(out, fieldLines(mark(taskFieldBody), "body", f.body, 8, w, bodyRows)...)
+	out = append(out, fieldLines(mark(taskFieldOwner), "owner", f.owner, 8, w, ownerRows)...)
+	out = append(out, fieldLines(mark(taskFieldAfter), "after", f.after, 8, w, afterRows)...)
 	out = append(out,
-		field(taskFieldTitle, "title", f.title.View()),
-		field(taskFieldBody, "body", body[0]),
-	)
-	for _, line := range body[1:] {
-		out = append(out, strings.Repeat(" ", 10)+line)
-	}
-	out = append(out,
-		field(taskFieldOwner, "owner", f.owner.View()),
-		field(taskFieldAfter, "after", f.after.View()),
 		"",
 		sDim.Render("the owner is a role on the team; after waits for tasks on the board, like 1,2."),
 	)
 	return fit(out, w, h)
+}
+
+// fieldRows is how many rows a wrapped form field draws, at most most.
+func fieldRows(area textarea.Model, most int) int {
+	return max(1, min(most, len(strings.Split(area.View(), "\n"))))
+}
+
+// fieldLines draws a form field whose text wraps: the label with the first
+// line, the rest indented under it. It shows at most rows lines, around the
+// cursor, cut to the screen's width.
+func fieldLines(mark, label string, area textarea.Model, labelW, w, rows int) []string {
+	indent := "  " + strings.Repeat(" ", labelW)
+	var out []string
+	for i, line := range visibleRows(area, rows) {
+		prefix := indent
+		if i == 0 {
+			prefix = mark + sDim.Render(fmt.Sprintf("%-*s", labelW, label))
+		}
+		out = append(out, ansi.Truncate(prefix+line, w, ""))
+	}
+	return out
 }

@@ -148,3 +148,84 @@ func TestTaskEditorFitsANarrowWindow(t *testing.T) {
 		t.Errorf("narrow view has %d lines, want 20", len(strings.Split(view, "\n")))
 	}
 }
+
+// The task form's fields wrap as they grow: a long title and body keep their
+// start and end on screen, the screen keeps its height, and what is saved is
+// the whole text.
+func TestALongTaskFormFieldsWrap(t *testing.T) {
+	m, ops := teamWithTasks(t)
+	m = press(t, m, "e")
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "n")
+
+	title := "START " + strings.Repeat("a long task title stays readable ", 5) + "END"
+	for _, r := range title {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	check := func(what string) {
+		t.Helper()
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "START") || !strings.Contains(view, "END") {
+			t.Errorf("%s: the form scrolled its text out of view:\n%s", what, view)
+		}
+		for _, line := range strings.Split(view, "\n") {
+			if width := ansi.StringWidth(line); width > m.width {
+				t.Errorf("%s: a line is %d wide, past the %d screen:\n%s", what, width, m.width, line)
+			}
+		}
+		if got := len(strings.Split(view, "\n")); got != m.height {
+			t.Errorf("%s: view has %d lines, want %d", what, got, m.height)
+		}
+		if n := len(m.taskFormLines(m.width, m.height)); n != m.height {
+			t.Errorf("%s: form is %d lines, want %d", what, n, m.height)
+		}
+	}
+	check("title")
+
+	m = press(t, m, "tab") // body
+	body := "START " + strings.Repeat("the details wrap too ", 6) + "END"
+	for _, r := range body {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	check("body")
+
+	m = press(t, m, "tab") // owner
+	if got := m.taskEdit.form.area().Value(); got != "" {
+		t.Fatalf("tab didn't leave the body: focused field holds %q", got)
+	}
+	m = press(t, m, "tab") // after; enter submits
+	m = press(t, m, "enter")
+	if len(ops.taskAdded) != 1 {
+		t.Fatalf("adds = %+v", ops.taskAdded)
+	}
+	if got := ops.taskAdded[0]; got.title != title || got.body != body {
+		t.Fatalf("saved title %q body %q, want the whole wrapped text", got.title, got.body)
+	}
+}
+
+// Up and down move the caret through a wrapped task field; tab still moves
+// between fields.
+func TestUpDownMoveTheCaretInsideATaskTextField(t *testing.T) {
+	m, _ := teamWithTasks(t)
+	m = press(t, m, "e")
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "n")
+	for _, r := range strings.Repeat("wrapped title words stay editable ", 5) {
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	before := cursorRow(m.taskEdit.form.title)
+	if before < 1 {
+		t.Fatalf("the title didn't wrap; cursor row = %d", before)
+	}
+	m = press(t, m, "up")
+	if after := cursorRow(m.taskEdit.form.title); after >= before {
+		t.Fatalf("up moved the caret from row %d to %d, want it up", before, after)
+	}
+	if m.taskEdit.form.field != taskFieldTitle {
+		t.Fatalf("up left the title for field %d, want the caret to move, not the focus", m.taskEdit.form.field)
+	}
+	m = press(t, m, "tab")
+	if m.taskEdit.form.field != taskFieldBody {
+		t.Fatalf("tab left field %d, want the body", m.taskEdit.form.field)
+	}
+}
