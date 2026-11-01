@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -34,7 +36,8 @@ func newStatusCmd() *cobra.Command {
 			defer st.Close()
 			// Claude Code pipes its status JSON into the status line; keep
 			// the rate limits it reports for the channel view.
-			captureRateLimits(st)
+			data := readStatusInput()
+			captureRateLimits(st, data)
 			style := ansiStyles
 			switch {
 			case forTmux:
@@ -103,18 +106,69 @@ type rateWindow struct {
 	ResetsAt       int64   `json:"resets_at"`
 }
 
-// captureRateLimits reads the status JSON Claude Code writes to the status
-// line's stdin, and records the rate limits it carries. It does nothing when
-// stdin is a terminal (a person runs it), when no JSON comes, or when the
-// tool sent none. Claude is the tool that reports them this way, so they go
-// under its name.
-func captureRateLimits(st *store.Store) {
+// statusInputWait is how long readStatusInput waits for more status JSON
+// once the pipe stops sending: a caller that keeps stdin open and writes
+// nothing must not hang the status line.
+const statusInputWait = 200 * time.Millisecond
+
+// readStatusInput reads the status JSON Claude Code writes to the status
+// line's stdin. It returns nil when stdin is a terminal (a person runs it),
+// or when the pipe stays open without sending for statusInputWait.
+func readStatusInput() []byte {
 	fi, err := os.Stdin.Stat()
 	if err != nil || fi.Mode()&os.ModeCharDevice != 0 {
-		return
+		return nil
 	}
-	data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
-	if err != nil || len(data) == 0 {
+	var (
+		mu   sync.Mutex
+		buf  bytes.Buffer
+		seen atomic.Int64
+		done = make(chan struct{})
+	)
+	go func() {
+		defer close(done)
+		tmp := make([]byte, 4096)
+		for seen.Load() < 1<<20 {
+			n, err := os.Stdin.Read(tmp)
+			if n > 0 {
+				mu.Lock()
+				buf.Write(tmp[:n])
+				mu.Unlock()
+				seen.Add(int64(n))
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	timer := time.NewTimer(statusInputWait)
+	defer timer.Stop()
+	last := int64(0)
+	take := func() []byte {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]byte(nil), buf.Bytes()...)
+	}
+	for {
+		select {
+		case <-done:
+			return take()
+		case <-timer.C:
+			if n := seen.Load(); n == last {
+				return take()
+			} else {
+				last = n
+				timer.Reset(statusInputWait)
+			}
+		}
+	}
+}
+
+// captureRateLimits records the rate limits the status JSON carries, for the
+// channel view. It does nothing when no JSON came or the tool sent none.
+// Claude is the tool that reports them this way, so they go under its name.
+func captureRateLimits(st *store.Store, data []byte) {
+	if len(data) == 0 {
 		return
 	}
 	var payload struct {
