@@ -76,6 +76,10 @@ func (t *Tracker) AddTask(tm store.Team, by, title, body, owner string, after []
 // keeping its number and status. The owner must be on the team, and after
 // must name tasks already on the board, as when a task is added. It loses,
 // naming who moved it, when another member changed the task meanwhile.
+//
+// A claimed task given to another owner, or to none, is open again: the
+// member that held it hears it no longer does, and a new owner hears the
+// task is theirs when it is ready.
 func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, after []int) (store.Task, error) {
 	title = strings.TrimSpace(team.Clean(title))
 	if title == "" {
@@ -111,7 +115,8 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 	old := tasks[i]
 	task := old
 	task.Title, task.Body, task.Owner, task.After = title, strings.TrimSpace(team.Clean(body)), owner, after
-	if task.Status == store.TaskClaimed && task.Owner == "" {
+	moved := owner != old.Owner
+	if task.Status == store.TaskClaimed && moved {
 		task.Status, task.Note = store.TaskOpen, ""
 	}
 	task.UpdatedAt = t.World.Now()
@@ -122,7 +127,23 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 	if !ok {
 		return store.Task{}, t.stale(old)
 	}
-	return task, nil
+	if !moved {
+		return task, nil
+	}
+	var errs []error
+	if old.Status == store.TaskClaimed && onTeam(members, old.Owner) {
+		to := "nobody"
+		if owner != "" {
+			to = owner
+		}
+		_, err := t.tell(tm, members, old.Owner, fmt.Sprintf("#%d %s is given to %s, so you no longer hold it.", task.N, task.Title, to))
+		errs = append(errs, err)
+	}
+	if owner != "" && team.Ready(task, tasks) {
+		_, err := t.tell(tm, members, owner, team.ReadyNote(task, ""))
+		errs = append(errs, err)
+	}
+	return task, errors.Join(errs...)
 }
 
 // ClaimTask makes a task by's to work on. It is refused on a paused team,

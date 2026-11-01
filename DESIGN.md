@@ -632,7 +632,9 @@ teammate can't paint the user's terminal.
   `esc` goes back to the tree, or from a form back to the board. The user acts as `you`
   on the API: the owner must be a role on the team, and `after` must name tasks already
   on the board, as when one is added. An edit also can't make a task wait on itself through
-  a cycle, and clearing the owner of a claimed task reopens it. An edit is applied over the
+  a cycle. Clearing the owner of a claimed task, or giving it to another, reopens it: the
+  member that held it is told, and a new owner hears it is theirs once it is ready, as
+  when a task is added for them. An edit is applied over the
   task as it was read, and loses, naming who has it, when someone moved it meanwhile.
 
 ### In the tree

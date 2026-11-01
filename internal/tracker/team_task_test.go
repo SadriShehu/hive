@@ -125,6 +125,51 @@ func TestEditClearingTheOwnerReleasesAClaimedTask(t *testing.T) {
 	}
 }
 
+func TestEditGivingAClaimedTaskToAnotherOwnerReopensItForThem(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	addTask(t, tr, "schema", "backend")
+	addTask(t, tr, "table", "", 1)
+	tm := theTeam(t, tr)
+	if _, err := tr.ClaimTask(tm, "backend", 1, false); err != nil {
+		t.Fatal(err)
+	}
+	task, err := tr.EditTask(tm, 1, "schema", "", "frontend", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != store.TaskOpen || task.Owner != "frontend" {
+		t.Fatalf("#1 = %s/%q, want it open for frontend, not claimed for it unasked", task.Status, task.Owner)
+	}
+	bodies := func(role string) string {
+		msgs, err := tr.Store.Pending("t1", role)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, m := range msgs {
+			out = append(out, m.Body)
+		}
+		return strings.Join(out, "|")
+	}
+	if got := bodies("frontend"); !strings.Contains(got, "#1 schema is yours, and ready") {
+		t.Errorf("frontend's mail = %q, want the ready note", got)
+	}
+	if got := bodies("backend"); !strings.Contains(got, "#1 schema is given to frontend, so you no longer hold it") {
+		t.Errorf("backend's mail = %q, want word that it lost #1", got)
+	}
+	if _, err := tr.ClaimTask(tm, "frontend", 1, false); err != nil {
+		t.Errorf("frontend couldn't claim it: %v", err)
+	}
+
+	// A task that still waits for one gets its owner no note until it is ready.
+	if _, err := tr.EditTask(tm, 2, "table", "", "backend", []int{1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := bodies("backend"); strings.Contains(got, "#2") {
+		t.Errorf("backend's mail = %q, want no note for #2 before #1 is done", got)
+	}
+}
+
 func TestDoneTellsTheLeadAndTheOwnersOfReadyTasks(t *testing.T) {
 	tr, w, sent := newTeamWorld(t)
 	backendUp(t, tr, w)
