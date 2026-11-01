@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 )
 
@@ -29,34 +30,19 @@ func newStatusCmd() *cobra.Command {
 			"tmux.conf; `hive install tmux` prints the line with your current right side in it.\n" +
 			"Set the whole value: `set -ag` would add another copy each time tmux.conf is loaded.\n\n" +
 			"--tmux colors it with tmux's own style tags. tmux runs it again every status-interval\n" +
-			"(15s unless set), so a lower one shows changes sooner.",
+			"(15s unless set), so a lower one shows changes sooner.\n\n" +
+			"Claude Code sends its rate limits only to its status line. If you already have one\n" +
+			"(say ~/.claude/statusline.py), set Claude Code's statusLine.command to\n" +
+			"`hive status --then ~/.claude/statusline.py`: hive records the limits for the team\n" +
+			"channel, then runs your line with the same JSON and prints what it prints.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st, _, sessions, err := openTracker()
+			code, err := runStatus(cmd, forTmux, then)
 			if err != nil {
 				return err
 			}
-			defer st.Close()
-			// Claude Code pipes its status JSON into the status line; keep
-			// the rate limits it reports for the channel view.
-			data := readStatusInput()
-			captureRateLimits(st, data)
-			if then != "" {
-				// Hand the same JSON to the user's own status line, and
-				// keep its line and exit status exactly as it was.
-				code := runThen(then, data, cmd.OutOrStdout(), cmd.ErrOrStderr())
-				st.Close()
+			if code != 0 {
 				os.Exit(code)
-			}
-			style := ansiStyles
-			switch {
-			case forTmux:
-				style = tmuxStyles
-			case !useColor():
-				style = nil
-			}
-			if line := statusText(sessions, style); line != "" {
-				fmt.Println(line)
 			}
 			return nil
 		},
@@ -64,6 +50,37 @@ func newStatusCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&forTmux, "tmux", false, "color it with tmux style tags, for the status line")
 	cmd.Flags().StringVar(&then, "then", "", "run this status-line command with the same JSON, after recording its rate limits")
 	return cmd
+}
+
+// runStatus is the status command without the exit: it returns the code a
+// --then line brings from the user's own command, which the caller exits with.
+func runStatus(cmd *cobra.Command, forTmux bool, then string) (int, error) {
+	// Claude Code pipes its status JSON into the status line; read it first,
+	// so a --then line works even when hive can't open its own database.
+	data := readStatusInput()
+	if then != "" {
+		// The user's status line must not depend on hive: record what we
+		// can, ignoring any error, then run it and keep its line.
+		recordRateLimits(data)
+		return runThen(then, data, cmd.OutOrStdout(), cmd.ErrOrStderr()), nil
+	}
+	st, _, sessions, err := openTracker()
+	if err != nil {
+		return 0, err
+	}
+	defer st.Close()
+	captureRateLimits(st, data)
+	style := ansiStyles
+	switch {
+	case forTmux:
+		style = tmuxStyles
+	case !useColor():
+		style = nil
+	}
+	if line := statusText(sessions, style); line != "" {
+		fmt.Println(line)
+	}
+	return 0, nil
 }
 
 // A count's style, around its text: for each of attention, working and idle.
@@ -198,9 +215,16 @@ func captureRateLimits(st *store.Store, data []byte) {
 	if w := payload.RateLimits.Seven; w != nil {
 		q.SevenUsed, q.SevenReset = w.UsedPercentage, w.ResetsAt
 	}
-	if !q.Empty() {
-		st.SetQuota(q)
+	if q.Empty() {
+		return
 	}
+	// Claude Code redraws often; don't rewrite the same windows.
+	if old, ok, err := st.Quota(q.Tool); err == nil && ok &&
+		old.FiveUsed == q.FiveUsed && old.FiveReset == q.FiveReset &&
+		old.SevenUsed == q.SevenUsed && old.SevenReset == q.SevenReset {
+		return
+	}
+	st.SetQuota(q)
 }
 
 // runThen runs the user's own status-line command with the JSON hive read,
@@ -218,4 +242,18 @@ func runThen(command string, data []byte, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// recordRateLimits stores the rate limits in the JSON with a plain database
+// open, and ignores any error: the user's own status line must still draw.
+func recordRateLimits(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	st, err := store.Open(paths.DBPath())
+	if err != nil {
+		return
+	}
+	defer st.Close()
+	captureRateLimits(st, data)
 }

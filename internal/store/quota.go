@@ -1,5 +1,10 @@
 package store
 
+import (
+	"database/sql"
+	"errors"
+)
+
 // Quota is a tool account's rate-limit windows, as the tool last reported
 // them. The percents are 0 to 100, and the resets are unix seconds, 0 when
 // the tool didn't say.
@@ -32,6 +37,17 @@ func (s *Store) SetQuota(q Quota) error {
 		(tool, five_used, five_resets, seven_used, seven_resets, at) VALUES (?, ?, ?, ?, ?, ?)`,
 		q.Tool, q.FiveUsed, q.FiveReset, q.SevenUsed, q.SevenReset, q.At)
 	return err
+}
+
+// Quota returns one tool's last reported windows.
+func (s *Store) Quota(tool string) (Quota, bool, error) {
+	var q Quota
+	err := s.db.QueryRow(`SELECT tool, five_used, five_resets, seven_used, seven_resets, at FROM quota_limits WHERE tool = ?`,
+		tool).Scan(&q.Tool, &q.FiveUsed, &q.FiveReset, &q.SevenUsed, &q.SevenReset, &q.At)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Quota{}, false, nil
+	}
+	return q, err == nil, err
 }
 
 // Quotas returns every tool's last reported windows, by tool.
