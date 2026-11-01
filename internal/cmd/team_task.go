@@ -18,17 +18,20 @@ import (
 )
 
 // roleOn is the caller's role on a team: --as, else the role it plays there,
-// else "".
-func (e *teamEnv) roleOn(tm store.Team, as string) string {
+// else "". --as is checked: an agent may only name a role it plays, never you.
+func (e *teamEnv) roleOn(tm store.Team, as string) (string, error) {
 	if as != "" {
-		return as
+		if err := e.checkAs(tm, as); err != nil {
+			return "", err
+		}
+		return as, nil
 	}
 	for _, r := range e.roles {
 		if r.Team.ID == tm.ID {
-			return r.Member.Role
+			return r.Member.Role, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // taskFlags are the flags every task command takes.
@@ -47,7 +50,12 @@ func (f *taskFlags) open() (*teamEnv, store.Team, string, error) {
 		e.st.Close()
 		return nil, store.Team{}, "", err
 	}
-	return e, tm, e.sender(tm, f.as), nil
+	who, err := e.sender(tm, f.as)
+	if err != nil {
+		e.st.Close()
+		return nil, store.Team{}, "", err
+	}
+	return e, tm, who, nil
 }
 
 func newTeamTaskCmd() *cobra.Command {
@@ -329,7 +337,11 @@ func newTeamWaitCmd() *cobra.Command {
 				ctx, cancel = context.WithTimeout(ctx, timeout)
 				defer cancel()
 			}
-			lines, err := e.tr.WaitTeam(ctx, tm, e.roleOn(tm, as), o)
+			role, err := e.roleOn(tm, as)
+			if err != nil {
+				return err
+			}
+			lines, err := e.tr.WaitTeam(ctx, tm, role, o)
 			if errors.Is(err, context.DeadlineExceeded) {
 				return fmt.Errorf("nothing after %s", timeout)
 			}
@@ -344,7 +356,7 @@ func newTeamWaitCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&ref, "team", "", "the team (default: the caller's)")
-	f.StringVar(&as, "as", "", "wait as this role, for scripts")
+	f.StringVar(&as, "as", "", "wait as this role: a script's, or one the running agent plays")
 	f.StringVar(&task, "task", "", "wait for this task to be done or blocked")
 	f.StringVar(&from, "from", "", "wait for a message from this role")
 	f.BoolVar(&anything, "any", false, "wait for anything on the board")

@@ -32,7 +32,11 @@ func newTeamDoneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			d, err := e.tr.DoneTeam(tm, e.sender(tm, ""), clean)
+			who, err := e.sender(tm, "")
+			if err != nil {
+				return err
+			}
+			d, err := e.tr.DoneTeam(tm, who, clean)
 			printDone(tm, d, clean, err)
 			return err
 		},

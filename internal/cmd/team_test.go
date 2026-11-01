@@ -20,16 +20,49 @@ func TestSenderNeverPassesAnAgentOffAsTheUser(t *testing.T) {
 		to   store.Team
 		as   string
 		want string
+		err  string
 	}{
-		{"a member, on its team", teamEnv{caller: "claude:A", roles: backend}, api, "", "backend"},
-		{"a member, on another team", teamEnv{caller: "claude:A", roles: backend}, web, "", "api/backend"},
-		{"an agent on no team", teamEnv{caller: "claude:C"}, api, "", "claude:C"},
-		{"a shell outside any agent", teamEnv{}, api, "", store.FromYou},
-		{"--as", teamEnv{caller: "claude:C"}, api, "lead", "lead"},
+		{"a member, on its team", teamEnv{caller: "claude:A", roles: backend}, api, "", "backend", ""},
+		{"a member, on another team", teamEnv{caller: "claude:A", roles: backend}, web, "", "api/backend", ""},
+		{"an agent on no team", teamEnv{caller: "claude:C"}, api, "", "claude:C", ""},
+		{"a shell outside any agent", teamEnv{}, api, "", store.FromYou, ""},
+		{"--as, a role it plays", teamEnv{caller: "claude:A", roles: backend}, api, "backend", "backend", ""},
+		{"--as, a script's", teamEnv{}, api, "lead", "lead", ""},
+		{"--as you, from an agent", teamEnv{caller: "claude:A", roles: backend}, api, store.FromYou, "", "can't write as you"},
+		{"--as another role, from an agent", teamEnv{caller: "claude:A", roles: backend}, api, "lead", "", "plays no such role"},
+		{"--as its role, on another team", teamEnv{caller: "claude:A", roles: backend}, web, "backend", "", "plays no such role"},
 	} {
-		if got := c.e.sender(c.to, c.as); got != c.want {
-			t.Errorf("%s: sender = %q, want %q", c.name, got, c.want)
+		got, err := c.e.sender(c.to, c.as)
+		if c.err != "" {
+			if err == nil || !strings.Contains(err.Error(), c.err) {
+				t.Errorf("%s: sender = %q, %v; want an error naming %q", c.name, got, err, c.err)
+			}
+			continue
 		}
+		if err != nil || got != c.want {
+			t.Errorf("%s: sender = %q, %v, want %q", c.name, got, err, c.want)
+		}
+	}
+}
+
+func TestRoleOnRefusesAnAgentsAs(t *testing.T) {
+	api := store.Team{ID: "t1", Name: "api"}
+	backend := []tracker.Role{{Team: api, Member: store.Member{TeamID: "t1", Role: "backend"}}}
+	agent := teamEnv{caller: "claude:A", roles: backend}
+	if got, err := agent.roleOn(api, ""); err != nil || got != "backend" {
+		t.Errorf("the agent's role = %q, %v; want backend", got, err)
+	}
+	if got, err := agent.roleOn(api, "backend"); err != nil || got != "backend" {
+		t.Errorf("--as its role = %q, %v; want backend", got, err)
+	}
+	for _, as := range []string{store.FromYou, "lead"} {
+		if got, err := agent.roleOn(api, as); err == nil {
+			t.Errorf("an agent waited as %q = %q, want it refused", as, got)
+		}
+	}
+	script := teamEnv{}
+	if got, err := script.roleOn(api, "lead"); err != nil || got != "lead" {
+		t.Errorf("a script's --as = %q, %v; want lead", got, err)
 	}
 }
 
