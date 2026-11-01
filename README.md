@@ -397,7 +397,7 @@ your terminal.
 | `hive team inbox [--wait] [--timeout d]` | print the messages queued for this member, on every team it is on |
 | `hive team add <team> <role>=<tool>[:<model>]` · `rm <team> <role>` · `stop <team> [--yes]` | add a member · retire one · stop them all (asks first; `--yes` skips) |
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
-| `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail, members or tasks; `--clean` removes merged worktrees |
+| `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail, members or tasks, and its tasks no longer move; `--clean` removes merged worktrees |
 | `hive team mute <team> <role>` · `unmute <team> <role>` | pause hive's delivery to one member · let it go on |
 
 Inside a member the team and the role are implied; an agent on two teams names the one

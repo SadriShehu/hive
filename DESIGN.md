@@ -598,7 +598,8 @@ teammate can't paint the user's terminal.
   (#1, #2, …), with a title, details (`--body`), an owner (a role) and the tasks it waits
   for (`--after 1,2`). It can wait only for tasks already on the board, so tasks never wait
   for each other in a ring. A task is open, claimed, done or blocked; its note says what
-  done changed, or why it is blocked. A done team takes no new tasks.
+  done changed, or why it is blocked. A done team's board is closed: no task is added,
+  claimed, edited, closed or blocked.
 - **Claiming.** `claim <n>` makes a task the caller's. It is refused, with the reason,
   for a task that waits for one that isn't done (naming them), that is another member's
   or claimed by one, and on a paused or done team; `--force` overrides all but the pause,
@@ -613,8 +614,7 @@ teammate can't paint the user's terminal.
   the mailbox and out of your feed, since the post already names them: `#5 admin table
   view is yours, and ready (#4 done by backend: …). hive team task claim 5 takes it.` A
   task added with an owner and nothing left to wait for is told at once. Whoever closed a
-  task reads what became ready in the command's output instead. On a done team a task can
-  still be closed, but that adds no post or mail.
+  task reads what became ready in the command's output instead.
 - **Waiting.** `hive team wait` looks at the board twice a second, as `hive wait` does,
   and prints what happened: a task as hive words it, a message in its envelope. With no
   flag it returns when any task is done or blocked, or mail comes for the caller; `--task
