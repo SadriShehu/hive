@@ -1078,7 +1078,7 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 }
 
 // memberState says what a member is doing, as tracker.MemberState does, from
-// the member row and the tree's snapshot. #28 clears a member's pane and
+// the member row and the tree's snapshot. Refresh clears a member's pane and
 // pane PID once the pane is gone, so a record with neither is stopped; that
 // avoids asking tmux on every redraw.
 func memberState(mem store.Member, s store.Session, found bool) string {

@@ -757,3 +757,44 @@ func TestNewTeamRefusesAModelItCantPlaceBeforeAnythingStarts(t *testing.T) {
 		t.Errorf("resolveModels = %+v, %v; want the IDs claude takes", specs, err)
 	}
 }
+
+// Refresh forgets a pane-only member's pane once it is gone, so the board and
+// the TUI say stopped, not starting forever. A pane hive still runs keeps its
+// record.
+func TestRefreshForgetsAMembersPaneOnceItIsGone(t *testing.T) {
+	tr, w, _ := newTeamWorld(t)
+	tm := theTeam(t, tr)
+	// frontend's launched pane still runs.
+	w.panes = append(w.panes, tmux.Pane{ID: "%3", PID: 300})
+	if err := tr.Store.SetMemberPane(tm.ID, "frontend", "%3", 300); err != nil {
+		t.Fatal(err)
+	}
+	// backend's pane is gone.
+	if err := tr.Store.SetMemberPane(tm.ID, "backend", "%9", 900); err != nil {
+		t.Fatal(err)
+	}
+	// lead's pane ID was reused by another pane (same ID, another PID).
+	if err := tr.Store.SetMemberPane(tm.ID, "lead", "%1", 55); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := tr.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	members, err := tr.Store.Members(tm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range members {
+		switch m.Role {
+		case "frontend":
+			if m.Pane != "%3" || m.PanePID != 300 {
+				t.Errorf("frontend lost the pane hive still runs: %+v", m)
+			}
+		case "backend", "lead":
+			if m.Pane != "" || m.PanePID != 0 {
+				t.Errorf("%s kept a pane that isn't hive's: %+v", m.Role, m)
+			}
+		}
+	}
+}
