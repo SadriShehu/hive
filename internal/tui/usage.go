@@ -470,21 +470,20 @@ func shortSessionID(id string) string {
 // quotaText words a tool account's rate-limit windows: "5h 7% · resets 4h54m
 // · 7d 22%". A window the tool didn't report is left out.
 func quotaText(q store.Quota, now time.Time) string {
+	// A window whose reset has passed says nothing now: hive can't know the
+	// new percentage, so it shows nothing rather than the stale one.
+	live := func(reset int64) bool { return reset == 0 || reset > now.Unix() }
 	var parts []string
 	resets := func(at int64) string {
-		d := time.Unix(at, 0).Sub(now)
-		if d < 0 {
-			d = 0
-		}
-		return "resets " + human.Span(d)
+		return "resets " + human.Span(time.Unix(at, 0).Sub(now))
 	}
-	if q.FiveUsed > 0 || q.FiveReset > 0 {
+	if (q.FiveUsed > 0 || q.FiveReset > 0) && live(q.FiveReset) {
 		parts = append(parts, fmt.Sprintf("5h %d%%", int(math.Round(q.FiveUsed))))
 		if q.FiveReset > 0 {
 			parts = append(parts, resets(q.FiveReset))
 		}
 	}
-	if q.SevenUsed > 0 || q.SevenReset > 0 {
+	if (q.SevenUsed > 0 || q.SevenReset > 0) && live(q.SevenReset) {
 		parts = append(parts, fmt.Sprintf("7d %d%%", int(math.Round(q.SevenUsed))))
 		if q.SevenReset > 0 {
 			parts = append(parts, resets(q.SevenReset))
