@@ -223,12 +223,11 @@ func (t *Tracker) RetireMember(tm store.Team, role string) error {
 	if err != nil {
 		return err
 	}
-	var stop *store.Session
+	var stop *store.Member
 	for _, m := range members {
-		if m.Role == role && m.Active() && m.SessionID != "" {
-			if s, ok, _ := t.Store.Get(m.SessionID); ok && s.Live() {
-				stop = &s
-			}
+		if m.Role == role && m.Active() {
+			mm := m
+			stop = &mm
 		}
 	}
 	if err := t.Store.RetireMember(tm.ID, role, t.World.Now()); err != nil {
@@ -244,9 +243,32 @@ func (t *Tracker) RetireMember(tm store.Team, role string) error {
 	}
 	if stop != nil {
 		t.World.Forget()
-		return t.Stop(*stop)
+		_, err := t.stopMember(*stop)
+		return err
 	}
 	return nil
+}
+
+// stopMember ends a member's agent, whether hive knows its session yet or
+// only the pane it was started in. It reports whether it stopped one.
+func (t *Tracker) stopMember(m store.Member) (bool, error) {
+	if m.SessionID != "" {
+		s, ok, err := t.Store.Get(m.SessionID)
+		if err != nil {
+			return false, err
+		}
+		if ok && s.PID > 0 {
+			return true, t.Stop(s)
+		}
+	}
+	if m.Pane == "" || !t.paneExists(m.Pane) {
+		return false, nil
+	}
+	if t.KillPane != nil {
+		return true, t.KillPane(m.Pane)
+	}
+	_, err := tmux.Run("kill-pane", "-t", m.Pane)
+	return true, err
 }
 
 // StopTeam stops every member that runs and returns how many it stopped.
@@ -259,18 +281,17 @@ func (t *Tracker) StopTeam(tm store.Team) (int, error) {
 	var errs []error
 	n := 0
 	for _, m := range members {
-		if !m.Active() || m.SessionID == "" {
+		if !m.Active() {
 			continue
 		}
-		s, ok, err := t.Store.Get(m.SessionID)
-		if err != nil || !ok || s.PID <= 0 {
-			continue
-		}
-		if err := t.Stop(s); err != nil {
+		stopped, err := t.stopMember(m)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", m.Role, err))
 			continue
 		}
-		n++
+		if stopped {
+			n++
+		}
 	}
 	if n > 0 {
 		t.system(tm, fmt.Sprintf("stopped %d members", n))
