@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -274,9 +275,13 @@ func Notify(text, pane string) error {
 // commands (#(…)): a session title is the agent's to choose.
 func literal(text string) string { return strings.ReplaceAll(text, "#", "##") }
 
+// pastes numbers each Paste's buffer, so pastes at once from one process
+// each keep their own text.
+var pastes atomic.Int64
+
 // Paste types text into pane as a bracketed paste, then presses Enter.
 func Paste(pane, text string) error {
-	buffer := fmt.Sprintf("hive-%d", os.Getpid())
+	buffer := fmt.Sprintf("hive-%d-%d", os.Getpid(), pastes.Add(1))
 	load := command("load-buffer", "-b", buffer, "-")
 	load.Stdin = strings.NewReader(text)
 	if out, err := load.CombinedOutput(); err != nil {

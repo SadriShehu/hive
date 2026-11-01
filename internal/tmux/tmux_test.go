@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -80,6 +81,48 @@ func TestWindowsPasteAndCapture(t *testing.T) {
 	windows, err := Windows("base")
 	if err != nil || len(windows) != 2 || windows[1] != "rec" {
 		t.Fatalf("windows = %v, %v", windows, err)
+	}
+}
+
+// Pastes at once from one process, as the TUI makes when it sends while a
+// resume is typing, each reach their own pane.
+func TestPastesAtOnceKeepTheirPanes(t *testing.T) {
+	isolated(t)
+	dir := t.TempDir()
+	var panes []string
+	for i := range 2 {
+		pane, err := NewWindow(Window{Session: "base", Name: fmt.Sprintf("rec%d", i), Dir: dir, Detached: true,
+			Argv: []string{"/bin/sh", "-c", fmt.Sprintf("stty -echo; echo ready; cat > p%d", i)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "the recorder", func() bool { screen, _ := Capture(pane.ID); return strings.Contains(screen, "ready") })
+		panes = append(panes, pane.ID)
+	}
+	const rounds = 6
+	errs := make(chan error, rounds*len(panes))
+	for r := range rounds {
+		var wg sync.WaitGroup
+		for i, pane := range panes {
+			wg.Go(func() { errs <- Paste(pane, fmt.Sprintf("for-%d-round-%d", i, r)) })
+		}
+		wg.Wait()
+	}
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for i := range panes {
+		var data []byte
+		waitFor(t, "every paste", func() bool {
+			data, _ = os.ReadFile(filepath.Join(dir, fmt.Sprintf("p%d", i)))
+			return strings.Count(string(data), "\n") >= rounds
+		})
+		if got, want := strings.Count(string(data), fmt.Sprintf("for-%d-", i)), rounds; got != want || strings.Contains(string(data), fmt.Sprintf("for-%d-", 1-i)) {
+			t.Errorf("pane %d got %q, want its own %d lines only", i, data, want)
+		}
 	}
 }
 
