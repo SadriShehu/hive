@@ -52,6 +52,14 @@ export const HivePlugin = async () => ({
       case "session.idle":
         status(p.sessionID, "idle")
         return
+      case "session.error": {
+        // An interrupted turn emits session.error and no idle or status
+        // event, so mark the aborted session idle here. A later retry/busy
+        // status moves it back to working.
+        const name = p.error?.name ?? ""
+        if (p.sessionID && (name === "MessageAbortedError" || name === "AbortError")) status(p.sessionID, "idle")
+        return
+      }
       case "permission.asked":
       case "permission.updated":
         status(p.sessionID, "attention")

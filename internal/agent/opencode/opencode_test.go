@@ -66,3 +66,11 @@ func TestParseHook(t *testing.T) {
 		t.Error("unknown event accepted")
 	}
 }
+
+func TestPluginMarksAnAbortedSessionIdle(t *testing.T) {
+	for _, want := range []string{`case "session.error"`, "MessageAbortedError", `status(p.sessionID, "idle")`} {
+		if !strings.Contains(pluginSource, want) {
+			t.Errorf("the plugin does not handle an aborted turn: it lacks %q", want)
+		}
+	}
+}
