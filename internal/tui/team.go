@@ -837,7 +837,7 @@ func (f teamForm) memberHeight(i, w int) int {
 		area  textarea.Model
 		width int
 	}{{row.role, role}, {row.tool, tool}, {row.model, model}, {row.prompt, part}} {
-		height = max(height, fieldRows(c.area, memberCellRows))
+		height = max(height, len(visibleRows(c.area, memberCellRows)))
 	}
 	return height
 }

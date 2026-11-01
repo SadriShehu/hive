@@ -1134,3 +1134,33 @@ func TestALongTeamGoalAndPartWrap(t *testing.T) {
 		t.Errorf("view has %d lines, want %d", got, m.height)
 	}
 }
+
+// With several short members, the form draws every row rather than counting
+// each wrapping cell as four lines. A long part still wraps.
+func TestAShortTeamFormShowsEveryMember(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = press(t, m, "T")
+	for range 4 {
+		m = press(t, m, "+")
+	}
+	roles := []string{"one", "two", "three", "four", "five"}
+	for i, role := range roles {
+		setTeamRow(&m, i, role, "claude", "", "")
+	}
+	view := ansi.Strip(m.View())
+	for _, role := range roles {
+		if !strings.Contains(view, role) {
+			t.Errorf("member %q isn't shown:\n%s", role, view)
+		}
+	}
+	m.teamForm.members[0].prompt.SetValue("START " + strings.Repeat("a long part stays readable ", 4) + "END")
+	m.teamForm.focus(m.teamForm.membersAt() + memberPart)
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "START") || !strings.Contains(view, "END") {
+		t.Errorf("the form cut a long part:\n%s", view)
+	}
+	if got := len(strings.Split(view, "\n")); got != m.height {
+		t.Errorf("view has %d lines, want %d", got, m.height)
+	}
+}
