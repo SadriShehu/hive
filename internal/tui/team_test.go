@@ -1314,4 +1314,22 @@ func TestATeamHeadInTheUsageBodyIsFetched(t *testing.T) {
 	if ops.usagesAsked == 0 {
 		t.Error("the team head in the usage body didn't fetch usage")
 	}
+
+	// A plain session in the usage body has no team head: no member fetch.
+	m, ops = setup(t, false)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.showUsage = true
+	if !m.usageTakesTheBody() {
+		t.Fatal("setup: the usage panel doesn't take the body for a session")
+	}
+	if m.teamUsageInView() {
+		t.Fatal("a plain session's usage body counts as a team view")
+	}
+	m.lastSync = now
+	ops.usagesAsked = 0
+	m.quotasAt = time.Time{}
+	m = step(t, m, tickMsg(now))
+	if ops.usagesAsked != 0 {
+		t.Errorf("a plain session fetched every usage %d times", ops.usagesAsked)
+	}
 }
