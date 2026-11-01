@@ -1089,11 +1089,18 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	if t.Workspace == store.WorkspaceWorktrees {
 		where += " · a worktree per member"
 	}
-	head := []string{
-		sAccent.Bold(true).Render("⬡ "+t.Name) + sDim.Render(" · "+ansi.Truncate(cleanLine(t.Goal), max(1, w-len(t.Name)-5), "…")),
-		sDim.Render(ansi.Truncate(fmt.Sprintf("%d members · led by %s · %s · started %s ago",
-			len(members), led, where, age(m.now(), t.CreatedAt)), w, "…")),
+	head := []string{sAccent.Bold(true).Render("⬡ " + t.Name)}
+	if goal := strings.TrimSpace(cleanLine(t.Goal)); goal != "" {
+		for i, line := range strings.Split(ansi.Wrap(goal, max(10, w-4), ""), "\n") {
+			prefix := "    "
+			if i == 0 {
+				prefix = "  " + sDim.Render("· ")
+			}
+			head = append(head, prefix+sDim.Render(line))
+		}
 	}
+	head = append(head, sDim.Render(ansi.Truncate(fmt.Sprintf("%d members · led by %s · %s · started %s ago",
+		len(members), led, where, age(m.now(), t.CreatedAt)), w, "…")))
 	if _, trashed := m.trashedTeamByID(t.ID); trashed {
 		head = append(head, sError.Render("in the trash · r restores it · d deletes it for good"))
 	} else if isDone(&t) {
@@ -1101,17 +1108,24 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	} else if t.Paused {
 		head = append(head, sError.Render("⏸ paused: no mail is delivered · p resumes"))
 	}
-	var roster []string
 	for _, mem := range members {
 		s, ok := m.memberSession(mem)
 		g, gs := "◌", sDim
 		if ok {
 			g, gs = glyph(s)
 		}
-		roster = append(roster, gs.Render(g)+" "+sText.Render(mem.Role))
-	}
-	if len(roster) > 0 {
-		head = append(head, strings.Join(roster, "  "))
+		// The member's part is long text: it wraps under its role.
+		text := mem.Role
+		if part := strings.TrimSpace(cleanLine(mem.Prompt)); part != "" {
+			text += " · " + part
+		}
+		for i, line := range strings.Split(ansi.Wrap(text, max(10, w-4), ""), "\n") {
+			prefix := "    "
+			if i == 0 {
+				prefix = "  " + gs.Render(g) + " "
+			}
+			head = append(head, prefix+sText.Render(line))
+		}
 	}
 	return head
 }
