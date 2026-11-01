@@ -52,6 +52,9 @@ func (t *Tracker) AddTask(tm store.Team, by, title, body, owner string, after []
 	if err != nil {
 		return store.Task{}, nil, err
 	}
+	if err := closed(tm); err != nil {
+		return store.Task{}, nil, err
+	}
 	owner = strings.TrimPrefix(strings.TrimSpace(owner), "@")
 	if owner != "" && !onTeam(members, owner) {
 		return store.Task{}, nil, fmt.Errorf("the team has no %s; roles: %s", owner, team.Roster(members))
@@ -125,6 +128,9 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 func (t *Tracker) ClaimTask(tm store.Team, by string, n int, force bool) (store.Task, error) {
 	tm, members, tasks, err := t.board(tm.ID)
 	if err != nil {
+		return store.Task{}, err
+	}
+	if err := closed(tm); err != nil {
 		return store.Task{}, err
 	}
 	if tm.Paused {
@@ -272,6 +278,9 @@ func (t *Tracker) toLead(tm store.Team, members []store.Member, by string) []str
 // announce adds hive's post about a task to the channel, queued for roles,
 // and delivers it to them. A post for one role is shown as to that role.
 func (t *Tracker) announce(tm store.Team, members []store.Member, body string, roles []string, private bool) ([]Sent, error) {
+	if tm.Status == store.TeamDone {
+		return nil, nil // a done team takes no new post or mail
+	}
 	to := ""
 	if len(roles) == 1 {
 		to = roles[0]
