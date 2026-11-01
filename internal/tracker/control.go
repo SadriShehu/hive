@@ -52,6 +52,14 @@ func (t *Tracker) adapter(tool string) agent.Adapter {
 	return nil
 }
 
+// newWindow opens a tmux window for a new agent, or the test's stand-in.
+func (t *Tracker) newWindow(w tmux.Window) (tmux.Pane, error) {
+	if t.StartWindow != nil {
+		return t.StartWindow(w)
+	}
+	return tmux.NewWindow(w)
+}
+
 // Launch starts a new interactive agent in its own tmux window, picking
 // the tool or the model first when asked to.
 func (t *Tracker) Launch(ctx context.Context, o LaunchOptions) (Launched, error) {
@@ -98,7 +106,7 @@ func (t *Tracker) Launch(ctx context.Context, o LaunchOptions) (Launched, error)
 		env[ParentEnv] = o.ParentID
 	}
 	started := t.World.Now()
-	pane, err := tmux.NewWindow(tmux.Window{Session: o.Session, Name: windowName(o.Tool, cwd),
+	pane, err := t.newWindow(tmux.Window{Session: o.Session, Name: windowName(o.Tool, cwd),
 		Dir: cwd, Env: env, Argv: argv, Detached: o.Detached})
 	if err != nil {
 		return Launched{}, err
@@ -168,7 +176,7 @@ func (t *Tracker) Resume(s store.Session, prompt string, o LaunchOptions) (Launc
 		cwd = paths.Home() // the project folder is gone; the tool will say what it can
 	}
 	started := t.World.Now()
-	pane, err := tmux.NewWindow(tmux.Window{Session: o.Session, Name: windowName(s.Tool, cwd),
+	pane, err := t.newWindow(tmux.Window{Session: o.Session, Name: windowName(s.Tool, cwd),
 		Dir: cwd, Env: t.memberEnv(s.ID), Argv: argv, Detached: o.Detached})
 	if err != nil {
 		return Launched{}, err

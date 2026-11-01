@@ -79,11 +79,16 @@ func (t *Tracker) ToolModels(ctx context.Context, tool string) ([]string, error)
 // modelDefault is what a person types for the tool's own default model.
 const modelDefault = "default"
 
+// longContextSuffix marks a model's long-context variant ("claude-sonnet-5-5[1m]").
+const longContextSuffix = "[1m]"
+
 // ResolveModel turns the model a person asked tool for into the ID its
 // model flag takes: "" or "default" is the tool's default (""), auto stays
-// auto, an ID the tool runs stays as it is, and a name for one ("opus 5.5",
-// "Opus-5.5") becomes that ID. A model hive can't place, or one that could
-// be several, is an error that lists what the tool runs.
+// auto, an alias the tool takes stays as it is, and a name for an ID
+// ("opus 5.5", "Opus-5.5") becomes that ID, keeping a [1m] long-context
+// suffix. A model hive can't place, or one that could be several, is an
+// error that lists what the tool runs. A tool hive knows no models for takes
+// the model as it is: hive can't check it.
 func (t *Tracker) ResolveModel(ctx context.Context, tool, model string) (string, error) {
 	model = strings.TrimSpace(model)
 	switch {
@@ -96,23 +101,36 @@ func (t *Tracker) ResolveModel(ctx context.Context, tool, model string) (string,
 	if a == nil {
 		return "", fmt.Errorf("hive doesn't know %q", tool)
 	}
-	if !a.Spec().TakesModel() {
+	spec := a.Spec()
+	if !spec.TakesModel() {
 		return "", fmt.Errorf("hive can't set the model for %s: its start command has no {model}; add one in config.toml", tool)
 	}
+	if slices.Contains(spec.ModelAliases, model) {
+		return model, nil
+	}
+	base := strings.TrimSuffix(model, longContextSuffix)
+	long := model[len(base):]
 	ids, err := t.ToolModels(ctx, tool)
 	if err != nil {
 		return "", fmt.Errorf("can't check model %q for %s: %w", model, tool, err)
 	}
-	found := matchModel(model, ids, a.Spec().Models)
+	if len(ids) == 0 {
+		return model, nil // no list to check it against: the tool decides
+	}
+	found := matchModel(base, ids, spec.Models)
 	switch {
 	case len(found) == 1:
-		return found[0], nil
+		return found[0] + long, nil
 	case len(found) > 1:
 		return "", fmt.Errorf("model %q could be any of %s's %s; name one", model, tool, strings.Join(found, ", "))
-	case len(ids) == 0:
-		return "", fmt.Errorf("%s has no model %q, and hive knows none it runs; add them to its [[agent]] models in config.toml", tool, model)
 	}
-	return "", fmt.Errorf("%s has no model %q; it runs %s", tool, model, listModels(tool, ids))
+	// The tool's list is what it names now; the price catalog also knows IDs
+	// older versions of the tool still take (Claude Code keeps old IDs).
+	if m, ok := t.Models.Match(base); ok {
+		return m.Name + long, nil
+	}
+	return "", fmt.Errorf("%s has no model %q; it runs %s; add one to its [[agent]] models in config.toml if the tool takes it",
+		tool, model, listModels(tool, ids))
 }
 
 // listModels names the models a tool runs, the first dozen of a long list.

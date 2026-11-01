@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/tmux"
 	"github.com/sadrishehu/hive/internal/usage"
 )
 
@@ -61,7 +63,8 @@ func modelWorld(t *testing.T) *Tracker {
 	}
 	adapters := []agent.Adapter{
 		fakeTool{agent.Spec{Name: "claude", New: []string{"claude", "--model", "{model}", "{prompt}"},
-			Models: []string{"claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-4-5", "claude-opus-4.6-fast"}}},
+			Models:       []string{"claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-4-5", "claude-opus-4.6-fast"},
+			ModelAliases: []string{"opusplan"}}},
 		listingTool{fakeTool: fakeTool{agent.Spec{Name: "opencode", New: []string{"opencode", "--model", "{model}", "--prompt", "{prompt}"}}},
 			models: []string{"deepseek/deepseek-v4-pro", "google-vertex/claude-opus-5-5@default", "google-vertex-anthropic/claude-opus-5-5@default", "opencode/mystery-free"}},
 		fakeTool{agent.Spec{Name: "plain", New: []string{"plain", "{prompt}"}, Models: []string{"gpt-6-pro"}}},
@@ -155,6 +158,9 @@ func TestPickPrefersTheParentsToolAndNeedsAModelFlag(t *testing.T) {
 
 func TestResolveModelTurnsANameIntoTheToolsID(t *testing.T) {
 	tr := modelWorld(t)
+	// A tool with a {model} flag and no list hive knows: hive can't check it.
+	tr.Adapters = append(tr.Adapters, fakeTool{agent.Spec{Name: "bare",
+		New: []string{"bare", "--model", "{model}", "{prompt}"}}})
 	ctx := context.Background()
 	for _, c := range []struct{ tool, model, want string }{
 		{"claude", "claude-opus-5-5", "claude-opus-5-5"},
@@ -164,6 +170,11 @@ func TestResolveModelTurnsANameIntoTheToolsID(t *testing.T) {
 		{"claude", "Claude Sonnet 5.5", "claude-sonnet-5-5"},
 		{"claude", "sonnet", "claude-sonnet-5-5"},
 		{"claude", "opus 4.6", "claude-opus-4.6-fast"},
+		{"claude", "claude-opus-4-8", "claude-opus-4-8"},  // in the price catalog, not the tool's current list
+		{"claude", "sonnet[1m]", "claude-sonnet-5-5[1m]"}, // a long-context suffix stays on the ID
+		{"claude", "claude-sonnet-5-5[1m]", "claude-sonnet-5-5[1m]"},
+		{"claude", "opusplan", "opusplan"}, // an alias Claude Code takes as it is
+		{"bare", "x", "x"},                 // no list to check against: passed through
 		{"claude", "", ""},
 		{"claude", "default", ""},
 		{"claude", fusion.Auto, fusion.Auto},
@@ -185,7 +196,7 @@ func TestResolveModelRefusesWhatItCantPlace(t *testing.T) {
 		tool, model string
 		want        []string
 	}{
-		{"claude", "opus 5.7", []string{`claude has no model "opus 5.7"`, "it runs claude-fable-5-1, claude-sonnet-5-5, claude-haiku-4-5, claude-opus-4.6-fast, claude-opus-5-5"}},
+		{"claude", "opus 5.7", []string{`claude has no model "opus 5.7"`, "it runs claude-fable-5-1, claude-sonnet-5-5, claude-haiku-4-5, claude-opus-4.6-fast, claude-opus-5-5", "[[agent]] models in config.toml"}},
 		{"claude", "--", []string{`claude has no model "--"`}},
 		{"opencode", "opus 5.5", []string{`could be any of opencode's google-vertex/claude-opus-5-5@default, google-vertex-anthropic/claude-opus-5-5@default`, "name one"}},
 		{"plain", "gpt-6-pro", []string{"{model}"}},
@@ -208,5 +219,33 @@ func TestALongModelListIsCutInTheError(t *testing.T) {
 	got := listModels("opencode", ids)
 	if !strings.HasPrefix(got, "m-0, m-1,") || !strings.HasSuffix(got, "m-11 and 8 more (`hive models opencode` lists them)") {
 		t.Errorf("listModels = %q", got)
+	}
+}
+
+// The model a person types reaches the argv the way the tool names it, and a
+// model hive can't place starts nothing.
+func TestLaunchResolvesTheModelIntoTheArgv(t *testing.T) {
+	tr := modelWorld(t)
+	dir := t.TempDir()
+	var started tmux.Window
+	tr.StartWindow = func(w tmux.Window) (tmux.Pane, error) {
+		started = w
+		return tmux.Pane{ID: "%9", PID: 999}, nil
+	}
+	ctx := context.Background()
+	launched, err := tr.Launch(ctx, LaunchOptions{Tool: "claude", Model: "opus 5.5", Cwd: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launched.Model != "claude-opus-5-5" || !slices.Contains(started.Argv, "claude-opus-5-5") {
+		t.Fatalf("launched %+v with argv %v; want claude-opus-5-5 in the argv", launched, started.Argv)
+	}
+
+	started = tmux.Window{}
+	if _, err := tr.Launch(ctx, LaunchOptions{Tool: "claude", Model: "opus 5.7", Cwd: dir}); err == nil {
+		t.Fatal("an unknown model started an agent")
+	}
+	if len(started.Argv) != 0 {
+		t.Fatalf("a window opened for a model hive refused: %v", started.Argv)
 	}
 }
