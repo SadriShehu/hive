@@ -1,9 +1,11 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // Statuses of a task on a team's board.
@@ -198,6 +200,82 @@ func (s *Store) EditTask(old, t Task) (bool, error) {
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// sameTask reports whether now is still the task old was read as.
+func sameTask(now, old Task) bool {
+	return now.Status == old.Status && now.Owner == old.Owner && now.Title == old.Title &&
+		now.Body == old.Body && slices.Equal(now.After, old.After)
+}
+
+// UpdateTaskChecked moves a task from what was read (old) to t, and lets check
+// see the team's whole board as it is inside the same transaction, with t in
+// place, so that a check over the board and the write can't race another
+// member's edit. It reports false when the task changed since old was read,
+// and writes nothing when check refuses.
+func (s *Store) UpdateTaskChecked(old, t Task, check func(tasks []Task) error) (bool, error) {
+	if t.After == nil {
+		t.After = []int{}
+	}
+	if old.After == nil {
+		old.After = []int{}
+	}
+	after, err := json.Marshal(t.After)
+	if err != nil {
+		return false, err
+	}
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+	// The read must be under the write lock: two edits that each check the
+	// board before either writes can leave a ring otherwise.
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			conn.ExecContext(ctx, "ROLLBACK")
+		}
+	}()
+	rows, err := conn.QueryContext(ctx, `SELECT `+taskColumns+` FROM team_tasks WHERE team_id = ? ORDER BY n`, old.TeamID)
+	if err != nil {
+		return false, err
+	}
+	tasks, err := scanTasks(rows)
+	if err != nil {
+		return false, err
+	}
+	i := slices.IndexFunc(tasks, func(x Task) bool { return x.N == old.N })
+	if i < 0 || !sameTask(tasks[i], old) {
+		return false, nil
+	}
+	tasks[i] = t
+	if check != nil {
+		if err := check(tasks); err != nil {
+			return false, err
+		}
+	}
+	res, err := conn.ExecContext(ctx, `UPDATE team_tasks SET title = ?, body = ?, status = ?, owner = ?, after = ?, note = ?, updated_at = ?
+		WHERE team_id = ? AND n = ?`,
+		t.Title, t.Body, t.Status, t.Owner, string(after), t.Note, t.UpdatedAt, old.TeamID, old.N)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, nil
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE teams SET updated_at = MAX(updated_at, ?) WHERE id = ?`, t.UpdatedAt, old.TeamID); err != nil {
+		return false, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return false, err
+	}
+	committed = true
+	return true, nil
 }
 
 // MessagesAfter returns a team's messages after id, oldest first, private
