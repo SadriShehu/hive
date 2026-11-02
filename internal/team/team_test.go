@@ -156,3 +156,52 @@ func TestBriefSaysWhoLeads(t *testing.T) {
 		}
 	}
 }
+
+func TestTheLeadSeesTeammatesParts(t *testing.T) {
+	members := []store.Member{
+		{Role: "lead", Tool: "claude"},
+		{Role: "backend", Tool: "codex", Prompt: "own internal/"},
+		{Role: "frontend", Tool: "claude", Prompt: "own web/\nand the routes"},
+		{Role: "old", Tool: "claude", Prompt: "gone", LeftAt: 1},
+	}
+	tm := store.Team{Name: "api", Goal: "ship", Cwd: "/work", LeadRole: "lead"}
+	b := Brief(tm, members[0], members)
+	for _, want := range []string{
+		"Goal: ship\nTeammates' parts:\n- backend: own internal/\n- frontend: own web/ and the routes\n",
+		"built around each teammate's part, each with an owner",
+	} {
+		if !strings.Contains(b, want) {
+			t.Errorf("lead brief lacks %q:\n%s", want, b)
+		}
+	}
+	if strings.Contains(b, "old:") {
+		t.Errorf("lead brief lists a retired member's part:\n%s", b)
+	}
+
+	members[1].Prompt, members[2].Prompt = "", ""
+	b = Brief(tm, members[0], members)
+	if strings.Contains(b, "Teammates' parts:") {
+		t.Errorf("lead brief lists parts when no one has one:\n%s", b)
+	}
+	if !strings.Contains(b, "You lead. Turn the goal into tasks, each with an owner") {
+		t.Errorf("lead brief without parts = %q", b)
+	}
+}
+
+func TestAMemberWithNoPartWaitsForTheLead(t *testing.T) {
+	members := []store.Member{{Role: "lead", Tool: "claude"}, {Role: "backend", Tool: "codex"}}
+	tm := store.Team{Name: "api", Goal: "ship", Cwd: "/work", LeadRole: "lead"}
+	b := Brief(tm, members[1], members)
+	if !strings.Contains(b, "You have no part of your own yet") || !strings.Contains(b, "The lead is lead.") {
+		t.Errorf("member with no part = %q", b)
+	}
+
+	members[1].Prompt = "own internal/"
+	b = Brief(tm, members[1], members)
+	if !strings.Contains(b, "then claim a task of yours, or wait for one") {
+		t.Errorf("member with a part = %q", b)
+	}
+	if strings.Contains(b, "no part of your own") {
+		t.Errorf("member with a part is told it has none:\n%s", b)
+	}
+}

@@ -117,6 +117,22 @@ func Roster(members []store.Member) string {
 	return strings.Join(parts, ", ")
 }
 
+// teammateParts lists the other active members' parts, one line each, for the
+// lead's brief. It is empty when no other member has one.
+func teammateParts(members []store.Member, lead string) string {
+	var b strings.Builder
+	for _, o := range members {
+		if !o.Active() || o.Role == lead || o.Prompt == "" {
+			continue
+		}
+		if b.Len() == 0 {
+			b.WriteString("Teammates' parts:\n")
+		}
+		fmt.Fprintf(&b, "- %s: %s\n", o.Role, flat(o.Prompt))
+	}
+	return b.String()
+}
+
 // Brief is the first prompt of a member: the goal, its part, the roster, and
 // how to work through hive. It is the one place hive talks to an agent.
 func Brief(t store.Team, m store.Member, members []store.Member) string {
@@ -124,6 +140,11 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 	fmt.Fprintf(&b, "You are %s on the hive team %s (%s), in %s.\n\n", m.Role, t.Name, Roster(members), Folder(t, m))
 	if t.Goal != "" {
 		fmt.Fprintf(&b, "Goal: %s\n", t.Goal)
+	}
+	parts := ""
+	if t.LeadRole != "" && m.Role == t.LeadRole {
+		parts = teammateParts(members, t.LeadRole)
+		b.WriteString(parts)
 	}
 	if m.Prompt != "" {
 		fmt.Fprintf(&b, "Your part: %s\n", m.Prompt)
@@ -144,14 +165,24 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 	b.WriteString(workLine(t, m, members))
 	switch {
 	case m.Role == t.LeadRole:
-		b.WriteString("\nYou lead. Turn the goal into tasks, each with an owner and the tasks it waits for: " +
+		lead := "\nYou lead. Turn the goal into tasks, each with an owner and the tasks it waits for: "
+		if parts != "" {
+			lead = "\nYou lead. Turn the goal into tasks built around each teammate's part, each with an owner " +
+				"and the tasks it waits for: "
+		}
+		b.WriteString(lead +
 			"`hive team task add \"title\" --owner <role> --after <n,…>`. Review what is marked done, integrate it, " +
 			"and post when the goal is met.\n")
 	case t.LeadRole == "":
 		b.WriteString("\nThe human leads this team from hive and writes to you in the channel. " +
 			"Start by reading `hive team board`, then claim a task of yours, or wait for your part.\n")
 	default:
-		b.WriteString("\nStart with `hive team board`, then claim a task of yours, or wait for one. The lead is " + t.LeadRole + ".\n")
+		if m.Prompt == "" {
+			b.WriteString("\nStart with `hive team board`. You have no part of your own yet: wait for a task " +
+				"from the lead; hive wakes you when one is yours. The lead is " + t.LeadRole + ".\n")
+		} else {
+			b.WriteString("\nStart with `hive team board`, then claim a task of yours, or wait for one. The lead is " + t.LeadRole + ".\n")
+		}
 	}
 	return b.String()
 }
