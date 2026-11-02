@@ -150,6 +150,20 @@ without the tree open:
   tmux    = false  # to turn the tmux message off
   ```
 
+- **A command**, to reach a phone or a chat with no daemon: any program on your
+  PATH, run detached with the text, hive's title, the session ID and its folder
+  filled in. It runs without a shell, so each element is one argument and nothing
+  needs quoting. An [ntfy](https://ntfy.sh) push, for example:
+
+  ```toml
+  [alerts]
+  command = ["ntfy", "pub", "my-topic", "{text}"]
+  ```
+
+  `{text}` is `claude ‹Admin phase 2› needs you`; `{title}` is `hive`; `{id}` and
+  `{cwd}` are the session's ID and folder. A failure goes to hive's log, like the
+  other alerts.
+
 ## Use from the shell
 
 ```sh
