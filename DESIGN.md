@@ -131,6 +131,12 @@ preview and `hive tail`), `ResumeChecker` (refuses reopens the tool would fail),
 `Prewarmer` (sessions a tool starts ahead of use, hidden until their first message) and
 `Purger` (deletes a session from the tool's own storage for good).
 
+An install is a plan first. `PlanInstall` and `PlanUninstall` return the files and their
+new contents without touching anything, and both a real run and `--dry-run` go through
+that plan; the real run then applies it with the same backups as before. The tmux binding
+writer plans the same way, so `hive install --dry-run` can show its diff without running
+a tmux command.
+
 `Purger` uses the tool's own delete wherever there is one, and treats a session that is
 already gone as deleted. Only IDs made of letters, digits, `-` and `_` reach a file path.
 
@@ -438,8 +444,8 @@ Start here, Sessions, Teams, Housekeeping, and For tmux and hooks.
 | `hive trash restore <id>` | bring it back with everything under it |
 | `hive trash purge <id> \| --all [--yes]` | delete for good, from the tools too, deepest first; asks first, and without a terminal needs `--yes` |
 | `hive sync [--full]` | import past sessions and link past spawns |
-| `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a] [--next-key A]` | connect tools and bind the popup and needs-you keys; idempotent, backs up first |
-| `hive uninstall [...]` | remove exactly what install added |
+| `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a] [--next-key A] [--dry-run]` | connect tools and bind the popup and needs-you keys; idempotent, backs up first; `--dry-run` prints a unified diff of every file and changes nothing |
+| `hive uninstall [...] [--dry-run]` | remove exactly what install added; `--dry-run` shows the removal first |
 | `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and the `ERROR` lines logged in the last day, with the last three |
 | `hive team …` | [teams](#teams): start one, follow its channel, write to its members |
 | `hive hook <tool>` | for integrations only; prints nothing, always exits 0 |

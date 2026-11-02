@@ -102,31 +102,61 @@ func (a *Adapter) Installed() bool {
 // Install writes the plugin, pointed at hiveBin.
 func (a *Adapter) Install(hiveBin string) (string, error) {
 	path := a.pluginPath()
-	bin, _ := json.Marshal(hiveBin)
-	content := strings.Replace(pluginSource, "__HIVE_BIN__", string(bin), 1)
-	existing, err := os.ReadFile(path)
-	switch {
-	case err == nil && string(existing) == content:
-		return "already installed at " + path, nil
-	case err == nil && !strings.HasPrefix(string(existing), marker):
-		return "", errors.New(path + " exists and was not written by hive; not touching it")
-	case err != nil && !errors.Is(err, fs.ErrNotExist):
+	changes, err := a.PlanInstall(hiveBin)
+	if err != nil {
 		return "", err
 	}
-	if err := agent.WriteFileAtomic(path, []byte(content), 0o644); err != nil {
+	if len(changes) == 0 {
+		return "already installed at " + path, nil
+	}
+	if err := agent.Apply(changes); err != nil {
 		return "", err
 	}
 	return "wrote plugin " + path + " (running sessions pick it up after a restart)", nil
 }
 
+// PlanInstall returns the change Install would make, without making it.
+func (a *Adapter) PlanInstall(hiveBin string) ([]agent.Change, error) {
+	path := a.pluginPath()
+	bin, _ := json.Marshal(hiveBin)
+	content := strings.Replace(pluginSource, "__HIVE_BIN__", string(bin), 1)
+	existing, err := os.ReadFile(path)
+	switch {
+	case err == nil && string(existing) == content:
+		return nil, nil
+	case err == nil && !strings.HasPrefix(string(existing), marker):
+		return nil, errors.New(path + " exists and was not written by hive; not touching it")
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
+		return nil, err
+	}
+	return []agent.Change{{Path: path, Old: existing, New: []byte(content), Mode: 0o644}}, nil
+}
+
 // Uninstall removes the plugin if hive wrote it.
 func (a *Adapter) Uninstall() (string, error) {
 	path := a.pluginPath()
-	if !a.Installed() {
+	changes, err := a.PlanUninstall()
+	if err != nil {
+		return "", err
+	}
+	if len(changes) == 0 {
 		return "not installed at " + path, nil
 	}
-	if err := os.Remove(path); err != nil {
+	if err := agent.Apply(changes); err != nil {
 		return "", err
 	}
 	return "removed plugin " + path, nil
+}
+
+// PlanUninstall returns the change Uninstall would make, without making it.
+func (a *Adapter) PlanUninstall() ([]agent.Change, error) {
+	path := a.pluginPath()
+	if !a.Installed() {
+		return nil, nil
+	}
+	existing, _, err := agent.Current(path)
+	if err != nil {
+		return nil, err
+	}
+	return []agent.Change{{Path: path, Old: existing, Remove: true}}, nil
 }
