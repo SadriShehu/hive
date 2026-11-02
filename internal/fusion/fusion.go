@@ -213,6 +213,7 @@ type Choice struct {
 	Met       bool // it meets every level the task asks for
 	Qualified int  // how many candidates met them
 	Reason    string
+	Notes     []string // why a tool was left out, for the explanation
 }
 
 // Pick chooses among candidates for need: the lightest model that meets
