@@ -659,7 +659,8 @@ tasks done. Its preview is the board and the channel, under a strip of the membe
 board takes at most half, folding the done tasks first. A member's row is titled by the
 task it holds (`backend · #4 handlers…`), else by what its session does.
 
-`↵` on a team opens its channel full screen: the team's name, goal, roster and state, the
+`↵` on a team opens its channel full screen: the team's name and goal on one line, how it
+runs, then one line per member with its state, model, context and the task it holds, the
 task board and the feed, with a live line at the bottom. Typing writes to everyone
 (`@role` for one), `↵` sends through the same mailbox as `s`, `esc` goes back to the tree,
 and the prompt wraps: `↑/↓` move the caret once typing, and `pgup`/`pgdn` (or `ctrl+u`/
