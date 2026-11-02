@@ -369,8 +369,8 @@ func (m Model) formLines(w, h int) []string {
 	folders := f.folderLines(h - formChromeRows - 1)
 	prompt := visibleRows(f.prompt, h-formChromeRows-len(folders))
 	out = append(out,
-		field(fieldTool, "tool", choices(f.tools, f.tool, func(t string) lipgloss.Style { return toolStyle(t) })),
-		field(fieldModel, "model", f.modelLine()),
+		field(fieldTool, "tool", choices(f.tools, f.tool, max(8, w-9), func(t string) lipgloss.Style { return toolStyle(t) })),
+		field(fieldModel, "model", f.modelLine(max(8, w-9))),
 		field(fieldFolder, "folder", f.folder.View()),
 	)
 	out = append(out, folders...)
@@ -385,22 +385,69 @@ func (m Model) formLines(w, h int) []string {
 	return fit(out, w, h)
 }
 
-// choices draws a row of choices with the selected one in brackets.
-func choices(items []string, selected int, style func(string) lipgloss.Style) string {
-	var parts []string
+// choices draws a row of choices with the selected one in brackets. When the
+// row is wider than w it shows a window around the selected choice, with … on
+// either side of the hidden ones and the position at the end.
+func choices(items []string, selected, w int, style func(string) lipgloss.Style) string {
+	if len(items) == 0 {
+		return ""
+	}
+	selected = max(0, min(selected, len(items)-1))
+	rendered := make([]string, len(items))
 	for i, item := range items {
 		if i == selected {
-			parts = append(parts, style(item).Bold(true).Render("‹ "+item+" ›"))
+			rendered[i] = style(item).Bold(true).Render("‹ " + item + " ›")
 		} else {
-			parts = append(parts, sDim.Render(item))
+			rendered[i] = sDim.Render(item)
 		}
 	}
-	return strings.Join(parts, "  ")
+	all := strings.Join(rendered, "  ")
+	if ansi.StringWidth(all) <= w {
+		return all
+	}
+	pos := sDim.Render(fmt.Sprintf("%d/%d", selected+1, len(items)))
+	line := func(lo, hi int) string {
+		out := strings.Join(rendered[lo:hi+1], "  ")
+		if lo > 0 {
+			out = sDim.Render("…") + "  " + out
+		}
+		if hi < len(items)-1 {
+			out += "  " + sDim.Render("…")
+		}
+		return out + "  " + pos
+	}
+	lo, hi := selected, selected
+	if ansi.StringWidth(line(lo, hi)) > w {
+		label := ansi.Truncate(items[selected], max(1, w-8), "…")
+		return ansi.Truncate(style(label).Bold(true).Render("‹ "+label+" ›"), w, "")
+	}
+	for {
+		grew := false
+		preferLeft := selected-lo <= hi-selected
+		for _, left := range []bool{preferLeft, !preferLeft} {
+			if left && lo > 0 {
+				if next := line(lo-1, hi); ansi.StringWidth(next) <= w {
+					lo, grew = lo-1, true
+					break
+				}
+			}
+			if !left && hi < len(items)-1 {
+				if next := line(lo, hi+1); ansi.StringWidth(next) <= w {
+					hi, grew = hi+1, true
+					break
+				}
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+	return line(lo, hi)
 }
 
 // modelLine draws the model field: for a tool, its choices; for auto, the
 // mode, which ←/→ flips.
-func (f form) modelLine() string {
+func (f form) modelLine(w int) string {
 	if f.toolName() == fusion.Auto {
 		what := "picks the tool and the model for the prompt"
 		if f.mode == fusion.ModeModel {
@@ -408,11 +455,12 @@ func (f form) modelLine() string {
 		}
 		return sAccent.Bold(true).Render("‹ "+string(f.mode)+" ›") + "  " + sDim.Render(what+" · ←/→ changes the mode")
 	}
-	line := choices(f.modelChoices(), min(f.model, len(f.modelChoices())-1), func(string) lipgloss.Style { return sAccent })
+	loading := ""
 	if f.loadingModels() {
-		line += "  " + sDim.Render("loading what it runs…")
+		loading = "  " + sDim.Render("loading what it runs…")
+		w -= ansi.StringWidth("  loading what it runs…")
 	}
-	return line
+	return choices(f.modelChoices(), min(f.model, len(f.modelChoices())-1), max(8, w), func(string) lipgloss.Style { return sAccent }) + loading
 }
 
 // explain says what starts, under the form.

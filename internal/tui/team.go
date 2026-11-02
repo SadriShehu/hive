@@ -624,12 +624,12 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 }
 
 // templateLine draws the template row: none, or a saved roster.
-func (f teamForm) templateLine() string {
+func (f teamForm) templateLine(w int) string {
 	names := []string{"none"}
 	for _, t := range f.templates {
 		names = append(names, t.Name)
 	}
-	line := choices(names, f.template, func(string) lipgloss.Style { return sAccent })
+	line := choices(names, f.template, w, func(string) lipgloss.Style { return sAccent })
 	switch {
 	case f.template > 0:
 		line += "  " + sDim.Render("fills the form; the name stays yours")
@@ -941,7 +941,7 @@ func (m Model) teamFormLines(w, h int) []string {
 	single := func(i int, name, value string) string {
 		return mark(i) + sDim.Render(fmt.Sprintf("%-8s", name)) + value
 	}
-	leadLine := choices(f.leads, f.lead, func(t string) lipgloss.Style { return toolStyle(t) })
+	leadLine := choices(f.leads, f.lead, max(8, w-10), func(t string) lipgloss.Style { return toolStyle(t) })
 	if f.leads[f.lead] == "none" {
 		leadLine += "  " + sDim.Render("you lead from the tree")
 	}
@@ -953,11 +953,11 @@ func (m Model) teamFormLines(w, h int) []string {
 	folderRows := fieldRows(f.folder, 3)
 	role, tool, model, _ := memberWidths(w)
 	out := []string{sBold.Render("New team"), "",
-		single(tfTemplate, "template", f.templateLine()),
+		single(tfTemplate, "template", f.templateLine(max(8, w-10))),
 	}
 	out = append(out, fieldLines(mark(tfName), "name", f.name, 8, w, nameRows)...)
 	out = append(out, fieldLines(mark(tfFolder), "folder", f.folder, 8, w, folderRows)...)
-	out = append(out, single(tfWork, "work", f.workLine()), single(tfLead, "lead", leadLine),
+	out = append(out, single(tfWork, "work", f.workLine(max(8, w-10))), single(tfLead, "lead", leadLine),
 		"  "+sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"))
 	// The member rows take what is left above the goal and the help.
 	after := 1 + goalLines + 1 + 2
@@ -986,22 +986,12 @@ func (f teamForm) modelHelp(row, w int) []string {
 		return []string{sDim.Render("tool auto picks the model too, for the goal and the member's part."),
 			sDim.Render("name a tool to pick its model here.")}
 	}
-	items, at := f.modelChoices(row), f.modelChoice(row)
-	shown := func(from int) string {
-		line := choices(items[from:], at-from, func(string) lipgloss.Style { return sAccent })
-		if from > 0 {
-			line = sDim.Render("…") + "  " + line
-		}
-		return line
-	}
-	from := 0
-	for from < at && ansi.StringWidth(shown(from)) > w {
-		from++
-	}
-	line := shown(from)
+	loading := ""
 	if f.loadingModels(row) {
-		line += "  " + sDim.Render("loading what it runs…")
+		loading = "  " + sDim.Render("loading what it runs…")
+		w -= ansi.StringWidth("  loading what it runs…")
 	}
+	line := choices(f.modelChoices(row), f.modelChoice(row), max(8, w), func(string) lipgloss.Style { return sAccent }) + loading
 	return []string{line, sDim.Render("←/→ picks one, or type an ID or a name like opus 5.5.")}
 }
 

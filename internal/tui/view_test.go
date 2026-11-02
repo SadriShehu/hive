@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -97,5 +99,42 @@ func TestSessionHintsAreMostUsedFirst(t *testing.T) {
 	}
 	if strings.Contains(got, "q quit") {
 		t.Errorf("session hint still advertises q quit:\n%s", got)
+	}
+}
+
+func TestChoicesKeepTheSelectedOneInView(t *testing.T) {
+	items := make([]string, 20)
+	for i := range items {
+		items[i] = fmt.Sprintf("model-%02d", i)
+	}
+	style := func(string) lipgloss.Style { return sAccent }
+	for _, w := range []int{30, 40, 80} {
+		for selected := range items {
+			got := choices(items, selected, w, style)
+			plain := ansi.Strip(got)
+			if !strings.Contains(plain, "‹ "+items[selected]+" ›") {
+				t.Fatalf("choices(%d, %d) hides the selected item:\n%s", w, selected, plain)
+			}
+			if width := ansi.StringWidth(got); width > w {
+				t.Fatalf("choices(%d, %d) is %d wide:\n%s", w, selected, width, plain)
+			}
+			if w == 30 {
+				if !strings.Contains(plain, fmt.Sprintf("%d/20", selected+1)) {
+					t.Errorf("choices(%d, %d) lacks its position:\n%s", w, selected, plain)
+				}
+				if !strings.Contains(plain, "…") {
+					t.Errorf("choices(%d, %d) hides items with no ellipsis:\n%s", w, selected, plain)
+				}
+			}
+		}
+	}
+}
+
+func TestChoicesLookTheSameWhenEverythingFits(t *testing.T) {
+	items := []string{"claude", "opencode", "codex"}
+	got := choices(items, 1, 80, func(string) lipgloss.Style { return sAccent })
+	want := sDim.Render("claude") + "  " + sAccent.Bold(true).Render("‹ opencode ›") + "  " + sDim.Render("codex")
+	if got != want {
+		t.Fatalf("choices =\n%q\nwant\n%q", got, want)
 	}
 }
