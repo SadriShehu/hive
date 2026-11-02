@@ -30,7 +30,7 @@ func newRmCmd() *cobra.Command {
 			"history imports leave them there. Everything in there must have ended first (`hive kill`).\n" +
 			"`hive trash` lists the trash, to restore sessions or delete them for good. A session in\n" +
 			"the trash comes back on its own if its agent reports in again.",
-		Args: cobra.ExactArgs(1),
+		Args: oneArg("session", "<id>", "hive ls lists them"),
 		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
 			family, err := tr.Trash(s)
 			if err != nil {
@@ -84,7 +84,7 @@ func newRestoreCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "restore <id>",
 		Short: "Bring a session and everything under it back from the trash",
-		Args:  cobra.ExactArgs(1),
+		Args:  oneArg("session", "<id>", "hive trash lists them"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, tr, trashed, err := openTrash()
 			if err != nil {
@@ -118,7 +118,7 @@ func newPurgeCmd() *cobra.Command {
 			if all {
 				return cobra.NoArgs(cmd, args)
 			}
-			return cobra.ExactArgs(1)(cmd, args)
+			return oneArg("session", "<id>", "or --all; hive trash lists them")(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, tr, trashed, err := openTrash()
