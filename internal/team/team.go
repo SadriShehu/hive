@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 )
 
@@ -17,6 +18,7 @@ import (
 const (
 	TeamEnv = "HIVE_TEAM"
 	RoleEnv = "HIVE_ROLE"
+	DirEnv  = "HIVE_TEAM_DIR" // the team's shared files folder
 )
 
 // LeadRole is the role of the agent hive starts to lead a team.
@@ -153,6 +155,7 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 	if t.Goal != "" {
 		fmt.Fprintf(&b, "Goal: %s\n", t.Goal)
 	}
+	fmt.Fprintf(&b, "\nShared files: $%s (%s) holds drafts and notes every member can read; it is outside the repo, so nothing there gets committed.\n", DirEnv, paths.TeamFilesDir(t.Name))
 	parts := ""
 	if t.LeadRole != "" && m.Role == t.LeadRole {
 		parts = teammateParts(members, t.LeadRole)

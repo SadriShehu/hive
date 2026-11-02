@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,11 +14,13 @@ import (
 
 	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/textdiff"
 	"github.com/sadrishehu/hive/internal/tmux"
 )
 
 func newInstallCmd() *cobra.Command {
 	var bin, key, nextKey string
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "install [claude|opencode|copilot|codex|tmux ...]",
 		Short: "Connect agents and tmux to hive; safe to rerun",
@@ -35,6 +38,9 @@ func newInstallCmd() *cobra.Command {
 			agents, withTmux, err := pickTargets(args, true)
 			if err != nil {
 				return err
+			}
+			if dryRun {
+				return dryRunInstall(agents, withTmux, hiveBin, key, nextKey, false, cmd.OutOrStdout())
 			}
 			var errs []error
 			for _, a := range agents {
@@ -60,7 +66,89 @@ func newInstallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&bin, "bin", "", "hive binary the integrations should call (default: this one)")
 	cmd.Flags().StringVar(&key, "key", "a", "tmux key that, after the prefix, opens the tree")
 	cmd.Flags().StringVar(&nextKey, "next-key", "A", "tmux key that, after the prefix, jumps to the agent that needs you")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would change, and change nothing")
 	return cmd
+}
+
+// installPlanner is an adapter that can say what install would change before
+// changing it.
+type installPlanner interface {
+	PlanInstall(hiveBin string) ([]agent.Change, error)
+	PlanUninstall() ([]agent.Change, error)
+}
+
+// dryRunInstall prints the diff each target would get, and changes nothing.
+func dryRunInstall(agents []agent.Adapter, withTmux bool, hiveBin, key, nextKey string, uninstall bool, w io.Writer) error {
+	var errs []error
+	for _, a := range agents {
+		name := a.Spec().Name
+		p, ok := a.(installPlanner)
+		if !ok {
+			verb := "install"
+			if uninstall {
+				verb = "uninstall"
+			}
+			fmt.Fprintf(w, "%s: can't preview this one; hive %s %s shows what it did\n", name, verb, name)
+			continue
+		}
+		var changes []agent.Change
+		var err error
+		if uninstall {
+			changes, err = p.PlanUninstall()
+		} else {
+			changes, err = p.PlanInstall(hiveBin)
+		}
+		if err != nil {
+			fmt.Fprintf(w, "%s: error: %v\n", name, err)
+			errs = append(errs, err)
+			continue
+		}
+		printChanges(w, name, changes)
+	}
+	if withTmux {
+		conf := tmux.ConfPath()
+		if uninstall {
+			changes, keys, _, err := tmux.PlanUninstallBindings(conf)
+			if err != nil {
+				fmt.Fprintf(w, "tmux: error: %v\n", err)
+				errs = append(errs, err)
+			} else {
+				printChanges(w, "tmux", changes)
+				if len(keys) > 0 {
+					fmt.Fprintf(w, "would unbind prefix+%s now\n", strings.Join(keys, " and prefix+"))
+				}
+			}
+		} else {
+			changes, _, err := tmux.PlanInstallBindings(conf,
+				tmux.PopupBinding(key, hiveBin), tmux.NextBinding(nextKey, hiveBin))
+			if err != nil {
+				fmt.Fprintf(w, "tmux: error: %v\n", err)
+				errs = append(errs, err)
+			} else {
+				printChanges(w, "tmux", changes)
+				fmt.Fprintf(w, "would bind prefix+%s and prefix+%s now\n", key, nextKey)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// printChanges shows one target's plan: the file and a unified diff of each
+// change, or that it has nothing to do.
+func printChanges(w io.Writer, name string, changes []agent.Change) {
+	if len(changes) == 0 {
+		fmt.Fprintf(w, "%s: up to date\n", name)
+		return
+	}
+	for _, c := range changes {
+		fmt.Fprintf(w, "%s: %s\n", name, c.Path)
+		name := strings.TrimPrefix(c.Path, "/")
+		newName := "b/" + name
+		if c.Remove {
+			newName = "/dev/null"
+		}
+		fmt.Fprint(w, textdiff.Unified("a/"+name, newName, c.Old, c.New, 3))
+	}
 }
 
 // statusLineConf returns the tmux.conf lines that add `hive status` to the
@@ -96,13 +184,17 @@ func inStatusLine() bool {
 }
 
 func newUninstallCmd() *cobra.Command {
-	return &cobra.Command{
+	var dryRun bool
+	cmd := &cobra.Command{
 		Use:   "uninstall [claude|opencode|copilot|codex|tmux ...]",
 		Short: "Remove exactly what install added",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agents, withTmux, err := pickTargets(args, false)
 			if err != nil {
 				return err
+			}
+			if dryRun {
+				return dryRunInstall(agents, withTmux, "", "a", "A", true, cmd.OutOrStdout())
 			}
 			var errs []error
 			for _, a := range agents {
@@ -118,6 +210,8 @@ func newUninstallCmd() *cobra.Command {
 			return errors.Join(errs...)
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would change, and change nothing")
+	return cmd
 }
 
 func report(name, msg string, err error) {

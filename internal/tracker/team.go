@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tmux"
@@ -36,6 +39,25 @@ func newTeamID() string {
 	var b [4]byte
 	rand.Read(b[:])
 	return fmt.Sprintf("%x", b[:])
+}
+
+// ensureTeamDir makes a team's shared files folder. Teams started before it
+// existed get it on their first start, board or report too.
+func ensureTeamDir(tm store.Team) error {
+	return os.MkdirAll(paths.TeamFilesDir(tm.Name), 0o755)
+}
+
+// removeTeamDir removes a team's folder for good, and refuses anything that
+// isn't under <DataDir>/teams/<name>.
+func removeTeamDir(tm store.Team) error {
+	base := filepath.Join(paths.DataDir(), "teams")
+	dir := paths.TeamDir(tm.Name)
+	rel, err := filepath.Rel(base, dir)
+	if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) ||
+		strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to remove %s: it is not a team folder", dir)
+	}
+	return os.RemoveAll(dir)
 }
 
 // TeamOptions describes a team to start.
@@ -114,9 +136,12 @@ func (t *Tracker) NewTeam(ctx context.Context, o TeamOptions) (store.Team, []Mem
 			return store.Team{}, nil, errors.Join(err, t.Store.ForgetWorktrees(tm.ID), t.Store.DeleteTeam(tm.ID))
 		}
 	}
+	if err := ensureTeamDir(tm); err != nil {
+		return store.Team{}, nil, errors.Join(err, t.dropWorktrees(tm), t.Store.DeleteTeam(tm.ID))
+	}
 	out, err := t.startTeam(ctx, tm, specs, o.SelfLead, o.Session)
 	if err != nil {
-		return store.Team{}, nil, errors.Join(err, t.dropWorktrees(tm), t.Store.DeleteTeam(tm.ID))
+		return store.Team{}, nil, errors.Join(err, t.dropWorktrees(tm), removeTeamDir(tm), t.Store.DeleteTeam(tm.ID))
 	}
 	return tm, out, nil
 }
@@ -195,9 +220,13 @@ func (t *Tracker) startMember(ctx context.Context, tm store.Team, m store.Member
 		t.system(tm, m.Role+" didn't start: "+err.Error())
 		return Launched{}, err
 	}
+	if err := ensureTeamDir(tm); err != nil {
+		t.system(tm, m.Role+" didn't start: "+err.Error())
+		return Launched{}, err
+	}
 	l, err := t.Launch(ctx, LaunchOptions{Tool: m.Tool, Model: m.Model, Cwd: team.Folder(tm, m), Prompt: team.Brief(tm, m, members),
 		ParentID: tm.CreatedBy, Session: session, Detached: true,
-		Env: map[string]string{team.TeamEnv: tm.ID, team.RoleEnv: m.Role}})
+		Env: map[string]string{team.TeamEnv: tm.ID, team.RoleEnv: m.Role, team.DirEnv: paths.TeamFilesDir(tm.Name)}})
 	if err != nil {
 		t.system(tm, m.Role+" didn't start: "+err.Error())
 		return l, err

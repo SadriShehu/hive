@@ -44,6 +44,17 @@ you, by another agent, or with `n` in the tree. Past sessions are imported too. 
 auto`, or tool `auto` in the tree's form, [picks the model](#picking-the-model-auto), and
 the tool, for the prompt.
 
+## Your first five minutes
+
+1. See the change before you trust it: `hive install --dry-run` prints a unified diff of
+   every file hive would edit, then `hive install` makes it (with backups).
+2. `hive` opens the tree, or **prefix + a** does when you are inside tmux.
+3. Press `n`, type a prompt and press `↵`: the agent starts in its own tmux window, and the
+   right side of the tree shows its screen live.
+4. Press `↵` on a row to jump into that agent's pane.
+5. Come back with **prefix + a**. A `◆` marks an agent that needs you;
+   **prefix + A** jumps straight to the one that has waited longest.
+
 ## Install
 
 ```sh
@@ -65,7 +76,9 @@ which build you run.
 backed up to `hive.json.bak-hive` when an existing file is changed), and adds hooks
 to `~/.codex/hooks.json` for Codex (or `$CODEX_HOME/hooks.json`, backed up to
 `hooks.json.bak-hive`). Codex asks you to trust the new hooks when it next starts.
-It is safe to rerun; `hive uninstall` removes exactly what it added. Hooks load when
+It is safe to rerun, and `hive install --dry-run` shows a unified diff of every file it
+would change without changing anything; `hive uninstall --dry-run` does the same for
+removal. `hive uninstall` removes exactly what it added. Hooks load when
 an agent starts, so running sessions pick them up after a restart; until then they
 show as untracked, or are adopted as soon as they spawn another agent.
 
@@ -104,6 +117,13 @@ transcript for a headless run, a subagent or a finished session.
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
 | `u` | show / hide what the session used: model, tokens, price, context, tools, skills |
+
+`?` opens the help on the keys for where you are: the tree, a team row, the trash, or
+the board; the other sections follow in a fixed order. Its key column fits the longest
+key and descriptions wrap under it with a hanging indent, so nothing is cut at any
+width. `↑`/`↓` (or `j`/`k`), `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) and `g`/`G` scroll it,
+with a line count on the hint when it doesn't all fit; `esc`, `q`, `?` and `↵` close it,
+and other keys do nothing.
 
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. The form asks for the tool, the model, the
@@ -222,6 +242,24 @@ reported in, so a `hive send` right after it isn't typed before the agent can re
 A tool that starts its session only with its first message (opencode without `-p`)
 gets a stand-in ID, `opencode:pid-N`, which the other commands accept and which
 names the session once it starts.
+
+### Shell completion
+
+hive completes session IDs, teams, roles, task numbers, tools and models as you
+type. Install it once for your shell:
+
+```sh
+hive completion zsh > "${fpath[1]}/_hive"
+hive completion bash > /etc/bash_completion.d/hive
+hive completion fish > ~/.config/fish/completions/hive.fish
+```
+
+`hive send <TAB>` lists the live sessions first, each with its tool, role, task
+and state, as `claude:1043899d  claude · lead · #4 handlers · working`.
+`hive team task done <TAB>` lists the tasks it can close, and
+`hive team new api --member "backend=claude:<TAB>"` lists claude's models.
+Completion opens the database read-only, makes nothing, and calls neither tmux
+nor the network.
 
 `hive wait <id>...` returns once each agent is done with what it was given: its turn
 is over (idle), it stopped to ask you (attention), or it ended (exited). A message hive
@@ -361,7 +399,13 @@ tool = "codex"
 
 ```sh
 hive team new admin-api --from api
+hive team save admin-api --as api   # add this team as a template, for next time
 ```
+
+`hive team save <team> [--as <name>]` appends one `[[team]]` table to `config.toml` with the
+team's goal, lead, folder, worktrees and members; `--as` names it, the team's name by
+default. It only appends, refuses a name already there, and leaves a config it can't parse
+alone.
 
 The team folder is stored as an absolute path, so a relative `cwd` or `--cwd` resolves
 where you run the command.
@@ -414,6 +458,7 @@ blocked and asks why, and `esc` goes back to the tree, or from a form back to th
 The form takes a title, an optional body, an owner role and the tasks it waits for (`1,2`).
 An edit can't make a task wait on itself through a cycle, and clearing the owner of a
 claimed task reopens it. The selected task's body and note are shown under the list.
+`?` shows the board's keys, with esc going back to the board.
 
 Members post progress with `hive team post`; hive adds its own posts (a member started,
 needs you, stopped); you answer with `s`, or on the channel's live line. A message to a
@@ -443,6 +488,8 @@ tree, so a teammate can't paint your terminal.
 | --- | --- |
 | `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
 | `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks, latest posts and each worktree's branch line, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
+| `hive team report [team] [--out path]` | Markdown hand-off: the goal whole, members with state and cost, every task with its note or blocked reason, and the members' posts; `--out team` writes `$HIVE_TEAM_DIR/report.md` |
+| `hive team save <team> [--as name]` | append the team as a `[[team]]` template in config.toml, for `hive team new --from`; only appends, and refuses a name already there |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready |
 | `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `edit <n> [--title t] [--body b\|-] [--owner role] [--after n,…]` · `reopen <n> --why text` · `ls [n] [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task; `edit` changes only the flags you pass; `reopen` sends a done or blocked task back to open |
@@ -478,6 +525,14 @@ shared-folder team gets one line under its roster: `⎇ feat/x · 4 files uncomm
 narrow width the diff stat goes first, then `↓`, then the branch name is cut—the merge
 result always stays. `hive team board --json` carries the same numbers under
 `worktrees.trees`.
+
+**Shared files.** Each team gets a folder outside its repository, `<data dir>/teams/<team>/files`
+(`~/.local/share/hive` unless `HIVE_HOME` or `XDG_DATA_HOME` says otherwise), where members
+keep drafts and notes the whole team can read. Every member's window has `HIVE_TEAM_DIR`
+pointing at it, the brief names it, and `hive team board` shows `files: <path> · N files`
+(`files_dir` in `--json`). It stays when the team goes to the trash, so restore finds it;
+purging the team removes it. `hive team report` turns the goal, members, tasks and their
+notes, and the members' posts into Markdown for a PR description or a hand-off.
 
 **Done.** `hive team done <team>` marks the goal met: the team stays in the tree, dimmed
 and folded with its channel, and messages, posts, new members and new tasks are refused

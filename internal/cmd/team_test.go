@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/sadrishehu/hive/internal/adapters"
+	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -390,5 +392,127 @@ func TestBoardCanPrintOnePartOnly(t *testing.T) {
 	}
 	if err := ls.Args(ls, []string{"1", "2"}); err == nil {
 		t.Error("task ls took two numbers")
+	}
+}
+
+func TestTeamReportHasEverySectionAndEveryNote(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "hive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tm := store.Team{ID: "t1", Name: "api", Goal: "ship <the> admin API", Cwd: "/work",
+		Status: store.TeamActive, CreatedAt: 1, UpdatedAt: 1}
+	if err := st.CreateTeam(tm); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []store.Member{
+		{TeamID: tm.ID, Role: "lead", Tool: "claude", Model: "claude-opus-5-5", JoinedAt: 1},
+		{TeamID: tm.ID, Role: "backend", Tool: "codex", JoinedAt: 2},
+	} {
+		if err := st.AddMember(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, task := range []store.Task{
+		{TeamID: tm.ID, Title: "schema", Status: store.TaskDone, Owner: "backend", Note: "users.role added", CreatedAt: 1, UpdatedAt: 2},
+		{TeamID: tm.ID, Title: "handlers", Status: store.TaskBlocked, Owner: "backend", Note: "waiting on the API", CreatedAt: 1, UpdatedAt: 3},
+	} {
+		if _, err := st.AddTask(task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, m := range []store.Message{
+		{TeamID: tm.ID, From: "lead", Body: "start with the schema", Kind: store.MsgPost, At: 60_000},
+		{TeamID: tm.ID, From: "backend", To: "lead", Body: "a secret", Kind: store.MsgSay, At: 61_000},
+		{TeamID: tm.ID, From: store.FromHive, Body: "#1 done", Kind: store.MsgSystem, At: 62_000},
+		{TeamID: tm.ID, From: "backend", Body: "the list endpoint is ready", Kind: store.MsgPost, At: 63_000},
+	} {
+		if _, err := st.AddMessage(m, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr := tracker.New(st, adapters.Builtin(), &tracker.System{})
+	got, err := teamReport(st, tr, tm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"# api · active",
+		"goal: ship <the> admin API",
+		"## Members",
+		"- lead · claude:claude-opus-5-5",
+		"- backend · codex",
+		"## Tasks",
+		"- #1 schema · backend · done",
+		"  note: users.role added",
+		"- #2 handlers · backend · blocked",
+		"  blocked: waiting on the API",
+		"## Posts",
+		"lead: start with the schema",
+		"backend: the list endpoint is ready",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("report lacks %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"a secret", "#1 done"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("report includes %q:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestTeamReportOutTeamWritesItInTheFilesFolder(t *testing.T) {
+	t.Setenv("HIVE_HOME", t.TempDir())
+	st, err := store.Open(paths.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := store.Team{ID: "t1", Name: "api", Goal: "ship it", Cwd: "/work",
+		Status: store.TeamActive, CreatedAt: 1, UpdatedAt: 1}
+	if err := st.CreateTeam(tm); err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	if err := st.AddMember(store.Member{TeamID: tm.ID, Role: "lead", Tool: "claude", JoinedAt: 1}); err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	st.Close()
+
+	cmd := newTeamReportCmd()
+	cmd.SetArgs([]string{"api", "--out", "team"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(paths.TeamFilesDir("api"), "report.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# api · active") || !strings.Contains(string(data), "goal: ship it") {
+		t.Fatalf("report.md = %q", data)
+	}
+}
+
+func TestTeamFilesMakesTheFolderAndCountsItsFiles(t *testing.T) {
+	t.Setenv("HIVE_HOME", t.TempDir())
+	dir, n, err := teamFiles(store.Team{Name: "api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("empty folder has %d files", n)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"draft.md", "notes/todo.md"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, n, err = teamFiles(store.Team{Name: "api"}); err != nil || n != 2 {
+		t.Fatalf("teamFiles = %d, %v; want 2 files", n, err)
 	}
 }

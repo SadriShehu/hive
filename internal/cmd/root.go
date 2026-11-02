@@ -37,6 +37,7 @@ func newRootCmd() *cobra.Command {
 		newPopupCmd(), newUICmd(), newNewCmd(), newJumpCmd(), newResumeCmd(), newSendCmd(),
 		newTailCmd(), newWaitCmd(), newUsageCmd(), newModelsCmd(), newKillCmd(), newTeamCmd(), newRmCmd(), newTrashCmd(), newStatusCmd(), newDoctorCmd())
 	groupHelp(root)
+	wireCompletion(root)
 	return root
 }
 

@@ -209,7 +209,10 @@ func (t *Tracker) PurgeTeam(ctx context.Context, tm store.Team) (Purged, error) 
 			return out, err
 		}
 	}
-	return out, t.Store.DeleteTeam(tm.ID)
+	if err := t.Store.DeleteTeam(tm.ID); err != nil {
+		return out, err
+	}
+	return out, removeTeamDir(tm)
 }
 
 func joinRoles(roles []string) string {

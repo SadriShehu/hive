@@ -53,3 +53,16 @@ func ConfigPath() string {
 	}
 	return filepath.Join(Home(), ".config", "hive", "config.toml")
 }
+
+// TeamDir is the folder hive keeps for a team, under the data folder: its
+// shared files live in TeamFilesDir, and purging the team removes this whole
+// folder.
+func TeamDir(name string) string {
+	return filepath.Join(DataDir(), "teams", name)
+}
+
+// TeamFilesDir is a team's shared files folder: drafts and notes every member
+// can read, outside the team's repository.
+func TeamFilesDir(name string) string {
+	return filepath.Join(TeamDir(name), "files")
+}

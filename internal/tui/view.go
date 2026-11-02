@@ -66,7 +66,9 @@ func (m Model) View() string {
 	var body []string
 	switch {
 	case m.mode == modeHelp:
-		body = fit(helpLines(), m.width, h)
+		lines := m.helpLines(m.width)
+		top := min(max(0, m.helpScroll), max(0, len(lines)-h))
+		body = fit(lines[top:], m.width, h)
 	case m.mode == modeGoal:
 		lines := m.goalLines(m.width)
 		top := min(max(0, m.goalScroll), max(0, len(lines)-h))
@@ -604,7 +606,15 @@ func (m Model) hintLine() string {
 		}
 		return hint
 	case modeHelp:
-		return keys("any key", "close")
+		hint := keys("↑/↓", "scroll", "esc", "close")
+		total := len(m.helpLines(m.width))
+		if h := m.bodyHeight(); total > h {
+			top := min(max(0, m.helpScroll), total-h)
+			first := min(top+1, total)
+			last := min(top+h, total)
+			hint += "  " + sDim.Render(fmt.Sprintf("· %d–%d of %d lines", first, last, total))
+		}
+		return hint
 	}
 	if hints, ok := m.teamHints(); ok {
 		return fitHints(hints, m.width, keys("?", "more"))
@@ -667,38 +677,178 @@ func (m Model) statusLine() string {
 	return ansi.Truncate(sOK.Render("✓ ")+sText.Render(m.flash), m.width, "…")
 }
 
-func helpLines() []string {
-	rows := [][2]string{
-		{"↵", "jump to the session's pane; reopen it if it isn't running"},
-		{"s", "send a message: typed into its pane, or reopens it with the message"},
-		{"n / c", "start a new agent / a new agent as a child of the selected one; tool or model auto picks for the prompt"},
-		{"r", "reopen a finished session in its tool's own TUI"},
-		{"x", "stop the session's process (asks first)"},
-		{"d", "move the session and everything under it to the trash (asks first)"},
-		{"t", "show the trash: r restores, d deletes for good, from its tool too (asks first)"},
-		{"/", "filter by title, folder or ID (searches all history); team:<name or ID> shows a team's subtree, bare team: every team"},
-		{"a", "show all history / only the last 24h"},
-		{"i", "hide / show subagents"},
-		{"←/→ space", "fold and unfold; ← on a leaf goes to its parent"},
-		{"y", "copy the session ID"},
-		{"T", "start a team: agents that work on one goal and report to a channel"},
-		{"on a team", "↵ opens its channel · e edits its board · ctrl+g reads the whole goal and every part · s messages everyone"},
-		{"", "p pauses · L leads · x stops all · d trashes it · m hides hive's posts"},
-		{"in a channel", "type to write to everyone (@role for one) · ↵ sends · esc goes back · ↑/↓ move the caret once typing"},
-		{"", "pgup/pgdn scroll the feed · ctrl+g reads the goal"},
-		{"S", "sync history now (it also runs every 30s)"},
-		{"tab", "hide / show the preview"},
-		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills"},
-		{"q", "quit (esc too, in the popup)"},
+// helpRow is one line of the help: a key and what it does. An empty key
+// makes a plain line, as the glyph legend has.
+type helpRow struct {
+	key, text string
+	dim       bool
+}
+
+// helpSection is a titled group of help rows. The section for where the user
+// is comes first; name picks it out.
+type helpSection struct {
+	name, title string
+	rows        []helpRow
+}
+
+func treeHelp() helpSection {
+	return helpSection{name: "Tree", title: "Tree", rows: []helpRow{
+		{"↵", "jump to the session's pane; reopen it if it isn't running", false},
+		{"s", "send a message: typed into its pane, or reopens it with the message", false},
+		{"n / c", "start a new agent / a new agent as a child of the selected one; tool or model auto picks for the prompt", false},
+		{"r", "reopen a finished session in its tool's own TUI", false},
+		{"x", "stop the session's process (asks first)", false},
+		{"d", "move the session and everything under it to the trash (asks first)", false},
+		{"t", "show the trash: r restores, d deletes for good, from its tool too (asks first)", false},
+		{"/", "filter by title, folder or ID (searches all history); team:<name or ID> shows a team's subtree, bare team: every team", false},
+		{"a", "show all history / only the last 24h", false},
+		{"i", "hide / show subagents", false},
+		{"←/→ space", "fold and unfold; ← on a leaf goes to its parent", false},
+		{"y", "copy the session ID", false},
+		{"T", "start a team: agents that work on one goal and report to a channel", false},
+		{"S", "sync history now (it also runs every 30s)", false},
+		{"tab", "hide / show the preview", false},
+		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills", false},
+		{"q", "quit (esc too, in the popup)", false},
+	}}
+}
+
+func teamHelp() helpSection {
+	return helpSection{name: "Team", title: "Team  (on a ⬡ row or a member)", rows: []helpRow{
+		{"↵", "open the channel full screen (on a member: jump to it)", false},
+		{"e", "edit the board: n add · e edit · d done · b block", false},
+		{"ctrl+g", "read the whole goal and every member's part", false},
+		{"s", "message everyone (@role for one); on a member, that member", false},
+		{"p / L", "pause or resume · take the lead or hand it back", false},
+		{"x / d", "stop every member · move the team to the trash", false},
+		{"m", "hide hive's own posts", false},
+	}}
+}
+
+func channelHelp() helpSection {
+	return helpSection{name: "Channel", title: "Channel", rows: []helpRow{
+		{"type", "write to everyone (@role for one) · ↵ sends · esc goes back", false},
+		{"↑/↓", "move the caret once typing", false},
+		{"pgup/pgdn", "scroll the feed", false},
+		{"ctrl+g", "read the goal", false},
+	}}
+}
+
+func boardHelp() helpSection {
+	return helpSection{name: "Board", title: "Board  (e on a team)", rows: []helpRow{
+		{"j / k", "move", false},
+		{"n", "add a task", false},
+		{"e", "edit the selected task", false},
+		{"d", "mark it done", false},
+		{"b", "mark it blocked", false},
+		{"esc", "back", false},
+	}}
+}
+
+func trashHelp() helpSection {
+	return helpSection{name: "Trash", title: "Trash  (t)", rows: []helpRow{
+		{"r", "restore a session or a team with everything under it", false},
+		{"d", "delete it for good, from its tool too (asks first)", false},
+		{"t", "back to the tree", false},
+	}}
+}
+
+func glyphHelp() helpSection {
+	return helpSection{name: "Glyphs", title: "Glyphs", rows: []helpRow{
+		{"", "● working  ◆ needs you  ◉ idle  ◌ running / untracked  ○ exited", true},
+		{"", "run: a headless run   sub: a tool's own subagent", true},
+		{"", "$ in the header: what the sessions in view cost · ~ an estimate from list prices · partial: totals come when the session ends", true},
+	}}
+}
+
+// helpSections lists the help in its fixed order.
+func helpSections() []helpSection {
+	return []helpSection{treeHelp(), teamHelp(), channelHelp(), boardHelp(), trashHelp(), glyphHelp()}
+}
+
+// helpWhere is the view the help was opened from; in the help itself, the
+// view it will go back to.
+func (m Model) helpWhere() mode {
+	if m.mode == modeHelp {
+		return m.helpFrom
 	}
+	return m.mode
+}
+
+// helpFirstSection names the section for where the user is, which the help
+// shows first: the board, the trash, a team or a member row, else the tree.
+func (m Model) helpFirstSection() string {
+	switch {
+	case m.helpWhere() == modeTasks:
+		return "Board"
+	case m.trash:
+		return "Trash"
+	}
+	if n := m.selectedNode(); n != nil && (n.Team != nil || n.Role != "" || n.TeamID != "") {
+		return "Team"
+	}
+	return "Tree"
+}
+
+// helpOrders puts the current view's section first and keeps the rest in
+// their fixed order.
+func (m Model) helpOrders() []helpSection {
+	sections := helpSections()
+	first := m.helpFirstSection()
+	for i, s := range sections {
+		if s.name != first {
+			continue
+		}
+		if i > 0 {
+			ordered := []helpSection{s}
+			ordered = append(ordered, sections[:i]...)
+			ordered = append(ordered, sections[i+1:]...)
+			return ordered
+		}
+		break
+	}
+	return sections
+}
+
+// helpLines draws every section: a key column as wide as the longest key,
+// descriptions wrapped under it with a hanging indent, so nothing is cut.
+func (m Model) helpLines(w int) []string {
+	sections := m.helpOrders()
+	keyWidth := 0
+	for _, s := range sections {
+		for _, r := range s.rows {
+			keyWidth = max(keyWidth, ansi.StringWidth(r.key))
+		}
+	}
+	keyWidth += 2
+	indent := 2 + keyWidth
+	descWidth := max(1, w-indent)
 	out := []string{sBold.Render("hive keys"), ""}
-	for _, r := range rows {
-		out = append(out, "  "+sKey.Render(fmt.Sprintf("%-10s", r[0]))+sText.Render(r[1]))
+	for i, s := range sections {
+		if i > 0 {
+			out = append(out, "")
+		}
+		out = append(out, sBold.Render(s.title))
+		for _, r := range s.rows {
+			style := sText
+			if r.dim {
+				style = sDim
+			}
+			if r.key == "" {
+				for _, line := range strings.Split(ansi.Wrap(r.text, max(1, w-2), ""), "\n") {
+					out = append(out, "  "+style.Render(line))
+				}
+				continue
+			}
+			for j, line := range strings.Split(ansi.Wrap(r.text, descWidth, ""), "\n") {
+				if j == 0 {
+					out = append(out, "  "+sKey.Render(pad(r.key, keyWidth))+style.Render(line))
+				} else {
+					out = append(out, strings.Repeat(" ", indent)+style.Render(line))
+				}
+			}
+		}
 	}
-	out = append(out, "",
-		"  "+sDim.Render("● working  ◆ needs you  ◉ idle  ◌ running / untracked  ○ exited"),
-		"  "+sDim.Render("run: a headless run   sub: a tool's own subagent"),
-		"  "+sDim.Render("$ in the header: what the sessions in view cost · ~ an estimate from list prices · partial: totals come when the session ends"))
 	return out
 }
 
@@ -793,6 +943,38 @@ func (m Model) keyGoal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.goalScroll = 0
 	case "end", "G":
 		m.goalScroll = maxScroll
+	}
+	return m, nil
+}
+
+// helpMaxScroll is how far the help scrolls: enough to put its last line at
+// the bottom.
+func (m Model) helpMaxScroll(h int) int {
+	return max(0, len(m.helpLines(m.width))-h)
+}
+
+// keyHelp scrolls the help; esc, q, ? and enter close it, and any other key
+// leaves it where it is.
+func (m Model) keyHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	h := m.bodyHeight()
+	maxScroll := m.helpMaxScroll(h)
+	switch msg.String() {
+	case "esc", "q", "?", "enter":
+		m.mode = m.helpFrom
+		m.helpFrom = modeNormal
+		return m, nil
+	case "up", "k":
+		m.helpScroll = max(0, m.helpScroll-1)
+	case "down", "j":
+		m.helpScroll = min(maxScroll, m.helpScroll+1)
+	case "pgup", "ctrl+u":
+		m.helpScroll = max(0, m.helpScroll-max(1, h/2))
+	case "pgdown", "ctrl+d":
+		m.helpScroll = min(maxScroll, m.helpScroll+max(1, h/2))
+	case "home", "g":
+		m.helpScroll = 0
+	case "end", "G":
+		m.helpScroll = maxScroll
 	}
 	return m, nil
 }

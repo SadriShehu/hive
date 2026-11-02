@@ -131,6 +131,12 @@ preview and `hive tail`), `ResumeChecker` (refuses reopens the tool would fail),
 `Prewarmer` (sessions a tool starts ahead of use, hidden until their first message) and
 `Purger` (deletes a session from the tool's own storage for good).
 
+An install is a plan first. `PlanInstall` and `PlanUninstall` return the files and their
+new contents without touching anything, and both a real run and `--dry-run` go through
+that plan; the real run then applies it with the same backups as before. The tmux binding
+writer plans the same way, so `hive install --dry-run` can show its diff without running
+a tmux command.
+
 `Purger` uses the tool's own delete wherever there is one, and treats a session that is
 already gone as deleted. Only IDs made of letters, digits, `-` and `_` reach a file path.
 
@@ -266,6 +272,14 @@ shows every team), `a` recent or all history, `i` hide or show subagents, `S` sy
 `y` copy the ID, `tab` hide the preview, `u` show what the session used (model, tokens,
 price, context, tools, skills) in place of the pane preview, `←` / `→` collapse and expand,
 `?` help, `q` quit.
+
+The help is grouped into sections: Tree, Team, Channel, Board, Trash and Glyphs. The
+section for where `?` was pressed comes first (Team on a team or member row, Trash in the
+trash, Board in the board editor, Tree otherwise), the rest follow in that fixed order.
+The key column is as wide as the longest key plus two, and descriptions wrap under it with
+a hanging indent, so no line is cut at any width. `↑`/`↓`, `pgup`/`pgdn` and `g`/`G` scroll
+it; the hint carries the line count when it doesn't all fit; `esc`, `q`, `?` and `↵` close
+it, and other keys leave it open.
 
 **New agent.** `n` and `c` open a form: the tool, the folder (the parent's by default) and
 an optional first prompt. It opens on the prompt, since most launches keep the defaults;
@@ -438,11 +452,24 @@ Start here, Sessions, Teams, Housekeeping, and For tmux and hooks.
 | `hive trash restore <id>` | bring it back with everything under it |
 | `hive trash purge <id> \| --all [--yes]` | delete for good, from the tools too, deepest first; asks first, and without a terminal needs `--yes` |
 | `hive sync [--full]` | import past sessions and link past spawns |
-| `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a] [--next-key A]` | connect tools and bind the popup and needs-you keys; idempotent, backs up first |
-| `hive uninstall [...]` | remove exactly what install added |
+| `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a] [--next-key A] [--dry-run]` | connect tools and bind the popup and needs-you keys; idempotent, backs up first; `--dry-run` prints a unified diff of every file and changes nothing |
+| `hive uninstall [...] [--dry-run]` | remove exactly what install added; `--dry-run` shows the removal first |
 | `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and the `ERROR` lines logged in the last day, with the last three |
 | `hive team …` | [teams](#teams): start one, follow its channel, write to its members |
 | `hive hook <tool>` | for integrations only; prints nothing, always exits 0 |
+| `hive completion <shell>` | print the shell's completion script; its dynamic values come from the database, read-only |
+
+**Shell completion.** `hive completion <shell>` prints cobra's script for zsh, bash or
+fish, and the hidden `__complete` command behind it fills in the dynamic parts. Each
+kind has one function returning `value\tdescription`: sessions in the short form
+`tool:8hex`, live ones first and then the last day's, with the tool, role, held task
+and state after a tab; teams with their goal; a team's roles with their tool and
+state; and the task numbers each board verb can act on. `--member` completes tools
+after `role=`, models after `tool:`, `--lead` does the same and adds `self` and
+`none`, `--model` completes the models of the tool `hive new` names, and `--after`
+completes the comma list after its last comma. Completion opens the database with
+`store.OpenRead`, which neither creates nor migrates it, calls neither tmux nor the
+network, and prints nothing when it fails or when there is no database.
 
 **Interactive children from inside an agent.** Claude runs
 `hive new opencode -p "port the tests" --wait` and gets back an ID; the opencode TUI opens
@@ -499,8 +526,8 @@ filter and demo.
   on the team is refused before anything starts. The board shows each member's part under
   its line.
 - **Starting.** hive starts each member through the usual launch, detached, with the
-  brief as its first prompt and `HIVE_TEAM` and `HIVE_ROLE` in its window's environment,
-  next to `HIVE_PARENT`. Members start in the order given, the lead first. A member
+  brief as its first prompt and `HIVE_TEAM`, `HIVE_ROLE` and `HIVE_TEAM_DIR` in its
+  window's environment, next to `HIVE_PARENT`. Members start in the order given, the lead first. A member
   started with `auto` gets its pick from the goal and its own part, not from the brief;
   one `hive team new` asks each tool what it runs only once. A failed member stays on
   the team with the error in the channel; if no member's window opens, the team isn't
@@ -560,6 +587,14 @@ The template's name is unique and follows a team name's rules; every member's ro
 valid role and appears once, including the lead's; and a member names a tool. The folder is
 stored absolute, so a relative `cwd` resolves where `hive team new` runs. A broken config
 changes nothing, as everywhere else.
+
+`hive team save <team> --as <name>` writes one back: the team's goal, its lead as a
+`tool[:model]` (or `none` when you lead), the folder, the worktrees flag, and every other
+active member with its role, tool, model and part. The lead is the table's `lead`, not a
+member row, so a saved table is always valid for `--from`. The writer loads the config
+first, refuses a name already there or a file that doesn't parse, then appends only: a
+blank line, `# saved from team <team> on <date>`, and the encoder's block. Nothing already
+in the file is rewritten or reordered.
 
 ### The brief
 
@@ -763,6 +798,23 @@ records where each member works, and the brief names it.
   and draws nothing until it arrives. Only a member's branch line has colour, on its merge
   result. A shared-folder team gets one line with the folder's branch and uncommitted
   count instead.
+
+### Shared files and the report
+
+Each team has one folder outside its repository, `<data dir>/teams/<team>/files`, made when
+the team starts and on first use for a team from before it existed. Members get
+`HIVE_TEAM_DIR` in their window and the brief's `Shared files:` line names it, so drafts
+and notes there are readable by every member and never committed. The folder is keyed by
+the team's name, stays when the team goes to the trash so restore finds it, and goes when
+the team is purged. That removal is guarded to `<data dir>/teams/<team>`; a name that would
+reach anywhere else is refused. `hive team board` prints `files: <path> · N files`, and
+`--json` carries `files_dir`.
+
+`hive team report [team]` words the same stored work as Markdown: the quiet status line and
+the whole goal, the active members with tool, model, state and cost when hive knows it,
+every task with its owner, state and done note or blocked reason, and every member's
+channel posts, oldest first. `--out team` writes `<data dir>/teams/<team>/files/report.md`,
+ready to paste into a PR description or hand on.
 
 ### Done
 
