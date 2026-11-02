@@ -293,6 +293,52 @@ func (t *Tracker) BlockTask(tm store.Team, by string, n int, why string) (store.
 	return task, sent, err
 }
 
+// ReopenTask sends a done or blocked task back to open, saying why. Its owner
+// stays, and its note becomes why. hive posts it, and the owner hears it is
+// theirs again. A task that became ready when it was done stays as it is.
+func (t *Tracker) ReopenTask(tm store.Team, by string, n int, why string) (store.Task, []Sent, error) {
+	why = strings.TrimSpace(team.Clean(why))
+	if why == "" {
+		return store.Task{}, nil, errors.New("say why it is reopened: --why \"…\"")
+	}
+	tm, members, tasks, err := t.board(tm.ID)
+	if err != nil {
+		return store.Task{}, nil, err
+	}
+	if err := closed(tm); err != nil {
+		return store.Task{}, nil, err
+	}
+	if tm.Paused {
+		return store.Task{}, nil, fmt.Errorf("%s is paused: no tasks are reopened until it resumes", tm.Name)
+	}
+	i, err := findTask(tasks, n)
+	if err != nil {
+		return store.Task{}, nil, err
+	}
+	old := tasks[i]
+	switch old.Status {
+	case store.TaskOpen:
+		return store.Task{}, nil, fmt.Errorf("#%d is open already", n)
+	case store.TaskClaimed:
+		return store.Task{}, nil, fmt.Errorf("#%d is claimed by %s; edit or block it instead", n, old.Owner)
+	}
+	task := old
+	task.Status, task.Note, task.UpdatedAt = store.TaskOpen, why, t.World.Now()
+	if err := t.moveTask(old, task); err != nil {
+		return store.Task{}, nil, err
+	}
+	lead := t.toLead(tm, members, by)
+	sent, err := t.announce(tm, members, fmt.Sprintf("#%d reopened by %s: %s", n, by, why), lead, false)
+	errs := []error{err}
+	if task.Owner != "" && task.Owner != by && onTeam(members, task.Owner) && !slices.Contains(lead, task.Owner) {
+		s, err := t.tell(tm, members, task.Owner,
+			fmt.Sprintf("#%d %s is yours again (%s: %s). hive team task claim %d takes it.", n, task.Title, by, why, n))
+		sent = append(sent, s...)
+		errs = append(errs, err)
+	}
+	return task, sent, errors.Join(errs...)
+}
+
 // moveTask stores a task's move, unless another member moved it first.
 func (t *Tracker) moveTask(old, task store.Task) error {
 	ok, err := t.Store.UpdateTask(old, task)

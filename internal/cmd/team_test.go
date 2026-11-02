@@ -241,3 +241,62 @@ func TestPartFlagNamesTheMembersParts(t *testing.T) {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
+
+func TestTaskEditChangesOnlyTheFlagsItWasGiven(t *testing.T) {
+	task := store.Task{N: 3, Title: "old", Body: "old body", Owner: "backend", After: []int{1, 2},
+		Status: store.TaskClaimed, Note: "working"}
+	got, err := editValues(task, map[string]bool{"title": true}, "new title", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "new title" || got.Body != "old body" || got.Owner != "backend" ||
+		len(got.After) != 2 || got.Status != store.TaskClaimed {
+		t.Errorf("a title edit = %+v, want the rest kept", got)
+	}
+
+	got, err = editValues(task, map[string]bool{"owner": true}, "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Owner != "" || got.Title != "old" || len(got.After) != 2 {
+		t.Errorf("an owner edit = %+v, want --owner \"\" to clear only the owner", got)
+	}
+
+	got, err = editValues(task, map[string]bool{"after": true}, "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.After) != 0 || got.Title != "old" || got.Owner != "backend" {
+		t.Errorf("an after edit = %+v, want --after \"\" to clear only the waits", got)
+	}
+
+	got, err = editValues(task, map[string]bool{"body": true}, "", "new body", "", "")
+	if err != nil || got.Body != "new body" || got.Title != "old" {
+		t.Errorf("a body edit = %+v, %v", got, err)
+	}
+}
+
+func TestTeamTaskHasEditAndReopen(t *testing.T) {
+	c := newTeamTaskCmd()
+	found := map[string]bool{}
+	for _, sub := range c.Commands() {
+		found[sub.Name()] = true
+		switch sub.Name() {
+		case "edit":
+			for _, f := range []string{"title", "body", "owner", "after"} {
+				if sub.Flags().Lookup(f) == nil {
+					t.Errorf("task edit has no --%s", f)
+				}
+			}
+		case "reopen":
+			if sub.Flags().Lookup("why") == nil {
+				t.Error("task reopen has no --why")
+			}
+		}
+	}
+	for _, name := range []string{"edit", "reopen"} {
+		if !found[name] {
+			t.Errorf("team task has no %s command", name)
+		}
+	}
+}

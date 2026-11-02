@@ -637,6 +637,14 @@ teammate can't paint the user's terminal.
   view is yours, and ready (#4 done by backend: …). hive team task claim 5 takes it.` A
   task added with an owner and nothing left to wait for is told at once. Whoever closed a
   task reads what became ready in the command's output instead.
+- **Editing and reopening.** `edit <n>` changes only the flags it was given: title, body,
+  owner and the tasks it waits for; `--owner ""` and `--after ""` clear them. It follows
+  the tree editor's rules, so a claimed task given another owner, or none, is open again
+  and both owners hear of it. `reopen <n> --why` sends a done or blocked task back to
+  open: its owner stays, its note becomes the why, hive posts `#n reopened by <by>: <why>`
+  and tells the owner `#n <title> is yours again (<by>: <why>)`. An open or claimed task
+  isn't reopened, and neither is one on a paused or done team. Tasks that became ready
+  when it was done stay as they are.
 - **Waiting.** `hive team wait` looks at the board twice a second, as `hive wait` does,
   and prints what happened: a task as hive words it, a message in its envelope. With no
   flag it returns when any task is done or blocked, or mail comes for the caller; `--task
