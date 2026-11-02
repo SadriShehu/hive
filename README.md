@@ -378,8 +378,9 @@ mark it done with a note on what changed, or blocked with why. hive posts each, 
 lead when an agent leads, and tells the owner of a task as soon as everything it waits for
 is done, so nobody polls.
 
-Press `e` on a team to open its board full screen: `j`/`k` (or the arrows) move, `n` adds a
-task, `e`/`↵` edits the selected one, `d` marks it done with an optional note, `b` marks it
+Press `e` on a team or any of its members to open its board full screen: `j`/`k` (or the
+arrows) move, `n` adds a task, `e`/`↵` edits the selected one, `d` marks it done with an
+optional note, `b` marks it
 blocked and asks why, and `esc` goes back to the tree, or from a form back to the board.
 The form takes a title, an optional body, an owner role and the tasks it waits for (`1,2`).
 An edit can't make a task wait on itself through a cycle, and clearing the owner of a
@@ -399,7 +400,7 @@ your terminal.
 | Key, on a team | Does |
 | --- | --- |
 | `↵` | open the team's channel full screen; on a member row, jump to that member |
-| `e` | open the board editor: `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
+| `e` | open the board editor (on a team or any of its members): `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
 | `s` | message everyone (`@role` for one); on a member, message that member |
 | `p` | pause or resume: no mail is delivered and no task claimed while paused |
 | `L` | take the lead yourself, or hand it back to an agent |

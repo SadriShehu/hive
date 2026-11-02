@@ -514,15 +514,44 @@ func (m Model) hintLine() string {
 	case modeHelp:
 		return keys("any key", "close")
 	}
-	if hint, ok := m.teamHints(); ok {
-		return ansi.Truncate(hint, m.width, "…")
+	if hints, ok := m.teamHints(); ok {
+		return fitHints(hints, m.width, keys("?", "more"))
 	}
 	if m.trash {
-		return ansi.Truncate(keys("r", "restore", "d", "delete for good", "t", "back", "u", "usage", "/", "filter",
-			"i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+		return fitHints([]string{
+			keys("r", "restore"),
+			keys("d", "delete for good"),
+			keys("t", "back"),
+			keys("u", "usage"),
+			keys("/", "filter"),
+			keys("i", "subagents"),
+		}, m.width, keys("?", "more"))
 	}
-	return ansi.Truncate(keys("↵", "jump", "s", "send", "n", "new", "c", "child", "r", "reopen", "x", "stop",
-		"d", "delete", "t", "trash", "u", "usage", "/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+	return fitHints([]string{
+		keys("↵", "jump"),
+		keys("s", "send"),
+		keys("n", "new"),
+		keys("c", "child"),
+		keys("u", "usage"),
+		keys("/", "filter"),
+		keys("r", "reopen"),
+		keys("x", "stop"),
+		keys("d", "trash"),
+	}, m.width, keys("?", "more"))
+}
+
+// fitHints joins key hints with two spaces and drops whole hints from the end
+// until the line fits w. tail is always shown, so the reader can find the
+// keys that didn't fit.
+func fitHints(hints []string, w int, tail string) string {
+	for len(hints) > 0 {
+		line := strings.Join(hints, "  ") + "  " + tail
+		if ansi.StringWidth(line) <= w {
+			return line
+		}
+		hints = hints[:len(hints)-1]
+	}
+	return tail
 }
 
 func keys(pairs ...string) string {

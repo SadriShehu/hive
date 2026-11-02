@@ -194,6 +194,10 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, m.input.Focus(), true
 	}
 	if !isTeam {
+		if msg.String() == "e" {
+			m, cmd := m.openTaskEditor(tm)
+			return m, cmd, true
+		}
 		return m, nil, false
 	}
 	switch msg.String() {
@@ -1318,15 +1322,37 @@ func (m Model) feedLines(t store.Team, w int) []string {
 }
 
 // teamHints are the key hints while a team or one of its members is selected.
-func (m Model) teamHints() (string, bool) {
+func (m Model) teamHints() ([]string, bool) {
 	_, n, ok := m.selectedTeam()
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	if n.Team != nil {
-		return keys("↵", "channel", "s", "message", "p", "pause", "L", "lead", "x", "stop", "m", "system", "T", "new team", "?", "help", "q", "quit"), true
+		return []string{
+			keys("↵", "channel"),
+			keys("e", "board"),
+			keys("s", "message"),
+			keys("p", "pause"),
+			keys("L", "lead"),
+			keys("x", "stop"),
+			keys("d", "trash"),
+			keys("m", "hide hive posts"),
+			keys("T", "new team"),
+		}, true
 	}
-	return keys("↵", "jump", "s", "message", "p", "pause", "L", "lead", "r", "reopen", "x", "stop", "T", "new team", "?", "help", "q", "quit"), true
+	hints := []string{keys("↵", "jump")}
+	if n.TeamID != "" {
+		hints = append(hints, keys("e", "board"))
+	}
+	hints = append(hints,
+		keys("s", "message"),
+		keys("p", "pause"),
+		keys("L", "lead"),
+		keys("r", "reopen"),
+		keys("x", "stop"),
+		keys("T", "new team"),
+	)
+	return hints, true
 }
 
 // teamCount is how many teams are still active.
