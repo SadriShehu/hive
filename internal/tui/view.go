@@ -77,7 +77,7 @@ func (m Model) View() string {
 		body = m.channelLines(m.width, h)
 	case m.mode == modeTasks:
 		body = m.taskEditorLines(m.width, h)
-	case m.usageTakesTheBody():
+	case m.usageTakesTheBody(), m.changesTakesTheBody():
 		body = m.previewLines(m.width, h)
 	case m.previewVisible():
 		tw := m.treeWidth()
@@ -302,13 +302,20 @@ func (m Model) previewLines(w, h int) []string {
 		ids += " · started " + age(m.now(), s.CreatedAt) + " ago"
 	}
 	head = append(head, sDim.Render(ansi.Truncate(ids, w, "…")))
-	if !m.showUsage {
+	if !m.showUsage && !m.showChanges {
 		head = append(head, m.usageSummary(s, w, summaryRows(h))...)
 	}
 	head = append(head, sRule.Render(strings.Repeat("─", w)))
 	room := max(0, h-len(head))
 	if m.showUsage {
 		return fit(append(head, m.usageLines(s, m.selectedNode(), w, room)...), w, h)
+	}
+	if m.showChanges {
+		role := ""
+		if n := m.selectedNode(); n != nil {
+			role = n.Role
+		}
+		return fit(append(head, m.changesLines(s, role, w, room)...), w, h)
 	}
 	return fit(append(head, m.previewContent(s, w, room)...), w, h)
 }
@@ -629,12 +636,13 @@ func (m Model) hintLine() string {
 			keys("i", "subagents"),
 		}, m.width, keys("?", "more"))
 	}
-	return fitHints([]string{
+	hints := []string{
 		keys("↵", "jump"),
 		keys("s", "send"),
 		keys("n", "new"),
 		keys("c", "child"),
 		keys("u", "usage"),
+		keys("D", "changes"),
 		keys("/", "filter"),
 		keys("r", "reopen"),
 		keys("x", "stop"),
@@ -642,7 +650,11 @@ func (m Model) hintLine() string {
 		keys("t", "show trash"),
 		keys("a", "all/24h"),
 		keys("i", "subagents"),
-	}, m.width, keys("?", "more"))
+	}
+	if m.showChanges {
+		hints = append([]string{keys("v", "full diff")}, hints...)
+	}
+	return fitHints(hints, m.width, keys("?", "more"))
 }
 
 // fitHints joins key hints with two spaces and drops whole hints from the end
@@ -709,6 +721,7 @@ func treeHelp() helpSection {
 		{"S", "sync history now (it also runs every 30s)", false},
 		{"tab", "hide / show the preview", false},
 		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills", false},
+		{"D", "show / hide what the session changed: its files and diff; v while changes are on opens the full diff", false},
 		{"q", "quit (esc too, in the popup)", false},
 	}}
 }
@@ -717,6 +730,7 @@ func teamHelp() helpSection {
 	return helpSection{name: "Team", title: "Team  (on a ⬡ row or a member)", rows: []helpRow{
 		{"↵", "open the channel full screen (on a member: jump to it)", false},
 		{"e", "edit the board: n add · e edit · d done · b block", false},
+		{"D", "show / hide a member's changes: its branch's commits and uncommitted files; v opens the full diff", false},
 		{"ctrl+g", "read the whole goal and every member's part", false},
 		{"s", "message everyone (@role for one); on a member, that member", false},
 		{"p / L", "pause or resume · take the lead or hand it back", false},

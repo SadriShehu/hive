@@ -37,6 +37,7 @@ type Ops interface {
 	Restore(s store.Session) ([]store.Session, error)
 	Purge(s store.Session) (tracker.Purged, error)
 	Copy(text string) error
+	Popup(command string) error           // run a shell command in a tmux popup
 	Tools() []string                      // tools that can be started here
 	Models(tool string) ([]string, error) // what tool can run, as it names them; may take a second
 	Fusion() fusion.Settings              // what auto means
@@ -58,6 +59,7 @@ type Ops interface {
 	TeamRead(teamID string, upTo int64) error
 	TeamRunning(teamID string) ([]string, error) // roles whose agents run, panes only too
 	TeamBranches(teamID string) (BranchReport, error)
+	Changes(s store.Session, teamID, role string) (tracker.ChangeReport, error)
 	TeamTaskAdd(teamID, title, body, owner string, after []int) (store.Task, error)
 	TeamTaskEdit(teamID string, n int, title, body, owner string, after []int) (store.Task, error)
 	TeamTaskDone(teamID string, n int, note string) (store.Task, error)
@@ -189,6 +191,11 @@ func (o *liveOps) Copy(text string) error {
 	return err
 }
 
+func (o *liveOps) Popup(command string) error {
+	_, err := tmux.Run("display-popup", "-E", "-w", "95%", "-h", "90%", command)
+	return err
+}
+
 func (o *liveOps) Tools() []string { return o.tracker().InstalledTools() }
 
 func (o *liveOps) TeamTemplates() []TeamTemplate { return o.templates }
@@ -297,6 +304,10 @@ func (o *liveOps) TeamBranches(teamID string) (BranchReport, error) {
 	rep.Head = head
 	rep.Uncommitted, err = gitx.Uncommitted(tm.Cwd)
 	return rep, err
+}
+
+func (o *liveOps) Changes(s store.Session, teamID, role string) (tracker.ChangeReport, error) {
+	return o.tracker().Changes(s.Cwd, teamID, role)
 }
 
 func (o *liveOps) TeamStart(opts tracker.TeamOptions) (string, error) {

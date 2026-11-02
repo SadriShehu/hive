@@ -93,7 +93,7 @@ func TestSessionHintsAreMostUsedFirst(t *testing.T) {
 	m, _ := setup(t, false)
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
 	got := ansi.Strip(strings.Join(m.hintLines(), "\n"))
-	want := "↵ jump  s send  n new  c child  u usage  / filter  r reopen  x stop  d trash  t show trash  a all/24h  ? more"
+	want := "↵ jump  s send  n new  c child  u usage  D changes  / filter  r reopen  x stop  d trash  t show trash  a all/24h  ? more"
 	if got != want {
 		t.Fatalf("session hint =\n%s\nwant\n%s", got, want)
 	}

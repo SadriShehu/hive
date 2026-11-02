@@ -44,8 +44,15 @@ func Git(dir string, args ...string) (string, error) {
 }
 
 // run runs git in dir, with a timeout when wait is positive, and reports its
-// output, exit code and stderr.
+// output trimmed, exit code and stderr.
 func run(dir string, wait time.Duration, args ...string) (string, int, string, error) {
+	out, code, stderr, err := runRaw(dir, wait, args...)
+	return strings.TrimSpace(out), code, stderr, err
+}
+
+// runRaw is run without trimming stdout, which matters to status --porcelain:
+// its first line's leading space is part of the status.
+func runRaw(dir string, wait time.Duration, args ...string) (string, int, string, error) {
 	ctx := context.Background()
 	if wait > 0 {
 		var cancel context.CancelFunc
@@ -65,7 +72,7 @@ func run(dir string, wait time.Duration, args ...string) (string, int, string, e
 			code = -1
 		}
 	}
-	return strings.TrimSpace(out.String()), code, strings.TrimSpace(stderr.String()), err
+	return out.String(), code, strings.TrimSpace(stderr.String()), err
 }
 
 // gitError words a failed command: what ran, and the first thing git said.

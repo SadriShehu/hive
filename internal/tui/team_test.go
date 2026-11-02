@@ -39,6 +39,9 @@ type teamOps struct {
 	branches  map[string]BranchReport
 	branchErr error
 
+	changes   map[string]tracker.ChangeReport // by session ID
+	changeErr error
+
 	taskAdded   []taskCall
 	taskEdited  []taskCall
 	taskDone    []taskCall
@@ -86,6 +89,9 @@ func (f *teamOps) TeamRunning(team string) ([]string, error) {
 }
 func (f *teamOps) TeamBranches(team string) (BranchReport, error) {
 	return f.branches[team], f.branchErr
+}
+func (f *teamOps) Changes(s store.Session, _, _ string) (tracker.ChangeReport, error) {
+	return f.changes[s.ID], f.changeErr
 }
 func (f *teamOps) TrashTeam(tm store.Team) ([]store.Session, error) {
 	f.trashedTeams = append(f.trashedTeams, tm.ID)

@@ -102,13 +102,15 @@ type Model struct {
 	showPreview bool
 	preview     preview
 
-	showUsage bool
-	usages    map[string]store.Usage
-	usage     usageFetch
-	quotas    map[string]store.Quota // each tool account's last reported rate limits
-	quotasAt  time.Time
-	branches  map[string]branchFetch // each team's last branch report, by team ID
-	roots     []*tree.Node
+	showUsage   bool
+	showChanges bool
+	usages      map[string]store.Usage
+	usage       usageFetch
+	changes     changesFetch
+	quotas      map[string]store.Quota // each tool account's last reported rate limits
+	quotasAt    time.Time
+	branches    map[string]branchFetch // each team's last branch report, by team ID
+	roots       []*tree.Node
 
 	flash    string
 	flashErr bool
@@ -565,10 +567,11 @@ func (m *Model) usageCmd() tea.Cmd {
 // it runs in one, else the end of its transcript; and its usage.
 func (m *Model) previewCmd() tea.Cmd {
 	branches := m.branchesCmd()
+	changes := m.changesCmd()
 	if m.mode == modeChannel {
-		return tea.Batch(m.contentCmd(), branches)
+		return tea.Batch(m.contentCmd(), branches, changes)
 	}
-	return tea.Batch(m.contentCmd(), m.usageCmd(), branches)
+	return tea.Batch(m.contentCmd(), m.usageCmd(), branches, changes)
 }
 
 func (m *Model) contentCmd() tea.Cmd {
@@ -696,6 +699,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			f.err, f.report = "", msg.report
 		}
 		m.branches[msg.teamID] = f
+		return m, nil
+
+	case changesMsg:
+		if msg.id != m.changes.id {
+			return m, nil // the selection moved on
+		}
+		m.changes.at = msg.at
+		if msg.err != nil {
+			m.changes.err = msg.err.Error()
+		} else {
+			m.changes.err, m.changes.report = "", msg.report
+		}
 		return m, nil
 
 	case usageMsg:
@@ -830,6 +845,10 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showUsage = false
 			return m, nil
 		}
+		if m.changesTakesTheBody() {
+			m.showChanges = false
+			return m, nil
+		}
 		if m.popup {
 			return m, tea.Quit
 		}
@@ -944,10 +963,25 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showPreview = !m.showPreview
 	case "u":
 		m.showUsage = !m.showUsage
+		if m.showUsage {
+			m.showChanges = false
+		}
 		m.usage.at = time.Time{}
 		return m, m.usageCmd()
+	case "D":
+		if ok {
+			m.showChanges = !m.showChanges
+			if m.showChanges {
+				m.showUsage = false
+			}
+			m.changes.at = time.Time{}
+		}
+		return m, m.changesCmd()
+	case "v":
+		if ok && m.showChanges {
+			return m, m.popupDiff(s)
+		}
 	case "?":
-		m.helpFrom, m.helpScroll = modeNormal, 0
 		m.mode = modeHelp
 	}
 	return m, nil

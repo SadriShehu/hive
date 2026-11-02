@@ -116,7 +116,7 @@ transcript for a headless run, a subagent or a finished session.
 | `/` | filter by title, folder or ID, across all history; `team:<name or ID>` shows a team's subtree, a bare `team:` every team |
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
-| `u` | show / hide what the session used: model, tokens, price, context, tools, skills |
+| `u` · `D` | show / hide what the session used (model, tokens, price, context, tools, skills) · show / hide what it changed: files, a diff, and `v` for the full diff in a popup |
 
 `?` opens the help on the keys for where you are: the tree, a team row, the trash, or
 the board; the other sections follow in a fixed order. Its key column fits the longest
@@ -221,6 +221,7 @@ hive wait <id>                                 # until it has answered: prints "
 hive send <id> "now run them"                  # type into it; an ended one reopens with the message
 hive tail <id> -n 20                           # the end of its transcript (--json for agents)
 hive usage <id>                                # model, tokens, price, tools, skills, context (--json)
+hive diff <id>                                 # what it changed, through your pager (--stat, --json)
 hive models                                    # what each tool can run, with the ratings auto picks by
 hive jump <id>                                 # go to its pane, reopening it if it has ended
 hive jump --next                               # go to the agent that needs you
@@ -346,6 +347,17 @@ A `[[model]]` named like a row hive ships with replaces that row's prices and co
 window; without prices, it takes the price away. A tier or a rating it doesn't set stays
 the built-in one. A name can also cover a family: `gpt-6` prices every `gpt-6-…` model
 that has no price of its own.
+
+## What a session changed
+
+`hive diff <id>` shows what a session changed, through git and your own pager, so
+`delta`, `diff-so-fancy` or `less` work as they do. For a member of a worktrees team it
+is the commits on `hive/<team>/<role>` since the team's base, then what is left
+uncommitted in its worktree; for any other session, the uncommitted changes in its
+folder. `--stat` prints the summary and file list instead of the diff, and `--json` the
+label, base, branch, files and counts. In the tree, `D` shows the same in the preview
+(`v` opens the full diff in a popup), and `D` again goes back. A plain folder shared
+with live sessions says so, so its changes aren't mistaken for one session's.
 
 ## Teams
 
@@ -478,6 +490,7 @@ tree, so a teammate can't paint your terminal.
 | `e` | open the board editor (on a team or any of its members): `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
 | `ctrl+g` | read the whole goal and every member's part (a `^g goal` on the title says when it is cut) |
 | `s` | message everyone (`@role` for one); on a member, message that member |
+| `D` | on a member: show / hide its changes, the commits on its branch and its uncommitted files; `v` opens the full diff |
 | `p` | pause or resume: no mail is delivered and no task claimed while paused |
 | `L` | take the lead yourself, or hand it back to an agent |
 | `x` | stop every member (asks first) |

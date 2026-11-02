@@ -35,7 +35,7 @@ func newRootCmd() *cobra.Command {
 	}
 	root.AddCommand(newHookCmd(), newInstallCmd(), newUninstallCmd(), newLsCmd(), newSyncCmd(),
 		newPopupCmd(), newUICmd(), newNewCmd(), newJumpCmd(), newResumeCmd(), newSendCmd(),
-		newTailCmd(), newWaitCmd(), newUsageCmd(), newModelsCmd(), newKillCmd(), newTeamCmd(), newRmCmd(), newTrashCmd(), newStatusCmd(), newDoctorCmd())
+		newTailCmd(), newWaitCmd(), newUsageCmd(), newModelsCmd(), newKillCmd(), newDiffCmd(), newTeamCmd(), newRmCmd(), newTrashCmd(), newStatusCmd(), newDoctorCmd())
 	groupHelp(root)
 	wireCompletion(root)
 	return root
@@ -48,7 +48,7 @@ func groupHelp(root *cobra.Command) {
 		commands  []string
 	}{
 		{"start", "Start here:", []string{"install", "doctor"}},
-		{"sessions", "Sessions:", []string{"ls", "new", "send", "tail", "wait", "jump", "resume", "kill", "usage", "models"}},
+		{"sessions", "Sessions:", []string{"ls", "new", "send", "tail", "wait", "jump", "resume", "kill", "usage", "diff", "models"}},
 		{"teams", "Teams:", []string{"team"}},
 		{"housekeeping", "Housekeeping:", []string{"sync", "rm", "trash", "uninstall"}},
 		{"tmux", "For tmux and hooks:", []string{"status", "popup", "hook"}},

@@ -557,7 +557,7 @@ func wireCompletion(root *cobra.Command) {
 		}
 		return c
 	}
-	sessions := []string{"send", "tail", "jump", "resume", "usage", "kill", "rm", "wait"}
+	sessions := []string{"send", "tail", "jump", "resume", "usage", "kill", "rm", "wait", "diff"}
 	for _, name := range sessions {
 		if c := find(name); c != nil {
 			c.ValidArgsFunction = compSessions

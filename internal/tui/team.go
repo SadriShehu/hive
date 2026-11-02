@@ -230,6 +230,8 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}, true
 	case "c", "r", "u":
 		m.setFlash("pick a member of "+tm.Name+" for that", true)
+	case "D":
+		m.setFlash("pick a member for its changes", true)
 	case "y":
 		name := tm.Name
 		return m, func() tea.Msg { return doneMsg{text: "copied " + name, err: ops.Copy(name)} }, true
@@ -1468,12 +1470,16 @@ func (m Model) teamHints() ([]string, bool) {
 	}
 	hints = append(hints,
 		keys("s", "message"),
+		keys("D", "changes"),
 		keys("p", "pause"),
 		keys("L", "lead"),
 		keys("r", "reopen"),
 		keys("x", "stop"),
 		keys("T", "new team"),
 	)
+	if m.showChanges {
+		hints = append([]string{keys("v", "full diff")}, hints...)
+	}
 	return hints, true
 }
 

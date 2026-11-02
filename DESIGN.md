@@ -270,8 +270,14 @@ Other keys: `n` new agent, `c` new agent as a child of the selected one, `/` fil
 title, folder or ID (`team:<name or ID>` shows that team's whole subtree; a bare `team:`
 shows every team), `a` recent or all history, `i` hide or show subagents, `S` sync now,
 `y` copy the ID, `tab` hide the preview, `u` show what the session used (model, tokens,
-price, context, tools, skills) in place of the pane preview, `←` / `→` collapse and expand,
-`?` help, `q` quit.
+price, context, tools, skills) in place of the pane preview, `D` show what it changed (the
+files and a diff; `v` opens the full diff in a tmux popup), `←` / `→` collapse and expand,
+`?` help, `q` quit. `u` and `D` are exclusive, and the last one pressed wins. The changes
+preview reads git in a `tea.Cmd` only while it is on and its row is selected, at most every
+five seconds; View never runs git. A worktree member's preview labels the branch and the
+team's base and shows the commits on the branch plus its uncommitted files; a plain
+folder's preview says when other live sessions share the folder, so its changes aren't
+mistaken for one session's. `D` on a team row asks for a member.
 
 The help is grouped into sections: Tree, Team, Channel, Board, Trash and Glyphs. The
 section for where `?` was pressed comes first (Team on a team or member row, Trash in the
@@ -441,6 +447,7 @@ Start here, Sessions, Teams, Housekeeping, and For tmux and hooks.
 | `hive models [tool] [--json]` | what each installed tool can run, with the ratings `auto` picks by |
 | `hive send <id> [text \| -]` | type into its pane and press Enter; an ended session reopens with the message |
 | `hive tail <id> [-n 40] [--json]` | print the end of its transcript |
+| `hive diff <id> [--stat] [--json]` | what it changed, through git and the user's pager: a worktree member's branch since the base, then its uncommitted files; anything else's uncommitted folder |
 | `hive wait <id>... [--any] [--timeout d]` | block until each has answered what hive gave it and is idle, needs you, or has ended; print `<id> <idle\|attention\|exited>` as each gets there |
 | `hive jump <id>` | switch to its pane (a subagent's: its parent's), reopening it if it has ended; outside tmux, attach |
 | `hive jump --next` | switch to the session that has needed you longest, or from one of them to the next |

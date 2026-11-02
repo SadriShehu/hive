@@ -68,6 +68,9 @@ func quote(s string) string {
 	return s
 }
 
+// ShellQuote quotes a word for a command string tmux runs, as the bindings do.
+func ShellQuote(s string) string { return quote(s) }
+
 // InstallBindings writes bindings to the tmux config and, if a server is
 // running, binds them right away. Safe to rerun: a binding already there is
 // replaced in place.
