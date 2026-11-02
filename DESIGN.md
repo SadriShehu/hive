@@ -673,7 +673,7 @@ no preview.
 | Key, on a team | Does |
 | --- | --- |
 | `↵` | open the team's channel full screen; on a member row, jump to that member |
-| `e` | open the board editor: `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
+| `e` | open the board editor (on a team or any of its members): `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
 | `s` | write to everyone (`@role` for one); on a member, to that member |
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |
