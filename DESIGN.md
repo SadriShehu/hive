@@ -760,8 +760,11 @@ the channel) opens a full-screen reader with the whole goal and every member's p
 its own line breaks are kept. Typing writes to everyone
 (`@role` for one), `↵` sends through the same mailbox as `s`, `esc` goes back to the tree,
 and the prompt wraps: `↑/↓` move the caret once typing, and `pgup`/`pgdn` (or `ctrl+u`/
-`ctrl+d`) scroll the feed. The channel marks its team read while it is open, preview or
-no preview.
+`ctrl+d`) scroll the feed. On a narrow screen the live line's placeholder drops whole
+segments from the end, and a long team name drops `(@role for one)` first; under 100 cols
+a wrapped post's continuation lines start six columns in, under the name, while wide
+screens keep the alignment under the message column. The channel marks its team read
+while it is open, preview or no preview.
 
 | Key, on a team | Does |
 | --- | --- |

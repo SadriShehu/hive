@@ -1405,8 +1405,12 @@ func (m Model) feedLines(t store.Team, w int) []string {
 	for _, msg := range msgs {
 		whoW = max(whoW, ansi.StringWidth(who(msg)))
 	}
-	whoW = min(whoW, max(8, w/3))
+	whoW = min(whoW, 16)
 	prefixW := 6 + whoW + 1
+	indent := prefixW
+	if w < 100 {
+		indent = 6 // continuation lines start under the name, after the time
+	}
 	tools := map[string]string{}
 	for _, mem := range m.members(t.ID) {
 		tools[mem.Role] = mem.Tool
@@ -1429,7 +1433,7 @@ func (m Model) feedLines(t store.Team, w int) []string {
 				out = append(out, sDim.Render(time.UnixMilli(msg.At).Format("15:04"))+" "+
 					nameStyle.Render(pad(name, whoW))+" "+bodyStyle.Render(l))
 			} else {
-				out = append(out, strings.Repeat(" ", prefixW)+bodyStyle.Render(l))
+				out = append(out, strings.Repeat(" ", indent)+bodyStyle.Render(l))
 			}
 		}
 		if msg.Kind != store.MsgSay {
@@ -1440,7 +1444,7 @@ func (m Model) feedLines(t store.Team, w int) []string {
 			if ansi.StringWidth(out[last])+ansi.StringWidth(suffix) <= w {
 				out[last] += sDim.Render(suffix)
 			} else {
-				out = append(out, strings.Repeat(" ", prefixW)+sDim.Render(suffix))
+				out = append(out, strings.Repeat(" ", indent)+sDim.Render(suffix))
 			}
 		}
 	}

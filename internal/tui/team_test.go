@@ -223,7 +223,7 @@ func TestSelectingATeamShowsItsChannelAndMarksItRead(t *testing.T) {
 	m, ops := setupTeam(t)
 	view := ansi.Strip(m.View())
 	for _, want := range []string{"⬡ api-v2", "led by lead", "start with the schema", "you → lead",
-		"backend → frontend", "frontend needs you", "frontend waits on you"} {
+		"backend → front", "frontend needs you", "frontend waits on you"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("channel lacks %q:\n%s", want, view)
 		}
@@ -303,7 +303,7 @@ func TestEnterOnATeamOpensItsChannel(t *testing.T) {
 	}
 	view := ansi.Strip(m.View())
 	for _, want := range []string{"⬡ api-v2", "add the admin API", "3 members", "● lead", "#1 schema for admin users",
-		"start with the schema", "backend → frontend", "message api-v2"} {
+		"start with the schema", "backend → front", "message api-v2"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("channel lacks %q:\n%s", want, view)
 		}

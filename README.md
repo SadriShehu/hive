@@ -425,7 +425,9 @@ titled by the task it holds; select it and the preview is the board and the chan
 `↵` opens the channel full screen with a live line: type to write to everyone (`@role`
 for one), `↵` sends, `esc` goes back to the tree, `ctrl+g` reads the whole goal, and the
 prompt wraps: `↑/↓` move the caret once you have typed, and `pgup`/`pgdn` (or
-`ctrl+u`/`ctrl+d`) scroll the feed. Each
+`ctrl+u`/`ctrl+d`) scroll the feed. On a narrow screen the live line's placeholder drops
+whole segments, and a long team name drops `(@role for one)` first; a wrapped post
+continues six columns in, under the name. Each
 member's row shows its state, model and effort, short session ID and how full its context
 is; the account's rate-limit windows (`5h 7% · resets 4h54m · 7d 22%`) show once per tool,
 when the tool reports them. Claude Code sends them only to its status line: point that
