@@ -67,7 +67,7 @@ func runHook(tool string, args []string, f hookFlags) error {
 	defer st.Close()
 	tr := tracker.New(st, adapters.All(), &tracker.System{})
 	if os.Getenv("HIVE_DEBUG") != "" {
-		tr.Logf = logf
+		tr.Logf = logInfo
 	}
 	tr.OnAttention = func(s store.Session) { alert(st, s) }
 	tr.OnDeliverable = func(s store.Session) { startDeliver(s.ID) }
@@ -104,8 +104,13 @@ func readStdin() []byte {
 	return data
 }
 
-// logf appends one line to hive's log, rotating it past 1 MB.
-func logf(format string, args ...any) {
+// logf appends one failure line to hive's log, rotating it past 1 MB.
+func logf(format string, args ...any) { logAt("ERROR", format, args...) }
+
+// logInfo appends one routine line to hive's log.
+func logInfo(format string, args ...any) { logAt("INFO", format, args...) }
+
+func logAt(level, format string, args ...any) {
 	path := paths.LogPath()
 	if fi, err := os.Stat(path); err == nil && fi.Size() > 1<<20 {
 		os.Rename(path, path+".1")
@@ -118,5 +123,5 @@ func logf(format string, args ...any) {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "%s [%d] %s\n", time.Now().Format(time.RFC3339), os.Getpid(), fmt.Sprintf(format, args...))
+	fmt.Fprintf(f, "%s %s [%d] %s\n", time.Now().Format(time.RFC3339), level, os.Getpid(), fmt.Sprintf(format, args...))
 }

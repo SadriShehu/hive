@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -53,40 +55,72 @@ func taskGlyph(status string) (string, lipgloss.Style) {
 }
 
 // taskLines lists a team's tasks for its preview in at most limit lines.
-// When they don't fit, the done ones fold into one line, and then the last
-// ones give way to a count.
+// When they don't fit, the block folds: a summary line of counts, then the
+// claimed, blocked and open tasks by number, then the done ones, and a last
+// line saying how many are left and that e opens the board.
 func (m Model) taskLines(teamID string, w, limit int) []string {
 	tasks := m.tasks(teamID)
 	if len(tasks) == 0 || limit <= 0 {
 		return nil
 	}
-	show, done := tasks, 0
-	if len(tasks) > limit {
-		show = nil
+	if len(tasks) <= limit {
+		out := make([]string, 0, len(tasks))
 		for _, t := range tasks {
-			if t.Status == store.TaskDone {
-				done++
-			} else {
-				show = append(show, t)
-			}
+			out = append(out, taskLine(t, tasks, w))
 		}
+		return out
 	}
-	var out []string
-	if done > 0 {
-		out = append(out, sOK.Render("✓")+sDim.Render(fmt.Sprintf(" %d done", done)))
+	out := []string{taskSummary(team.Count(tasks))}
+	room := limit - 1
+	if room <= 0 {
+		return out
 	}
-	more := 0
-	if room := limit - len(out); len(show) > room {
-		more = len(show) - max(0, room-1)
-		show = show[:max(0, room-1)]
+	ordered := slices.Clone(tasks)
+	slices.SortStableFunc(ordered, func(a, b store.Task) int {
+		if r := taskRank(a.Status) - taskRank(b.Status); r != 0 {
+			return r
+		}
+		return cmp.Compare(a.N, b.N)
+	})
+	keep := room
+	if len(ordered) > room {
+		keep = room - 1
 	}
+	show := ordered[:max(0, keep)]
 	for _, t := range show {
 		out = append(out, taskLine(t, tasks, w))
 	}
-	if more > 0 {
-		out = append(out, sDim.Render(fmt.Sprintf("… %d more · hive team task ls", more)))
+	if more := len(ordered) - len(show); more > 0 {
+		out = append(out, sDim.Render(fmt.Sprintf("… %d more · e opens the board", more)))
 	}
 	return out
+}
+
+// taskRank orders a folded board: what moves comes before what waits, and
+// done comes last.
+func taskRank(status string) int {
+	switch status {
+	case store.TaskClaimed:
+		return 0
+	case store.TaskBlocked:
+		return 1
+	case store.TaskOpen:
+		return 2
+	}
+	return 3
+}
+
+// taskSummary is the folded board's first line: "1/6 done · 3 claimed · 2
+// open", with the parts that are zero left out.
+func taskSummary(c team.Counts) string {
+	parts := []string{fmt.Sprintf("%d/%d done", c.Done, c.Total)}
+	if c.Claimed > 0 {
+		parts = append(parts, fmt.Sprintf("%d claimed", c.Claimed))
+	}
+	if c.Open > 0 {
+		parts = append(parts, fmt.Sprintf("%d open", c.Open))
+	}
+	return sDim.Render(strings.Join(parts, " · "))
 }
 
 // taskLine draws one task: mark, number, title, then what it waits for and

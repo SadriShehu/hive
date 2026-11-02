@@ -109,8 +109,9 @@ func LoadConfig(path string) (Config, error) {
 // Alerts is the [alerts] table of config.toml: how hive tells you that an
 // agent needs you.
 type Alerts struct {
-	Tmux    bool `toml:"tmux"`    // a message on every tmux client not looking at it; on unless set false
-	Desktop bool `toml:"desktop"` // a desktop notification too
+	Tmux    bool     `toml:"tmux"`    // a message on every tmux client not looking at it; on unless set false
+	Desktop bool     `toml:"desktop"` // a desktop notification too
+	Command []string `toml:"command"` // a command to run, with {text}, {title}, {id} and {cwd} filled in
 }
 
 var defaultAlerts = Alerts{Tmux: true}
@@ -153,6 +154,9 @@ func readConfig(path string) (configFile, error) {
 	}
 	if cfg.Fusion.Tool != "" && !toolName.MatchString(cfg.Fusion.Tool) {
 		return configFile{}, fmt.Errorf("%s: fusion tool %q must be lowercase letters, digits, - or _", path, cfg.Fusion.Tool)
+	}
+	if len(cfg.Alerts.Command) > 0 && cfg.Alerts.Command[0] == "" {
+		return configFile{}, fmt.Errorf("%s: alert command needs a program", path)
 	}
 	if err := checkTeams(path, cfg.Team); err != nil {
 		return configFile{}, err

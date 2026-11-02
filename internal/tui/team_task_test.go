@@ -60,13 +60,45 @@ func TestALongBoardFoldsItsDoneTasks(t *testing.T) {
 	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
 	m = step(t, m, feedMsg{teamID: "t1", msgs: ops.feed})
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "✓ 8 done") || strings.Contains(view, "#3 step 3") {
+	if !strings.Contains(view, "8/20 done") || strings.Contains(view, "#3 step 3") {
 		t.Errorf("the done tasks aren't folded:\n%s", view)
 	}
-	if !strings.Contains(view, "more · hive team task ls") || !strings.Contains(view, "#9 step 9") || strings.Contains(view, "#20 step 20") {
+	if !strings.Contains(view, "more · e opens the board") || !strings.Contains(view, "#9 step 9") || strings.Contains(view, "#20 step 20") {
 		t.Errorf("want the first open tasks and a count of the rest:\n%s", view)
 	}
 	if !strings.Contains(view, "the list endpoint is GET") {
 		t.Errorf("the board crowds out the channel:\n%s", view)
+	}
+}
+
+// A folded board spends its few rows on what moves: claimed first, then
+// blocked, then open, and points at e rather than the CLI.
+func TestAFoldedBoardShowsMovingTasksFirst(t *testing.T) {
+	m, ops := setupTeam(t)
+	tasks := []store.Task{
+		{TeamID: "t1", N: 1, Title: "done one", Status: store.TaskDone},
+		{TeamID: "t1", N: 4, Title: "open four", Status: store.TaskOpen},
+		{TeamID: "t1", N: 7, Title: "blocked seven", Status: store.TaskBlocked},
+		{TeamID: "t1", N: 5, Title: "claimed five", Status: store.TaskClaimed, Owner: "backend"},
+		{TeamID: "t1", N: 2, Title: "open two", Status: store.TaskOpen},
+		{TeamID: "t1", N: 8, Title: "blocked eight", Status: store.TaskBlocked},
+		{TeamID: "t1", N: 3, Title: "claimed three", Status: store.TaskClaimed, Owner: "backend"},
+		{TeamID: "t1", N: 6, Title: "claimed six", Status: store.TaskClaimed, Owner: "backend"},
+	}
+	ops.snap.Tasks = tasks
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	got := m.taskLines("t1", 80, 3)
+	if len(got) != 3 {
+		t.Fatalf("folded board has %d lines, want 3:\n%s", len(got), ansi.Strip(strings.Join(got, "\n")))
+	}
+	plain := ansi.Strip(strings.Join(got, "\n"))
+	if !strings.HasPrefix(plain, "1/8 done · 3 claimed · 2 open") {
+		t.Errorf("the summary line is wrong:\n%s", plain)
+	}
+	if !strings.Contains(got[1], "#3 claimed three") {
+		t.Errorf("the first folded row isn't the lowest claimed task:\n%s", plain)
+	}
+	if !strings.Contains(got[2], "… 7 more · e opens the board") {
+		t.Errorf("the overflow line doesn't point at e:\n%s", plain)
 	}
 }
