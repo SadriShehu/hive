@@ -847,7 +847,7 @@ func TestTeamStartMakesTheSharedFilesFolderAndTellsEachMember(t *testing.T) {
 			t.Errorf("window env %s = %q, want %q", team.DirEnv, got, dir)
 		}
 		prompt := strings.Join(w.Argv, " ")
-		if want := "Shared files: $HIVE_TEAM_DIR (" + dir + ")"; !strings.Contains(prompt, want) {
+		if want := "Shared files: `$HIVE_TEAM_DIR` (" + dir + ")"; !strings.Contains(prompt, want) {
 			t.Errorf("brief lacks %q: %s", want, prompt)
 		}
 	}
