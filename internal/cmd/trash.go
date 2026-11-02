@@ -36,7 +36,7 @@ func newRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "moved %s to the trash\n", withBelow(s.ID, len(family)-1))
+			fmt.Fprintf(os.Stderr, "moved %s to the trash\n", withBelow(shortSessionID(s), len(family)-1))
 			return nil
 		}),
 	}
@@ -69,7 +69,7 @@ func newTrashCmd() *cobra.Command {
 				fmt.Println("the trash is empty")
 				return nil
 			}
-			printTree(roots, nil, func(int) string {
+			printTree(roots, nil, nil, func(int) string {
 				return fmt.Sprintf("%d sessions in the trash · `hive trash restore <id>` · `hive trash purge <id>`", len(trashed))
 			})
 			return nil
@@ -99,7 +99,7 @@ func newRestoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "restored %s\n", withBelow(s.ID, len(family)-1))
+			fmt.Fprintf(os.Stderr, "restored %s\n", withBelow(shortSessionID(s), len(family)-1))
 			return nil
 		},
 	}
@@ -141,7 +141,7 @@ func newPurgeCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				targets, what = []store.Session{s}, withBelow(s.ID, len(family)-1)
+				targets, what = []store.Session{s}, withBelow(shortSessionID(s), len(family)-1)
 			}
 			if len(targets) == 0 {
 				fmt.Fprintln(os.Stderr, "the trash is empty")
@@ -157,7 +157,7 @@ func newPurgeCmd() *cobra.Command {
 			for _, s := range targets {
 				purged, err := tr.Purge(cmd.Context(), s)
 				if n := len(purged.Sessions); n > 0 {
-					fmt.Fprintf(os.Stderr, "deleted %s for good\n", withBelow(s.ID, n-1))
+					fmt.Fprintf(os.Stderr, "deleted %s for good\n", withBelow(shortSessionID(s), n-1))
 				}
 				if len(purged.Kept) > 0 {
 					fmt.Fprintf(os.Stderr, "hive can't delete %s sessions: their own copies stay\n", strings.Join(purged.Kept, ", "))

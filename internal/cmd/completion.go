@@ -23,7 +23,28 @@ import (
 // shortSessionID is the short form completion offers and the CLI prints: the
 // tool and the first 8 characters of the tool's own session ID.
 func shortSessionID(s store.Session) string {
-	return s.Tool + ":" + firstRunes(s.NativeID, 8)
+	return shortIDText(s.ID)
+}
+
+// shortIDText shortens a full ID the same way. Every command still accepts it,
+// as a prefix of the full one.
+func shortIDText(id string) string {
+	if id == "" {
+		return ""
+	}
+	tool, native, ok := strings.Cut(id, ":")
+	if !ok {
+		return firstRunes(id, 8)
+	}
+	return tool + ":" + firstRunes(native, 8)
+}
+
+func shortIDs(ids []string) string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = shortIDText(id)
+	}
+	return strings.Join(out, ", ")
 }
 
 func firstRunes(s string, n int) string {

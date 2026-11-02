@@ -465,7 +465,7 @@ func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
 		case l.Launched.SessionID == "":
 			note = fmt.Sprintf("pane %s  reports in with its first event", l.Launched.Pane)
 		default:
-			note = fmt.Sprintf("%s  pane %s", l.Launched.SessionID, l.Launched.Pane)
+			note = fmt.Sprintf("%s  pane %s", shortIDText(l.Launched.SessionID), l.Launched.Pane)
 		}
 		fmt.Printf("  %-9s %-8s %s\n", m.Role, m.Tool, note)
 	}
@@ -475,7 +475,7 @@ func orID(id string) string {
 	if id == "" {
 		return "starting"
 	}
-	return id
+	return shortIDText(id)
 }
 
 func newTeamLsCmd() *cobra.Command {

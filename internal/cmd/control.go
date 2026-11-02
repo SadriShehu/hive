@@ -199,11 +199,11 @@ func newNewCmd() *cobra.Command {
 				id = s.ID
 				if s.Synthetic() {
 					fmt.Fprintf(os.Stderr, "%s starts its session with its first message; until then it goes by %s, "+
-						"which hive send, jump and kill accept, and which then names the session\n", l.Tool, id)
+						"which hive send, jump and kill accept, and which then names the session\n", l.Tool, shortIDText(id))
 				}
 			}
 			if id != "" {
-				fmt.Println(id)
+				fmt.Println(shortIDText(id))
 			} else {
 				fmt.Fprintf(os.Stderr, "started %s in tmux pane %s; its ID comes with its first event (use --wait)\n", l.Tool, l.Pane)
 			}
@@ -391,7 +391,7 @@ func newResumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Println(s.ID)
+			fmt.Println(shortSessionID(s))
 			if focus {
 				return goTo(l.Pane)
 			}
@@ -622,7 +622,7 @@ func newKillCmd() *cobra.Command {
 			if err := tr.Stop(s); err != nil {
 				return err
 			}
-			fmt.Fprintln(os.Stderr, "stopped", s.ID)
+			fmt.Fprintln(os.Stderr, "stopped", shortSessionID(s))
 			return nil
 		}),
 	}

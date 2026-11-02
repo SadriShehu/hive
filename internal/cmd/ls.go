@@ -14,6 +14,7 @@ import (
 	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tmux"
 	"github.com/sadrishehu/hive/internal/tree"
 )
@@ -47,22 +48,34 @@ func newLsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			roots := tree.DropEmpty(tree.Build(sessions))
+			data, err := loadTeamData(st)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				roots := tree.DropEmpty(tree.Build(sessions))
+				switch {
+				case live:
+					roots = tree.Filter(roots, func(n *tree.Node) bool { return n.Session.Live() })
+				case !all:
+					roots = tree.Recent(roots, time.Now().Add(-recentWindow).UnixMilli())
+				}
+				return printJSON(roots, usages, data.roles)
+			}
+			roots := tree.DropEmpty(tree.BuildTeams(sessions, data.teams, data.members))
 			switch {
 			case live:
 				roots = tree.Filter(roots, func(n *tree.Node) bool { return n.Session.Live() })
 			case !all:
 				roots = tree.Recent(roots, time.Now().Add(-recentWindow).UnixMilli())
 			}
-			if asJSON {
-				roles, err := teamRoles(st)
-				if err != nil {
-					return err
-				}
-				return printJSON(roots, usages, roles)
+			teams, rest := splitTeams(roots)
+			rest = tree.DropEmpty(rest)
+			if !all {
+				teams = collapseDoneTeams(teams)
 			}
-			printTree(roots, usages, func(live int) string {
-				return fmt.Sprintf("%d live · %d sessions", live, len(sessions)) + listedCost(roots, usages)
+			printTree(append(teams, rest...), usages, data, func(live int) string {
+				return fmt.Sprintf("%d live · %d sessions", live, len(sessions)) + listedCost(append(teams, rest...), usages)
 			})
 			hintInstall()
 			return nil
@@ -75,28 +88,72 @@ func newLsCmd() *cobra.Command {
 	return cmd
 }
 
-// teamRoles maps each session that plays a team role to its team's name and
-// the role.
-func teamRoles(st *store.Store) (map[string][2]string, error) {
+// teamData is what `hive ls` needs to draw teams: the teams, their members, and
+// each session's team and role.
+type teamData struct {
+	teams   []store.Team
+	members []store.Member
+	tasks   map[string][]store.Task
+	roles   map[string][2]string // session ID -> team name, role
+}
+
+func loadTeamData(st *store.Store) (*teamData, error) {
 	teams, err := st.Teams()
 	if err != nil {
 		return nil, err
-	}
-	names := map[string]string{}
-	for _, t := range teams {
-		names[t.ID] = t.Name
 	}
 	members, err := st.AllMembers()
 	if err != nil {
 		return nil, err
 	}
-	out := map[string][2]string{}
-	for _, m := range members {
-		if m.SessionID != "" {
-			out[m.SessionID] = [2]string{names[m.TeamID], m.Role}
+	names := map[string]string{}
+	d := &teamData{teams: teams, members: members, tasks: map[string][]store.Task{}, roles: map[string][2]string{}}
+	for _, t := range teams {
+		names[t.ID] = t.Name
+		if d.tasks[t.ID], err = st.Tasks(t.ID); err != nil {
+			return nil, err
 		}
 	}
-	return out, nil
+	for _, m := range members {
+		if m.SessionID != "" {
+			d.roles[m.SessionID] = [2]string{names[m.TeamID], m.Role}
+		}
+	}
+	return d, nil
+}
+
+// splitTeams lifts every team node out of the tree, so the teams print first
+// and the sessions that aren't on a team follow them.
+func splitTeams(nodes []*tree.Node) (teams, rest []*tree.Node) {
+	var walk func([]*tree.Node) []*tree.Node
+	walk = func(ns []*tree.Node) []*tree.Node {
+		out := make([]*tree.Node, 0, len(ns))
+		for _, n := range ns {
+			c := *n
+			c.Children = walk(n.Children)
+			if c.Team != nil {
+				teams = append(teams, &c)
+				continue
+			}
+			out = append(out, &c)
+		}
+		return out
+	}
+	rest = walk(nodes)
+	return teams, rest
+}
+
+// collapseDoneTeams leaves a done team as one line, with no members.
+func collapseDoneTeams(teams []*tree.Node) []*tree.Node {
+	out := make([]*tree.Node, len(teams))
+	for i, n := range teams {
+		c := *n
+		if c.Team != nil && c.Team.Status == store.TeamDone {
+			c.Children = nil
+		}
+		out[i] = &c
+	}
+	return out
 }
 
 func printJSON(roots []*tree.Node, usages map[string]store.Usage, roles map[string][2]string) error {
@@ -127,18 +184,92 @@ func printJSON(roots []*tree.Node, usages map[string]store.Usage, roles map[stri
 	return enc.Encode(rows)
 }
 
-type column struct {
-	text  string
-	style string // ANSI SGR parameters
+// lsRow is one line of the tree: a session, or a team with its members
+// under it.
+type lsRow struct {
+	team       *store.Team
+	prefix     string
+	glyph      string
+	glyphStyle string
+	name       string
+	nameStyle  string
+	title      string
+	titleStyle string
+	kind       string
+	state      string
+	stateStyle string
+	age        string
+	cost       string
+	path       string
+	id         string
+	summary    string // a team's members and tasks, in place of state and age
 }
 
-// printTree prints the tree, then a footer saying how many of it are live.
-func printTree(roots []*tree.Node, usages map[string]store.Usage, footer func(live int) string) {
+// memberTitle names what a member does: the task it holds, else its session's
+// title, as the tree's member rows do.
+func (d *teamData) memberTitle(n *tree.Node) string {
+	if t, ok := team.Held(n.Role, d.tasks[n.TeamID]); ok {
+		return fmt.Sprintf("#%d %s", t.N, team.Clean(t.Title))
+	}
+	s := n.Session
+	if s.Title == "" && strings.HasPrefix(s.LastPrompt, "You are "+n.Role+" on the hive team") {
+		for _, m := range d.members {
+			if m.TeamID == n.TeamID && m.Role == n.Role && m.Active() && m.Prompt != "" {
+				return oneLine(m.Prompt)
+			}
+		}
+		return "(waiting for work)"
+	}
+	return title(s)
+}
+
+// teamLine says how many members a team has and how far its tasks got.
+func (d *teamData) teamLine(t store.Team) string {
+	n := 0
+	for _, m := range d.members {
+		if m.TeamID == t.ID && m.Active() {
+			n++
+		}
+	}
+	noun := "members"
+	if n == 1 {
+		noun = "member"
+	}
+	parts := []string{fmt.Sprintf("%d %s", n, noun)}
+	if c := team.Count(d.tasks[t.ID]); c.Total > 0 {
+		parts = append(parts, fmt.Sprintf("%d/%d tasks", c.Done, c.Total))
+	}
+	line := strings.Join(parts, " · ")
+	if t.Status == store.TeamDone {
+		return "done · " + line
+	}
+	if t.Paused {
+		return "paused · " + line
+	}
+	return line
+}
+
+// printTree prints the teams, then the sessions not on one, then a footer
+// saying how many of it are live.
+func printTree(roots []*tree.Node, usages map[string]store.Usage, data *teamData, footer func(live int) string) {
 	now := time.Now()
-	var rows [][]column
+	var rows []lsRow
 	liveCount := 0
 	showCost := anyCost(roots, usages)
 	tree.Walk(roots, func(n *tree.Node, prefix string) {
+		if n.Team != nil {
+			t := *n.Team
+			nameStyle, glyphStyle := "1", "35"
+			if t.Status == store.TeamDone {
+				nameStyle, glyphStyle = "2", "2"
+			}
+			rows = append(rows, lsRow{
+				team: &t, prefix: prefix, glyph: "⬡", glyphStyle: glyphStyle,
+				name: t.Name, nameStyle: nameStyle, title: team.Clean(t.Goal), titleStyle: "2",
+				summary: data.teamLine(t), stateStyle: "2",
+			})
+			return
+		}
 		s := n.Session
 		live := s.Live()
 		if live {
@@ -149,44 +280,110 @@ func printTree(roots []*tree.Node, usages map[string]store.Usage, footer func(li
 		if !live {
 			dim = "2"
 		}
-		cells := []column{
-			{prefix, "2"},
-			{glyph, glyphStyle},
-			{s.Tool, toolStyle(s.Tool)},
-			{truncate(title(s), 48), dim},
-			{kindTag(s), "2"},
-			{statusWord(s), glyphStyle},
-			{age(now, s.UpdatedAt), "2"},
+		t := title(s)
+		if n.Role != "" {
+			t = n.Role + " · " + data.memberTitle(n)
 		}
-		if showCost {
-			cells = append(cells, column{costText(usages[s.ID]), "2"})
-		}
-		rows = append(rows, append(cells, column{shortPath(s.Cwd), "2"}, column{shortID(s), "2"}))
+		rows = append(rows, lsRow{
+			prefix: prefix, glyph: glyph, glyphStyle: glyphStyle,
+			name: s.Tool, nameStyle: toolStyle(s.Tool),
+			title: t, titleStyle: dim, kind: kindTag(s),
+			state: statusWord(s), stateStyle: glyphStyle,
+			age: age(now, s.UpdatedAt), cost: costText(usages[s.ID]),
+			path: shortPath(s.Cwd), id: shortSessionID(s),
+		})
 	})
 	if len(rows) == 0 {
 		fmt.Println("no sessions yet; try `hive ls --all`, or `hive install` to start tracking")
 		return
 	}
-	// Pad every column except the tree prefix, which is part of the first cell.
-	widths := make([]int, len(rows[0]))
+	leadW, titleW, kindW, stateW, ageW, costW, pathW, idW := 0, 0, 0, 0, 0, 0, 0, 0
 	for _, r := range rows {
-		lead := utf8.RuneCountInString(r[0].text) + utf8.RuneCountInString(r[1].text) + 1
-		widths[2] = max(widths[2], lead+utf8.RuneCountInString(r[2].text))
-		for i := 3; i < len(r); i++ {
-			widths[i] = max(widths[i], utf8.RuneCountInString(r[i].text))
+		lead := utf8.RuneCountInString(r.prefix) + utf8.RuneCountInString(r.glyph) + 1 + utf8.RuneCountInString(r.name)
+		leadW = max(leadW, lead)
+		if r.team != nil {
+			continue
 		}
+		titleW = max(titleW, utf8.RuneCountInString(r.title))
+		kindW = max(kindW, utf8.RuneCountInString(r.kind))
+		stateW = max(stateW, utf8.RuneCountInString(r.state))
+		ageW = max(ageW, utf8.RuneCountInString(r.age))
+		costW = max(costW, utf8.RuneCountInString(r.cost))
+		pathW = max(pathW, utf8.RuneCountInString(r.path))
+		idW = max(idW, utf8.RuneCountInString(r.id))
+	}
+	// Cut the title, not the state or the cost, when the terminal is narrow.
+	// When even that can't fit, drop the folder and then the ID.
+	width := boardWidth()
+	showPath, showID := true, true
+	fixed := func() int {
+		n := leadW + 2 + kindW + 2 + stateW + 2 + ageW
+		if showCost {
+			n += 2 + costW
+		}
+		if showPath {
+			n += 2 + pathW
+		}
+		if showID {
+			n += 2 + idW
+		}
+		return n
+	}
+	const minTitle = 20
+	if width-fixed()-4 < minTitle {
+		showPath = false
+	}
+	if width-fixed()-4 < minTitle {
+		showID = false
+	}
+	if room := width - fixed() - 4; titleW > room { // 4: the spaces around the title
+		titleW = max(10, room)
 	}
 	color := useColor()
 	for _, r := range rows {
 		var b strings.Builder
-		b.WriteString(paint(r[0].text, r[0].style, color))
-		b.WriteString(paint(r[1].text, r[1].style, color))
+		b.WriteString(paint(r.prefix, "2", color))
+		b.WriteString(paint(r.glyph, r.glyphStyle, color))
 		b.WriteByte(' ')
-		lead := utf8.RuneCountInString(r[0].text) + utf8.RuneCountInString(r[1].text) + 1
-		b.WriteString(paint(pad(r[2].text, widths[2]-lead), r[2].style, color))
-		for i := 3; i < len(r); i++ {
+		toolW := leadW - utf8.RuneCountInString(r.prefix) - utf8.RuneCountInString(r.glyph) - 1
+		b.WriteString(paint(pad(r.name, toolW), r.nameStyle, color))
+		b.WriteString("  ")
+		if r.team != nil {
+			goalW := titleW
+			if r.summary != "" {
+				if room := width - leadW - 2 - 2 - utf8.RuneCountInString(r.summary); goalW > room {
+					goalW = max(0, room)
+				}
+			}
+			if goalW > 0 {
+				b.WriteString(paint(pad(truncate(r.title, goalW), goalW), r.titleStyle, color))
+			}
+			if r.summary != "" {
+				if goalW > 0 {
+					b.WriteString("  ")
+				}
+				b.WriteString(paint(r.summary, r.stateStyle, color))
+			}
+		} else {
+			b.WriteString(paint(pad(truncate(r.title, titleW), titleW), r.titleStyle, color))
 			b.WriteString("  ")
-			b.WriteString(paint(pad(r[i].text, widths[i]), r[i].style, color))
+			b.WriteString(paint(pad(r.kind, kindW), "2", color))
+			b.WriteString("  ")
+			b.WriteString(paint(pad(r.state, stateW), r.stateStyle, color))
+			b.WriteString("  ")
+			b.WriteString(paint(pad(r.age, ageW), "2", color))
+			if showCost {
+				b.WriteString("  ")
+				b.WriteString(paint(pad(r.cost, costW), "2", color))
+			}
+			if showPath {
+				b.WriteString("  ")
+				b.WriteString(paint(pad(r.path, pathW), "2", color))
+			}
+			if showID {
+				b.WriteString("  ")
+				b.WriteString(paint(r.id, "2", color))
+			}
 		}
 		fmt.Println(strings.TrimRight(b.String(), " "))
 	}
@@ -311,10 +508,6 @@ func title(s store.Session) string {
 	return "(untitled)"
 }
 
-func shortID(s store.Session) string {
-	return s.Tool + ":" + truncateBare(s.NativeID, 12)
-}
-
 // homePath writes a path under the home folder with ~.
 func homePath(p string) string {
 	if home := paths.Home(); strings.HasPrefix(p, home) {
@@ -361,13 +554,6 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string([]rune(s)[:n-1]) + "…"
-}
-
-func truncateBare(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	return string([]rune(s)[:n])
 }
 
 func pad(s string, w int) string {

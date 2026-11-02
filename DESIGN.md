@@ -415,14 +415,17 @@ models the tool runs. `default` is the tool's default, as an empty model is.
 
 Every tree action is also a command, so agents can run agents of their own. A session is
 named by its full ID, the tool's own ID, or a unique prefix of either; a name hive hasn't
-seen yet triggers a history import and one retry. `hive --help` groups the commands as
-Start here, Sessions, Teams, Housekeeping, and For tmux and hooks.
+seen yet triggers a history import and one retry. Text output prints one short form,
+`tool` and the first eight characters of the tool's ID, which is a prefix every command
+accepts; when two sessions share it, the resolver's error names both full IDs. `--json`
+keeps the full IDs. `hive --help` groups the commands as Start here, Sessions, Teams,
+Housekeeping, and For tmux and hooks.
 
 | Command | What it does |
 | --- | --- |
 | `hive` | the tree; outside tmux it starts or attaches the `hive` tmux session |
 | `hive popup` | the tree in a tmux popup; quits after a jump |
-| `hive ls [--all \| --live] [--json] [--no-sync]` | print the tree; `--json` is a flat list with depth, for agents |
+| `hive ls [--all \| --live] [--json] [--no-sync]` | print the teams with their members by role and held task, then the sessions not on a team, in short IDs; a done team folds to one dim line without `--all`; `--json` is a flat list with depth, full IDs, and team and role, for agents |
 | `hive new <tool\|auto> [-p text] [--model name\|auto] [--mode provider\|model] [--dry-run] [--cwd dir] [--parent auto\|none\|<id>] [--wait] [--focus]` | start an agent in a background tmux window, linked under the calling agent; print its ID. `auto` [picks the model](#picking-the-model), and the tool too |
 | `hive models [tool] [--json]` | what each installed tool can run, with the ratings `auto` picks by |
 | `hive send <id> [text \| -]` | type into its pane and press Enter; an ended session reopens with the message |
