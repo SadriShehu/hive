@@ -42,7 +42,8 @@ func newTeamCmd() *cobra.Command {
 	cmd.AddCommand(newTeamNewCmd(), newTeamLsCmd(), newTeamBoardCmd(), newTeamSayCmd(), newTeamPostCmd(),
 		newTeamLogCmd(), newTeamInboxCmd(), newTeamAddCmd(), newTeamRmCmd(), newTeamStopCmd(),
 		newTeamPauseCmd(true), newTeamPauseCmd(false), newTeamLeadCmd(), newTeamDeliverCmd(), newTeamDoneCmd())
-	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd(), newTeamMuteCmd(true), newTeamMuteCmd(false), newTeamReportCmd())
+	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd(), newTeamMuteCmd(true), newTeamMuteCmd(false),
+		newTeamReportCmd(), newTeamSaveCmd())
 	cmd.PersistentPostRun = func(cmd *cobra.Command, args []string) { noteWaiting(cmd) }
 	return cmd
 }

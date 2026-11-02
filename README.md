@@ -374,7 +374,13 @@ tool = "codex"
 
 ```sh
 hive team new admin-api --from api
+hive team save admin-api --as api   # add this team as a template, for next time
 ```
+
+`hive team save <team> [--as <name>]` appends one `[[team]]` table to `config.toml` with the
+team's goal, lead, folder, worktrees and members; `--as` names it, the team's name by
+default. It only appends, refuses a name already there, and leaves a config it can't parse
+alone.
 
 The team folder is stored as an absolute path, so a relative `cwd` or `--cwd` resolves
 where you run the command.
@@ -457,6 +463,7 @@ tree, so a teammate can't paint your terminal.
 | `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
 | `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
 | `hive team report [team] [--out path]` | Markdown hand-off: the goal whole, members with state and cost, every task with its note or blocked reason, and the members' posts; `--out team` writes `$HIVE_TEAM_DIR/report.md` |
+| `hive team save <team> [--as name]` | append the team as a `[[team]]` template in config.toml, for `hive team new --from`; only appends, and refuses a name already there |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready |
 | `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `edit <n> [--title t] [--body b\|-] [--owner role] [--after n,…]` · `reopen <n> --why text` · `ls [n] [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task; `edit` changes only the flags you pass; `reopen` sends a done or blocked task back to open |

@@ -567,6 +567,14 @@ valid role and appears once, including the lead's; and a member names a tool. Th
 stored absolute, so a relative `cwd` resolves where `hive team new` runs. A broken config
 changes nothing, as everywhere else.
 
+`hive team save <team> --as <name>` writes one back: the team's goal, its lead as a
+`tool[:model]` (or `none` when you lead), the folder, the worktrees flag, and every other
+active member with its role, tool, model and part. The lead is the table's `lead`, not a
+member row, so a saved table is always valid for `--from`. The writer loads the config
+first, refuses a name already there or a file that doesn't parse, then appends only: a
+blank line, `# saved from team <team> on <date>`, and the encoder's block. Nothing already
+in the file is rewritten or reordered.
+
 ### The brief
 
 The first prompt of each member, and the one place hive talks to an agent: the team,
