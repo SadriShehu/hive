@@ -273,6 +273,14 @@ shows every team), `a` recent or all history, `i` hide or show subagents, `S` sy
 price, context, tools, skills) in place of the pane preview, `←` / `→` collapse and expand,
 `?` help, `q` quit.
 
+The help is grouped into sections: Tree, Team, Channel, Board, Trash and Glyphs. The
+section for where `?` was pressed comes first (Team on a team or member row, Trash in the
+trash, Board in the board editor, Tree otherwise), the rest follow in that fixed order.
+The key column is as wide as the longest key plus two, and descriptions wrap under it with
+a hanging indent, so no line is cut at any width. `↑`/`↓`, `pgup`/`pgdn` and `g`/`G` scroll
+it; the hint carries the line count when it doesn't all fit; `esc`, `q`, `?` and `↵` close
+it, and other keys leave it open.
+
 **New agent.** `n` and `c` open a form: the tool, the folder (the parent's by default) and
 an optional first prompt. It opens on the prompt, since most launches keep the defaults;
 the hint follows the focused field: `←`/`→` choose on the tool and model, `tab` completes

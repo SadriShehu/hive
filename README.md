@@ -118,6 +118,13 @@ transcript for a headless run, a subagent or a finished session.
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
 | `u` | show / hide what the session used: model, tokens, price, context, tools, skills |
 
+`?` opens the help on the keys for where you are: the tree, a team row, the trash, or
+the board; the other sections follow in a fixed order. Its key column fits the longest
+key and descriptions wrap under it with a hanging indent, so nothing is cut at any
+width. `↑`/`↓` (or `j`/`k`), `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) and `g`/`G` scroll it,
+with a line count on the hint when it doesn't all fit; `esc`, `q`, `?` and `↵` close it,
+and other keys do nothing.
+
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. The form asks for the tool, the model, the
 folder and a first prompt. It opens on the prompt, where most launches start: `tab` and
@@ -445,6 +452,7 @@ blocked and asks why, and `esc` goes back to the tree, or from a form back to th
 The form takes a title, an optional body, an owner role and the tasks it waits for (`1,2`).
 An edit can't make a task wait on itself through a cycle, and clearing the owner of a
 claimed task reopens it. The selected task's body and note are shown under the list.
+`?` shows the board's keys, with esc going back to the board.
 
 Members post progress with `hive team post`; hive adds its own posts (a member started,
 needs you, stopped); you answer with `s`, or on the channel's live line. A message to a

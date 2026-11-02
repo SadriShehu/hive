@@ -92,6 +92,9 @@ type Model struct {
 	goalScroll int    // lines scrolled down from the top
 	goalFrom   mode   // where esc goes back to: the tree or the channel
 
+	helpFrom   mode // where the help goes back to: the tree, the trash or the board
+	helpScroll int  // lines scrolled down from the top
+
 	taskEdit taskEditor // the team whose board is open, and where the cursor is
 
 	foldedDone map[string]bool // done teams the tree has folded once; the user may unfold them
@@ -777,8 +780,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeConfirm:
 			return m.keyConfirm(msg)
 		case modeHelp:
-			m.mode = modeNormal
-			return m, nil
+			return m.keyHelp(msg)
 		case modeGoal:
 			return m.keyGoal(msg)
 		}
@@ -929,6 +931,7 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.usage.at = time.Time{}
 		return m, m.usageCmd()
 	case "?":
+		m.helpFrom, m.helpScroll = modeNormal, 0
 		m.mode = modeHelp
 	}
 	return m, nil
