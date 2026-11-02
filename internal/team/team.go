@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/sadrishehu/hive/internal/store"
@@ -219,15 +220,25 @@ func Clean(text string) string {
 // "[", so a message can't run a slash command, a shell escape or a memory
 // shortcut in the recipient's TUI, and it holds no control character, so it
 // can't end the paste early and reach the TUI as keys.
-func Envelope(team, from, body string) string {
-	return fmt.Sprintf("[%s · from %s] %s", team, flat(from), flat(body))
+func Envelope(team, from, body string, at, now int64) string {
+	age := ""
+	if d := time.Duration(now-at) * time.Millisecond; at > 0 && now > at && d > time.Minute {
+		if d < time.Hour {
+			age = fmt.Sprintf(" · %dm ago", int(d.Minutes()))
+		} else {
+			age = fmt.Sprintf(" · %dh ago", int(d.Hours()))
+		}
+	}
+	return fmt.Sprintf("[%s · from %s%s] %s", team, flat(from), age, flat(body))
 }
 
 // Paste joins queued messages into the text typed into a pane, one line each.
-func Paste(team string, msgs []store.Message) string {
+// now says how old each message is: one written more than a minute before it
+// is delivered says so in its envelope.
+func Paste(team string, msgs []store.Message, now int64) string {
 	lines := make([]string, len(msgs))
 	for i, m := range msgs {
-		lines[i] = Envelope(team, m.From, m.Body)
+		lines[i] = Envelope(team, m.From, m.Body, m.At, now)
 	}
 	return strings.Join(lines, "\n")
 }

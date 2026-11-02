@@ -3,6 +3,7 @@ package team
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/sadrishehu/hive/internal/store"
@@ -49,12 +50,12 @@ func TestCleanKeepsLinesAndDropsOtherControlCharacters(t *testing.T) {
 
 func TestEnvelopeKeepsEveryLineOutOfTheTUIsCommands(t *testing.T) {
 	for _, body := range []string{"/exit", "!rm -rf /", "# remember this", "two\nlines\n/exit", "  /exit"} {
-		got := Envelope("api", "backend", body)
+		got := Envelope("api", "backend", body, 0, 0)
 		if !strings.HasPrefix(got, "[api · from backend] ") || strings.Contains(got, "\n") {
 			t.Errorf("Envelope(%q) = %q, want one line starting with the envelope", body, got)
 		}
 	}
-	paste := Paste("api", []store.Message{{From: "lead", Body: "a\nb"}, {From: "hive", Body: "c"}})
+	paste := Paste("api", []store.Message{{From: "lead", Body: "a\nb"}, {From: "hive", Body: "c"}}, 0)
 	for line := range strings.SplitSeq(paste, "\n") {
 		if !strings.HasPrefix(line, "[") {
 			t.Errorf("line %q of %q doesn't start with [", line, paste)
@@ -67,7 +68,7 @@ func TestEnvelopeKeepsEveryLineOutOfTheTUIsCommands(t *testing.T) {
 
 func TestEnvelopeHoldsNoControlCharacter(t *testing.T) {
 	// The end of a bracketed paste, then Ctrl-C and Esc Esc as keys.
-	got := Envelope("api", "lead\x1b", "stop\x1b[201~\x03\x1b\x1b\u009b rewind\tnow")
+	got := Envelope("api", "lead\x1b", "stop\x1b[201~\x03\x1b\x1b\u009b rewind\tnow", 0, 0)
 	if strings.ContainsFunc(got, unicode.IsControl) {
 		t.Errorf("Envelope = %q, want no control characters", got)
 	}
@@ -203,5 +204,29 @@ func TestAMemberWithNoPartWaitsForTheLead(t *testing.T) {
 	}
 	if strings.Contains(b, "no part of your own") {
 		t.Errorf("member with a part is told it has none:\n%s", b)
+	}
+}
+
+func TestEnvelopeSaysHowOldALateMessageIs(t *testing.T) {
+	now := int64(10 * time.Hour / time.Millisecond)
+	for _, at := range []int64{now, now - 1, now - int64(time.Minute/time.Millisecond)} {
+		if got := Envelope("api", "lead", "hi", at, now); got != "[api · from lead] hi" {
+			t.Errorf("Envelope(at %d) = %q, want no age within a minute", at, got)
+		}
+	}
+	if got := Envelope("api", "lead", "hi", now-6*60*1000, now); got != "[api · from lead · 6m ago] hi" {
+		t.Errorf("six minutes late = %q", got)
+	}
+	if got := Envelope("api", "lead", "hi", now-2*60*60*1000, now); got != "[api · from lead · 2h ago] hi" {
+		t.Errorf("two hours late = %q", got)
+	}
+
+	paste := Paste("api", []store.Message{
+		{From: "lead", Body: "fresh", At: now},
+		{From: "lead", Body: "late", At: now - 6*60*1000},
+	}, now)
+	want := "[api · from lead] fresh\n[api · from lead · 6m ago] late"
+	if paste != want {
+		t.Errorf("Paste = %q, want %q", paste, want)
 	}
 }

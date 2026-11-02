@@ -604,10 +604,17 @@ The sender's process and the hook's can deliver at once, so a delivery claims th
 rows in one `UPDATE … RETURNING` before it types, and gives them back if typing fails.
 `hive hook` never waits on a delivery, so the agent's hook timeout is never at risk and
 nothing prints into the agent. An agent that would rather read its mail runs
-`hive team inbox [--wait]`.
+`hive team inbox [--wait] [--peek]`: plain `inbox` marks what it printed delivered and ends
+with `(marked delivered)`, while `--peek` prints the queue and leaves it queued. Any other
+`hive team` command a member runs after its own output adds one stderr line when mail waits
+for its role, `✉ 3 messages wait for you (lead ×2, manager) · hive team inbox`; it never
+changes the exit code, and the human and a member with an empty queue see nothing.
 
 **The envelope.** Every delivered line is `[team · from role] text`, with line breaks and
-every other control character turned into spaces. Starting with `[`, a line can't run a
+every other control character turned into spaces. A message written more than a minute
+before it is delivered says how old it is after the sender: `[team · from role · 6m ago]`,
+in minutes under an hour and then in hours (`2h ago`); one delivered within a minute looks
+as it always has. Starting with `[`, a line can't run a
 slash command (`/exit`), a shell escape (`!`) or a memory shortcut (`#`) in the
 recipient's TUI; holding no escape, it can't end tmux's bracketed paste early and reach
 the TUI as keys. Several messages go as one paste, one line each, with one Enter. Text hive
