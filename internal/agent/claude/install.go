@@ -221,4 +221,3 @@ func readSettings(path string) ([]byte, error) {
 	}
 	return data, nil
 }
-
