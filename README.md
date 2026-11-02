@@ -44,6 +44,17 @@ you, by another agent, or with `n` in the tree. Past sessions are imported too. 
 auto`, or tool `auto` in the tree's form, [picks the model](#picking-the-model-auto), and
 the tool, for the prompt.
 
+## Your first five minutes
+
+1. See the change before you trust it: `hive install --dry-run` prints a unified diff of
+   every file hive would edit, then `hive install` makes it (with backups).
+2. `hive` opens the tree, or **prefix + a** does when you are inside tmux.
+3. Press `n`, type a prompt and press `↵`: the agent starts in its own tmux window, and the
+   right side of the tree shows its screen live.
+4. Press `↵` on a row to jump into that agent's pane.
+5. Come back with **prefix + a**. A `◆` marks an agent that needs you;
+   **prefix + A** jumps straight to the one that has waited longest.
+
 ## Install
 
 ```sh
@@ -65,7 +76,9 @@ which build you run.
 backed up to `hive.json.bak-hive` when an existing file is changed), and adds hooks
 to `~/.codex/hooks.json` for Codex (or `$CODEX_HOME/hooks.json`, backed up to
 `hooks.json.bak-hive`). Codex asks you to trust the new hooks when it next starts.
-It is safe to rerun; `hive uninstall` removes exactly what it added. Hooks load when
+It is safe to rerun, and `hive install --dry-run` shows a unified diff of every file it
+would change without changing anything; `hive uninstall --dry-run` does the same for
+removal. `hive uninstall` removes exactly what it added. Hooks load when
 an agent starts, so running sessions pick them up after a restart; until then they
 show as untracked, or are adopted as soon as they spawn another agent.
 

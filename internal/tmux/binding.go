@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sadrishehu/hive/internal/agent"
 )
 
 // The marker lines that precede each key binding hive adds to tmux.conf.
@@ -70,22 +72,13 @@ func quote(s string) string {
 // running, binds them right away. Safe to rerun: a binding already there is
 // replaced in place.
 func InstallBindings(conf string, bindings ...Binding) (string, error) {
-	data, err := os.ReadFile(conf)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	changes, bound, err := PlanInstallBindings(conf, bindings...)
+	if err != nil {
 		return "", err
 	}
-	text := string(data)
-	var bound []string
-	for _, b := range bindings {
-		text = withBinding(text, b)
-		bound = append(bound, "prefix+"+b.Key+" to "+b.what)
-	}
 	msg := "already bound in " + conf
-	if text != string(data) {
-		if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(conf, []byte(text), 0o644); err != nil {
+	if len(changes) > 0 {
+		if err := agent.Apply(changes); err != nil {
 			return "", err
 		}
 		msg = "bound " + strings.Join(bound, " and ") + " in " + conf
@@ -102,6 +95,29 @@ func InstallBindings(conf string, bindings ...Binding) (string, error) {
 		}
 	}
 	return msg, nil
+}
+
+// PlanInstallBindings returns the tmux.conf change InstallBindings would
+// make, without making it, and what the keys would be bound to.
+func PlanInstallBindings(conf string, bindings ...Binding) ([]agent.Change, []string, error) {
+	data, err := os.ReadFile(conf)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, err
+	}
+	text := string(data)
+	var bound []string
+	for _, b := range bindings {
+		text = withBinding(text, b)
+		bound = append(bound, "prefix+"+b.Key+" to "+b.what)
+	}
+	if text == string(data) {
+		return nil, bound, nil
+	}
+	old := data
+	if errors.Is(err, fs.ErrNotExist) {
+		old = nil
+	}
+	return []agent.Change{{Path: conf, Old: old, New: []byte(text), Mode: 0o644}}, bound, nil
 }
 
 // withBinding returns conf with b in place of the line after b's marker, or
@@ -134,12 +150,40 @@ func withBinding(conf string, b Binding) string {
 
 // UninstallBindings removes every binding InstallBindings added.
 func UninstallBindings(conf string) (string, error) {
-	data, err := os.ReadFile(conf)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "not installed", nil
-	}
+	changes, keys, exists, err := PlanUninstallBindings(conf)
 	if err != nil {
 		return "", err
+	}
+	if !exists {
+		return "not installed", nil
+	}
+	if len(keys) == 0 {
+		return "not installed in " + conf, nil
+	}
+	if err := agent.Apply(changes); err != nil {
+		return "", err
+	}
+	if Available() {
+		for _, k := range keys {
+			run("unbind-key", k)
+		}
+	}
+	what := "the prefix+" + strings.Join(keys, " and prefix+") + " binding"
+	if len(keys) > 1 {
+		what += "s"
+	}
+	return "removed " + what + " from " + conf, nil
+}
+
+// PlanUninstallBindings returns the tmux.conf change UninstallBindings would
+// make, without making it, the keys it would unbind, and whether conf exists.
+func PlanUninstallBindings(conf string) ([]agent.Change, []string, bool, error) {
+	data, err := os.ReadFile(conf)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, err
 	}
 	lines := strings.Split(string(data), "\n")
 	var out, keys []string
@@ -160,21 +204,9 @@ func UninstallBindings(conf string) (string, error) {
 		out = append(out, lines[i])
 	}
 	if len(keys) == 0 {
-		return "not installed in " + conf, nil
+		return nil, nil, true, nil
 	}
-	if err := os.WriteFile(conf, []byte(strings.Join(out, "\n")), 0o644); err != nil {
-		return "", err
-	}
-	if Available() {
-		for _, k := range keys {
-			run("unbind-key", k)
-		}
-	}
-	what := "the prefix+" + strings.Join(keys, " and prefix+") + " binding"
-	if len(keys) > 1 {
-		what += "s"
-	}
-	return "removed " + what + " from " + conf, nil
+	return []agent.Change{{Path: conf, Old: data, New: []byte(strings.Join(out, "\n")), Mode: 0o644}}, keys, true, nil
 }
 
 // PopupKey returns the key conf binds to hive's popup, or "".
