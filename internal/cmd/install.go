@@ -84,7 +84,11 @@ func dryRunInstall(agents []agent.Adapter, withTmux bool, hiveBin, key, nextKey 
 		name := a.Spec().Name
 		p, ok := a.(installPlanner)
 		if !ok {
-			fmt.Fprintf(w, "%s: up to date\n", name)
+			verb := "install"
+			if uninstall {
+				verb = "uninstall"
+			}
+			fmt.Fprintf(w, "%s: can't preview this one; hive %s %s shows what it did\n", name, verb, name)
 			continue
 		}
 		var changes []agent.Change

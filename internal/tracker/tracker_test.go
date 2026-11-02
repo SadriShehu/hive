@@ -46,6 +46,7 @@ func (w *fakeWorld) add(pid, ppid int, args string) {
 // shell (300) runs `claude -p` (C, pid 301).
 func newWorld(t *testing.T) (*Tracker, *fakeWorld) {
 	t.Helper()
+	t.Setenv("HIVE_HOME", t.TempDir()) // teams' shared folders stay out of the user's
 	w := &fakeWorld{procs: proc.Table{}, env: map[string]string{}, now: 1_000}
 	w.add(80, 1, "tmux")
 	w.add(90, 80, "-zsh")

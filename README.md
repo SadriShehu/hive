@@ -399,7 +399,13 @@ tool = "codex"
 
 ```sh
 hive team new admin-api --from api
+hive team save admin-api --as api   # add this team as a template, for next time
 ```
+
+`hive team save <team> [--as <name>]` appends one `[[team]]` table to `config.toml` with the
+team's goal, lead, folder, worktrees and members; `--as` names it, the team's name by
+default. It only appends, refuses a name already there, and leaves a config it can't parse
+alone.
 
 The team folder is stored as an absolute path, so a relative `cwd` or `--cwd` resolves
 where you run the command.
@@ -482,6 +488,8 @@ tree, so a teammate can't paint your terminal.
 | --- | --- |
 | `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
 | `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
+| `hive team report [team] [--out path]` | Markdown hand-off: the goal whole, members with state and cost, every task with its note or blocked reason, and the members' posts; `--out team` writes `$HIVE_TEAM_DIR/report.md` |
+| `hive team save <team> [--as name]` | append the team as a `[[team]]` template in config.toml, for `hive team new --from`; only appends, and refuses a name already there |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready |
 | `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `edit <n> [--title t] [--body b\|-] [--owner role] [--after n,…]` · `reopen <n> --why text` · `ls [n] [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task; `edit` changes only the flags you pass; `reopen` sends a done or blocked task back to open |
@@ -507,6 +515,14 @@ first that the folder is a git repository with a commit, and it only removes the
 worktrees it made: a folder or branch already in a member's place fails that member
 rather than taking someone's work. The brief names each member's branch, and changes not
 committed in the team's folder aren't in the worktrees.
+
+**Shared files.** Each team gets a folder outside its repository, `<data dir>/teams/<team>/files`
+(`~/.local/share/hive` unless `HIVE_HOME` or `XDG_DATA_HOME` says otherwise), where members
+keep drafts and notes the whole team can read. Every member's window has `HIVE_TEAM_DIR`
+pointing at it, the brief names it, and `hive team board` shows `files: <path> · N files`
+(`files_dir` in `--json`). It stays when the team goes to the trash, so restore finds it;
+purging the team removes it. `hive team report` turns the goal, members, tasks and their
+notes, and the members' posts into Markdown for a PR description or a hand-off.
 
 **Done.** `hive team done <team>` marks the goal met: the team stays in the tree, dimmed
 and folded with its channel, and messages, posts, new members and new tasks are refused

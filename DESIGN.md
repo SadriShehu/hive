@@ -526,8 +526,8 @@ filter and demo.
   on the team is refused before anything starts. The board shows each member's part under
   its line.
 - **Starting.** hive starts each member through the usual launch, detached, with the
-  brief as its first prompt and `HIVE_TEAM` and `HIVE_ROLE` in its window's environment,
-  next to `HIVE_PARENT`. Members start in the order given, the lead first. A member
+  brief as its first prompt and `HIVE_TEAM`, `HIVE_ROLE` and `HIVE_TEAM_DIR` in its
+  window's environment, next to `HIVE_PARENT`. Members start in the order given, the lead first. A member
   started with `auto` gets its pick from the goal and its own part, not from the brief;
   one `hive team new` asks each tool what it runs only once. A failed member stays on
   the team with the error in the channel; if no member's window opens, the team isn't
@@ -587,6 +587,14 @@ The template's name is unique and follows a team name's rules; every member's ro
 valid role and appears once, including the lead's; and a member names a tool. The folder is
 stored absolute, so a relative `cwd` resolves where `hive team new` runs. A broken config
 changes nothing, as everywhere else.
+
+`hive team save <team> --as <name>` writes one back: the team's goal, its lead as a
+`tool[:model]` (or `none` when you lead), the folder, the worktrees flag, and every other
+active member with its role, tool, model and part. The lead is the table's `lead`, not a
+member row, so a saved table is always valid for `--from`. The writer loads the config
+first, refuses a name already there or a file that doesn't parse, then appends only: a
+blank line, `# saved from team <team> on <date>`, and the encoder's block. Nothing already
+in the file is rewritten or reordered.
 
 ### The brief
 
@@ -779,6 +787,23 @@ records where each member works, and the brief names it.
 - **The brief.** A member is told its branch, to commit small and before it says a part is
   done, and that the lead merges it; the lead, the branches to merge. Changes not committed
   in the team's folder aren't in the worktrees, and hive's first post says so.
+
+### Shared files and the report
+
+Each team has one folder outside its repository, `<data dir>/teams/<team>/files`, made when
+the team starts and on first use for a team from before it existed. Members get
+`HIVE_TEAM_DIR` in their window and the brief's `Shared files:` line names it, so drafts
+and notes there are readable by every member and never committed. The folder is keyed by
+the team's name, stays when the team goes to the trash so restore finds it, and goes when
+the team is purged. That removal is guarded to `<data dir>/teams/<team>`; a name that would
+reach anywhere else is refused. `hive team board` prints `files: <path> · N files`, and
+`--json` carries `files_dir`.
+
+`hive team report [team]` words the same stored work as Markdown: the quiet status line and
+the whole goal, the active members with tool, model, state and cost when hive knows it,
+every task with its owner, state and done note or blocked reason, and every member's
+channel posts, oldest first. `--out team` writes `<data dir>/teams/<team>/files/report.md`,
+ready to paste into a PR description or hand on.
 
 ### Done
 
