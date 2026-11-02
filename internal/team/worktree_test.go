@@ -36,7 +36,8 @@ func TestBriefOnAWorktreesTeam(t *testing.T) {
 		t.Errorf("with the user leading, every member has a branch the human merges:\n%s", b)
 	}
 	tm.Workspace = store.WorkspaceShared
-	if b := Brief(tm, members[0], members); !strings.Contains(b, "Everyone works in the same folder") {
-		t.Errorf("shared brief = %q", b)
+	want := "- Everyone works in the same checkout, so teammates see your edits at once. Don't pull, rebase, stash or switch branches. Say so before you edit a file a teammate is working in, and commit only your own files (`git add <paths>`, never `git add -A`); commit small.\n"
+	if b := Brief(tm, members[0], members); !strings.Contains(b, want) {
+		t.Errorf("shared brief lacks %q:\n%s", want, b)
 	}
 }

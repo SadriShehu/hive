@@ -484,6 +484,10 @@ filter and demo.
   `--lead self` makes the agent running `hive team new` the lead without starting
   another, and `--lead none` leaves it to you. `L` and `hive team lead` move it at any
   time; retiring the lead hands it to you.
+- **Parts.** `--part role=text`, the command line's `prompt =`, gives a member its part of
+  the brief. It wins over a template's prompt with `--from`, and naming a role that isn't
+  on the team is refused before anything starts. The board shows each member's part under
+  its line.
 - **Starting.** hive starts each member through the usual launch, detached, with the
   brief as its first prompt and `HIVE_TEAM` and `HIVE_ROLE` in its window's environment,
   next to `HIVE_PARENT`. Members start in the order given, the lead first. A member
@@ -554,8 +558,13 @@ its roster and folder, the goal, the member's own part, how to use `hive team bo
 `task claim`, `done` and `block`, `post`, `say` and `log`, and that hive wakes it when
 someone writes to it or a task of its own is ready. The lead is told to turn the goal into
 tasks with owners and `--after`, then review what is marked done, integrate and post when
-the goal is met. When you lead, every member is told so, including one whose role
-happens to be called `lead`: who leads goes by the team's lead role alone.
+the goal is met. Its brief lists the other active members' parts, and it is told to build
+the tasks around each one. A member with no part of its own yet is told to wait for a task
+from the lead. When you lead, every member is told so, including one whose role
+happens to be called `lead`: who leads goes by the team's lead role alone. On a shared
+folder the brief says everyone works in the same checkout, so teammates see your edits at
+once; it tells them not to pull, rebase, stash or switch branches, to say so before
+editing a file a teammate is working in, and to commit only their own files.
 
 ### The channel and the mailbox
 
@@ -592,10 +601,17 @@ The sender's process and the hook's can deliver at once, so a delivery claims th
 rows in one `UPDATE … RETURNING` before it types, and gives them back if typing fails.
 `hive hook` never waits on a delivery, so the agent's hook timeout is never at risk and
 nothing prints into the agent. An agent that would rather read its mail runs
-`hive team inbox [--wait]`.
+`hive team inbox [--wait] [--peek]`: plain `inbox` marks what it printed delivered and ends
+with `(marked delivered)`, while `--peek` prints the queue and leaves it queued. Any other
+`hive team` command a member runs after its own output adds one stderr line when mail waits
+for its role, `✉ 3 messages wait for you (lead ×2, manager) · hive team inbox`; it never
+changes the exit code, and the human and a member with an empty queue see nothing.
 
 **The envelope.** Every delivered line is `[team · from role] text`, with line breaks and
-every other control character turned into spaces. Starting with `[`, a line can't run a
+every other control character turned into spaces. A message written more than a minute
+before it is delivered says how old it is after the sender: `[team · from role · 6m ago]`,
+in minutes under an hour and then in hours (`2h ago`); one delivered within a minute looks
+as it always has. Starting with `[`, a line can't run a
 slash command (`/exit`), a shell escape (`!`) or a memory shortcut (`#`) in the
 recipient's TUI; holding no escape, it can't end tmux's bracketed paste early and reach
 the TUI as keys. Several messages go as one paste, one line each, with one Enter. Text hive
@@ -625,6 +641,14 @@ teammate can't paint the user's terminal.
   view is yours, and ready (#4 done by backend: …). hive team task claim 5 takes it.` A
   task added with an owner and nothing left to wait for is told at once. Whoever closed a
   task reads what became ready in the command's output instead.
+- **Editing and reopening.** `edit <n>` changes only the flags it was given: title, body,
+  owner and the tasks it waits for; `--owner ""` and `--after ""` clear them. It follows
+  the tree editor's rules, so a claimed task given another owner, or none, is open again
+  and both owners hear of it. `reopen <n> --why` sends a done or blocked task back to
+  open: its owner stays, its note becomes the why, hive posts `#n reopened by <by>: <why>`
+  and tells the owner `#n <title> is yours again (<by>: <why>)`. An open or claimed task
+  isn't reopened, and neither is one on a paused or done team. Tasks that became ready
+  when it was done stay as they are.
 - **Waiting.** `hive team wait` looks at the board twice a second, as `hive wait` does,
   and prints what happened: a task as hive words it, a message in its envelope. With no
   flag it returns when any task is done or blocked, or mail comes for the caller; `--task

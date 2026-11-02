@@ -22,7 +22,7 @@ func Folder(t store.Team, m store.Member) string {
 // folder, so that what it merges lands on the branch the folder has.
 func workLine(t store.Team, m store.Member, members []store.Member) string {
 	if t.Workspace != store.WorkspaceWorktrees {
-		return "- Everyone works in the same folder. Pull before you start; commit small.\n"
+		return "- Everyone works in the same checkout, so teammates see your edits at once. Don't pull, rebase, stash or switch branches. Say so before you edit a file a teammate is working in, and commit only your own files (`git add <paths>`, never `git add -A`); commit small.\n"
 	}
 	if t.LeadRole != "" && m.Role == t.LeadRole {
 		var branches []string
