@@ -602,6 +602,9 @@ func (m Model) hintLine() string {
 		keys("r", "reopen"),
 		keys("x", "stop"),
 		keys("d", "trash"),
+		keys("t", "show trash"),
+		keys("a", "all/24h"),
+		keys("i", "subagents"),
 	}, m.width, keys("?", "more"))
 }
 

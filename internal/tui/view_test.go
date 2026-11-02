@@ -93,9 +93,13 @@ func TestSessionHintsAreMostUsedFirst(t *testing.T) {
 	m, _ := setup(t, false)
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
 	got := ansi.Strip(strings.Join(m.hintLines(), "\n"))
-	want := "↵ jump  s send  n new  c child  u usage  / filter  r reopen  x stop  d trash  ? more"
+	want := "↵ jump  s send  n new  c child  u usage  / filter  r reopen  x stop  d trash  t show trash  a all/24h  ? more"
 	if got != want {
 		t.Fatalf("session hint =\n%s\nwant\n%s", got, want)
+	}
+	m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 24})
+	if wide := ansi.Strip(strings.Join(m.hintLines(), "\n")); !strings.HasSuffix(wide, "i subagents  ? more") {
+		t.Errorf("a wide screen shows every session key:\n%s", wide)
 	}
 	if strings.Contains(got, "q quit") {
 		t.Errorf("session hint still advertises q quit:\n%s", got)
