@@ -122,7 +122,7 @@ func TestTaskEditorAddsEditsClosesAndBlocks(t *testing.T) {
 	}
 }
 
-func TestTaskEditorOpensOnlyOnATeam(t *testing.T) {
+func TestTaskEditorOpensOnATeamOrItsMembers(t *testing.T) {
 	m, _ := setup(t, false)
 	m = press(t, m, "e")
 	if m.mode != modeNormal {
@@ -130,9 +130,13 @@ func TestTaskEditorOpensOnlyOnATeam(t *testing.T) {
 	}
 
 	m, _ = setupTeam(t)
-	m = press(t, m, "j", "e") // lead, a member row
+	m = press(t, m, "j") // the lead, a member row
 	if m.mode != modeNormal {
-		t.Fatalf("e on a member row opened mode %v", m.mode)
+		t.Fatalf("moving to a member row opened mode %v", m.mode)
+	}
+	m = press(t, m, "e")
+	if m.mode != modeTasks {
+		t.Fatalf("e on a member row opened mode %v, want its team's board", m.mode)
 	}
 }
 

@@ -200,6 +200,10 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, m.input.Focus(), true
 	}
 	if !isTeam {
+		if msg.String() == "e" {
+			m, cmd := m.openTaskEditor(tm)
+			return m, cmd, true
+		}
 		return m, nil, false
 	}
 	switch msg.String() {
@@ -626,12 +630,12 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 }
 
 // templateLine draws the template row: none, or a saved roster.
-func (f teamForm) templateLine() string {
+func (f teamForm) templateLine(w int) string {
 	names := []string{"none"}
 	for _, t := range f.templates {
 		names = append(names, t.Name)
 	}
-	line := choices(names, f.template, func(string) lipgloss.Style { return sAccent })
+	line := choices(names, f.template, w, func(string) lipgloss.Style { return sAccent })
 	switch {
 	case f.template > 0:
 		line += "  " + sDim.Render("fills the form; the name stays yours")
@@ -948,7 +952,7 @@ func (m Model) teamFormLines(w, h int) []string {
 	single := func(i int, name, value string) string {
 		return mark(i) + sDim.Render(fmt.Sprintf("%-*s", labelW, name)) + value
 	}
-	leadLine := choices(f.leads, f.lead, func(t string) lipgloss.Style { return toolStyle(t) })
+	leadLine := choices(f.leads, f.lead, max(8, w-labelW-2), func(t string) lipgloss.Style { return toolStyle(t) })
 	if f.leads[f.lead] == "none" {
 		leadLine += "  " + sDim.Render("you lead from the tree")
 	}
@@ -961,11 +965,11 @@ func (m Model) teamFormLines(w, h int) []string {
 	role, tool, model, _ := memberWidths(w)
 	numberW := len(fmt.Sprintf("%d", len(f.members)))
 	out := []string{sBold.Render("New team"), "",
-		single(tfTemplate, "template", f.templateLine()),
+		single(tfTemplate, "template", f.templateLine(max(8, w-labelW-2))),
 	}
 	out = append(out, fieldLines(mark(tfName), "name", f.name, labelW, w, nameRows)...)
 	out = append(out, fieldLines(mark(tfFolder), "folder", f.folder, labelW, w, folderRows)...)
-	out = append(out, single(tfWork, "work", f.workLine()), single(tfLead, "lead", leadLine),
+	out = append(out, single(tfWork, "work", f.workLine(max(8, w-labelW-2))), single(tfLead, "lead", leadLine),
 		strings.Repeat(" ", 2+numberW+1)+
 			sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"))
 	help := []string{}
@@ -1003,22 +1007,12 @@ func (f teamForm) modelHelp(row, w int) []string {
 		return []string{sDim.Render("tool auto picks the model too, for the goal and the member's part."),
 			sDim.Render("name a tool to pick its model here.")}
 	}
-	items, at := f.modelChoices(row), f.modelChoice(row)
-	shown := func(from int) string {
-		line := choices(items[from:], at-from, func(string) lipgloss.Style { return sAccent })
-		if from > 0 {
-			line = sDim.Render("…") + "  " + line
-		}
-		return line
-	}
-	from := 0
-	for from < at && ansi.StringWidth(shown(from)) > w {
-		from++
-	}
-	line := shown(from)
+	loading := ""
 	if f.loadingModels(row) {
-		line += "  " + sDim.Render("loading what it runs…")
+		loading = "  " + sDim.Render("loading what it runs…")
+		w -= ansi.StringWidth("  loading what it runs…")
 	}
+	line := choices(f.modelChoices(row), f.modelChoice(row), max(8, w), func(string) lipgloss.Style { return sAccent }) + loading
 	return []string{line, sDim.Render("←/→ picks one, or type an ID or a name like opus 5.5.")}
 }
 
@@ -1419,15 +1413,37 @@ func waitingSuffix(roles []string) string {
 }
 
 // teamHints are the key hints while a team or one of its members is selected.
-func (m Model) teamHints() (string, bool) {
+func (m Model) teamHints() ([]string, bool) {
 	_, n, ok := m.selectedTeam()
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	if n.Team != nil {
-		return keys("↵", "channel", "s", "message", "p", "pause", "L", "lead", "x", "stop", "m", "system", "T", "new team", "?", "help", "q", "quit"), true
+		return []string{
+			keys("↵", "channel"),
+			keys("e", "board"),
+			keys("s", "message"),
+			keys("p", "pause"),
+			keys("L", "lead"),
+			keys("x", "stop"),
+			keys("d", "trash"),
+			keys("m", "hide hive posts"),
+			keys("T", "new team"),
+		}, true
 	}
-	return keys("↵", "jump", "s", "message", "p", "pause", "L", "lead", "r", "reopen", "x", "stop", "T", "new team", "?", "help", "q", "quit"), true
+	hints := []string{keys("↵", "jump")}
+	if n.TeamID != "" {
+		hints = append(hints, keys("e", "board"))
+	}
+	hints = append(hints,
+		keys("s", "message"),
+		keys("p", "pause"),
+		keys("L", "lead"),
+		keys("r", "reopen"),
+		keys("x", "stop"),
+		keys("T", "new team"),
+	)
+	return hints, true
 }
 
 // teamCount is how many teams are still active.

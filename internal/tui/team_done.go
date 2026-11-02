@@ -8,12 +8,12 @@ import (
 )
 
 // workLine draws the new-team form's work row, which ←/→ flips.
-func (f teamForm) workLine() string {
+func (f teamForm) workLine(w int) string {
 	pick := 0
 	if f.work {
 		pick = 1
 	}
-	line := choices([]string{"shared folder", "a worktree per member"}, pick, func(string) lipgloss.Style { return sAccent })
+	line := choices([]string{"shared folder", "a worktree per member"}, pick, w, func(string) lipgloss.Style { return sAccent })
 	if f.work {
 		line += "  " + sDim.Render("the lead merges")
 	}

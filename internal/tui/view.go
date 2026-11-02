@@ -27,7 +27,13 @@ func (m Model) bodyHeight() int {
 	return max(1, m.height-2-hints)
 }
 
-func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
+// previewMinWidth is the narrowest window that shows the preview beside the tree.
+const previewMinWidth = 100
+
+func (m Model) previewVisible() bool { return m.showPreview && m.width >= previewMinWidth }
+
+// previewNarrow says the preview is on but the window is too narrow to show it.
+func (m Model) previewNarrow() bool { return m.showPreview && m.width < previewMinWidth }
 
 func (m Model) usageTakesTheBody() bool {
 	return m.showUsage && m.showPreview && !m.previewVisible() &&
@@ -103,27 +109,27 @@ func (m Model) headerLine() string {
 			live++
 		}
 	}
-	left := sBadge.Render("hive") + "  " +
-		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live))
+	segs := []string{sBadge.Render("hive") + "  " +
+		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live))}
 	if n := len(tracker.NeedsYou(m.sessions)); n > 0 {
-		left += sDim.Render("  ·  ") + lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n))
+		segs = append(segs, lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n)))
 	}
-	left += sDim.Render(fmt.Sprintf("  ·  %d sessions", total))
+	segs = append(segs, sDim.Render(fmt.Sprintf("%d sessions", total)))
 	if n := m.teamCount(); n == 1 {
-		left += sDim.Render("  ·  ") + sAccent.Render("1 team")
+		segs = append(segs, sAccent.Render("1 team"))
 	} else if n > 1 {
-		left += sDim.Render("  ·  ") + sAccent.Render(fmt.Sprintf("%d teams", n))
+		segs = append(segs, sAccent.Render(fmt.Sprintf("%d teams", n)))
 	}
 	if len(m.snap.Trashed) > 0 {
-		left += sDim.Render("  ·  " + m.trashCount() + " in the trash")
+		segs = append(segs, sDim.Render(m.trashCount()+" in the trash"))
 	} else if len(m.trashed) > 0 {
-		left += sDim.Render(fmt.Sprintf("  ·  %d in the trash", len(m.trashed)))
+		segs = append(segs, sDim.Render(fmt.Sprintf("%d in the trash", len(m.trashed))))
 	}
 	scope := "last 24h"
 	switch {
 	case m.trash:
-		left = sBadge.Render("hive") + "  " + sText.Render("trash") +
-			sDim.Render("  ·  "+m.trashCount()+", deleted from hive; their tools still have them")
+		segs = []string{sBadge.Render("hive") + "  " + sText.Render("trash") +
+			sDim.Render("  ·  "+m.trashCount()+", deleted from hive; their tools still have them")}
 		scope = "t goes back"
 	case m.showAll:
 		scope = "all history"
@@ -146,12 +152,23 @@ func (m Model) headerLine() string {
 		scope = "syncing… · " + scope
 	}
 	right := sDim.Render(scope)
-	if total, estimate := m.costInView(); total > 0 {
+	if cost, estimate := m.costInView(); cost > 0 && !m.previewNarrow() {
 		mark := ""
 		if estimate {
 			mark = "~"
 		}
-		right += sDim.Render(" · ") + sText.Render(mark+human.USD(total))
+		right += sDim.Render(" · ") + sText.Render(mark+human.USD(cost))
+	}
+	if m.previewNarrow() {
+		right += sDim.Render(fmt.Sprintf(" · preview needs %d cols", previewMinWidth))
+	}
+	sep := sDim.Render("  ·  ")
+	left := strings.Join(segs, sep)
+	if m.previewNarrow() {
+		for len(segs) > 1 && m.width-ansi.StringWidth(left)-ansi.StringWidth(right) < 1 {
+			segs = segs[:len(segs)-1]
+			left = strings.Join(segs, sep)
+		}
 	}
 	gap := m.width - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 1 {
@@ -369,8 +386,8 @@ func (m Model) formLines(w, h int) []string {
 	folders := f.folderLines(h - formChromeRows - 1)
 	prompt := visibleRows(f.prompt, h-formChromeRows-len(folders))
 	out = append(out,
-		field(fieldTool, "tool", choices(f.tools, f.tool, func(t string) lipgloss.Style { return toolStyle(t) })),
-		field(fieldModel, "model", f.modelLine()),
+		field(fieldTool, "tool", choices(f.tools, f.tool, max(8, w-9), func(t string) lipgloss.Style { return toolStyle(t) })),
+		field(fieldModel, "model", f.modelLine(max(8, w-9))),
 		field(fieldFolder, "folder", f.folder.View()),
 	)
 	out = append(out, folders...)
@@ -385,22 +402,69 @@ func (m Model) formLines(w, h int) []string {
 	return fit(out, w, h)
 }
 
-// choices draws a row of choices with the selected one in brackets.
-func choices(items []string, selected int, style func(string) lipgloss.Style) string {
-	var parts []string
+// choices draws a row of choices with the selected one in brackets. When the
+// row is wider than w it shows a window around the selected choice, with … on
+// either side of the hidden ones and the position at the end.
+func choices(items []string, selected, w int, style func(string) lipgloss.Style) string {
+	if len(items) == 0 {
+		return ""
+	}
+	selected = max(0, min(selected, len(items)-1))
+	rendered := make([]string, len(items))
 	for i, item := range items {
 		if i == selected {
-			parts = append(parts, style(item).Bold(true).Render("‹ "+item+" ›"))
+			rendered[i] = style(item).Bold(true).Render("‹ " + item + " ›")
 		} else {
-			parts = append(parts, sDim.Render(item))
+			rendered[i] = sDim.Render(item)
 		}
 	}
-	return strings.Join(parts, "  ")
+	all := strings.Join(rendered, "  ")
+	if ansi.StringWidth(all) <= w {
+		return all
+	}
+	pos := sDim.Render(fmt.Sprintf("%d/%d", selected+1, len(items)))
+	line := func(lo, hi int) string {
+		out := strings.Join(rendered[lo:hi+1], "  ")
+		if lo > 0 {
+			out = sDim.Render("…") + "  " + out
+		}
+		if hi < len(items)-1 {
+			out += "  " + sDim.Render("…")
+		}
+		return out + "  " + pos
+	}
+	lo, hi := selected, selected
+	if ansi.StringWidth(line(lo, hi)) > w {
+		label := ansi.Truncate(items[selected], max(1, w-8), "…")
+		return ansi.Truncate(style(label).Bold(true).Render("‹ "+label+" ›"), w, "")
+	}
+	for {
+		grew := false
+		preferLeft := selected-lo <= hi-selected
+		for _, left := range []bool{preferLeft, !preferLeft} {
+			if left && lo > 0 {
+				if next := line(lo-1, hi); ansi.StringWidth(next) <= w {
+					lo, grew = lo-1, true
+					break
+				}
+			}
+			if !left && hi < len(items)-1 {
+				if next := line(lo, hi+1); ansi.StringWidth(next) <= w {
+					hi, grew = hi+1, true
+					break
+				}
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+	return line(lo, hi)
 }
 
 // modelLine draws the model field: for a tool, its choices; for auto, the
 // mode, which ←/→ flips.
-func (f form) modelLine() string {
+func (f form) modelLine(w int) string {
 	if f.toolName() == fusion.Auto {
 		what := "picks the tool and the model for the prompt"
 		if f.mode == fusion.ModeModel {
@@ -408,11 +472,12 @@ func (f form) modelLine() string {
 		}
 		return sAccent.Bold(true).Render("‹ "+string(f.mode)+" ›") + "  " + sDim.Render(what+" · ←/→ changes the mode")
 	}
-	line := choices(f.modelChoices(), min(f.model, len(f.modelChoices())-1), func(string) lipgloss.Style { return sAccent })
+	loading := ""
 	if f.loadingModels() {
-		line += "  " + sDim.Render("loading what it runs…")
+		loading = "  " + sDim.Render("loading what it runs…")
+		w -= ansi.StringWidth("  loading what it runs…")
 	}
-	return line
+	return choices(f.modelChoices(), min(f.model, len(f.modelChoices())-1), max(8, w), func(string) lipgloss.Style { return sAccent }) + loading
 }
 
 // explain says what starts, under the form.
@@ -514,15 +579,44 @@ func (m Model) hintLine() string {
 	case modeHelp:
 		return keys("any key", "close")
 	}
-	if hint, ok := m.teamHints(); ok {
-		return ansi.Truncate(hint, m.width, "…")
+	if hints, ok := m.teamHints(); ok {
+		return fitHints(hints, m.width, keys("?", "more"))
 	}
 	if m.trash {
-		return ansi.Truncate(keys("r", "restore", "d", "delete for good", "t", "back", "u", "usage", "/", "filter",
-			"i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+		return fitHints([]string{
+			keys("r", "restore"),
+			keys("d", "delete for good"),
+			keys("t", "back"),
+			keys("u", "usage"),
+			keys("/", "filter"),
+			keys("i", "subagents"),
+		}, m.width, keys("?", "more"))
 	}
-	return ansi.Truncate(keys("↵", "jump", "s", "send", "n", "new", "c", "child", "r", "reopen", "x", "stop",
-		"d", "delete", "t", "trash", "u", "usage", "/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+	return fitHints([]string{
+		keys("↵", "jump"),
+		keys("s", "send"),
+		keys("n", "new"),
+		keys("c", "child"),
+		keys("u", "usage"),
+		keys("/", "filter"),
+		keys("r", "reopen"),
+		keys("x", "stop"),
+		keys("d", "trash"),
+	}, m.width, keys("?", "more"))
+}
+
+// fitHints joins key hints with two spaces and drops whole hints from the end
+// until the line fits w. tail is always shown, so the reader can find the
+// keys that didn't fit.
+func fitHints(hints []string, w int, tail string) string {
+	for len(hints) > 0 {
+		line := strings.Join(hints, "  ") + "  " + tail
+		if ansi.StringWidth(line) <= w {
+			return line
+		}
+		hints = hints[:len(hints)-1]
+	}
+	return tail
 }
 
 func keys(pairs ...string) string {
