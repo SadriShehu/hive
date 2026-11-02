@@ -273,6 +273,14 @@ shows every team), `a` recent or all history, `i` hide or show subagents, `S` sy
 price, context, tools, skills) in place of the pane preview, `←` / `→` collapse and expand,
 `?` help, `q` quit.
 
+The help is grouped into sections: Tree, Team, Channel, Board, Trash and Glyphs. The
+section for where `?` was pressed comes first (Team on a team or member row, Trash in the
+trash, Board in the board editor, Tree otherwise), the rest follow in that fixed order.
+The key column is as wide as the longest key plus two, and descriptions wrap under it with
+a hanging indent, so no line is cut at any width. `↑`/`↓`, `pgup`/`pgdn` and `g`/`G` scroll
+it; the hint carries the line count when it doesn't all fit; `esc`, `q`, `?` and `↵` close
+it, and other keys leave it open.
+
 **New agent.** `n` and `c` open a form: the tool, the folder (the parent's by default) and
 an optional first prompt. It opens on the prompt, since most launches keep the defaults;
 the hint follows the focused field: `←`/`→` choose on the tool and model, `tab` completes
@@ -456,6 +464,19 @@ Start here, Sessions, Teams, Housekeeping, and For tmux and hooks.
 | `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and the `ERROR` lines logged in the last day, with the last three |
 | `hive team …` | [teams](#teams): start one, follow its channel, write to its members |
 | `hive hook <tool>` | for integrations only; prints nothing, always exits 0 |
+| `hive completion <shell>` | print the shell's completion script; its dynamic values come from the database, read-only |
+
+**Shell completion.** `hive completion <shell>` prints cobra's script for zsh, bash or
+fish, and the hidden `__complete` command behind it fills in the dynamic parts. Each
+kind has one function returning `value\tdescription`: sessions in the short form
+`tool:8hex`, live ones first and then the last day's, with the tool, role, held task
+and state after a tab; teams with their goal; a team's roles with their tool and
+state; and the task numbers each board verb can act on. `--member` completes tools
+after `role=`, models after `tool:`, `--lead` does the same and adds `self` and
+`none`, `--model` completes the models of the tool `hive new` names, and `--after`
+completes the comma list after its last comma. Completion opens the database with
+`store.OpenRead`, which neither creates nor migrates it, calls neither tmux nor the
+network, and prints nothing when it fails or when there is no database.
 
 **Interactive children from inside an agent.** Claude runs
 `hive new opencode -p "port the tests" --wait` and gets back an ID; the opencode TUI opens

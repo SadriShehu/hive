@@ -215,6 +215,10 @@ func (m Model) keyTasks(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.openTaskForm(taskFormDone)
 	case "b":
 		return m, m.openTaskForm(taskFormBlock)
+	case "?":
+		m.helpFrom, m.helpScroll = modeTasks, 0
+		m.mode = modeHelp
+		return m, nil
 	}
 	return m, nil
 }
