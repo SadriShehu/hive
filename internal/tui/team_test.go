@@ -407,8 +407,8 @@ func TestALongChannelPromptWraps(t *testing.T) {
 func TestHelpNamesTheTeamAndChannelKeys(t *testing.T) {
 	m, _ := setupTeam(t)
 	m = press(t, m, "?")
-	view := ansi.Strip(m.View())
-	for _, want := range []string{"e edits its board", "d trashes it", "bare team:", "pgup/pgdn scroll the feed"} {
+	view := ansi.Strip(strings.Join(m.helpLines(m.width), "\n"))
+	for _, want := range []string{"edit the board", "move the team to the trash", "bare team:", "scroll the feed"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help lacks %q:\n%s", want, view)
 		}
