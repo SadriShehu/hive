@@ -1,7 +1,6 @@
 package tracker
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sadrishehu/hive/internal/gitx"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
@@ -21,23 +21,11 @@ func WorktreeDir(teamName, role string) string {
 	return filepath.Join(paths.DataDir(), "worktrees", teamName, role)
 }
 
-// git runs git in dir and returns what it printed, trimmed. Its error is
-// what git said, without the hints.
+// git runs git in dir and returns what it printed, trimmed. It is gitx's
+// runner, so hive has one way to talk to git; the read-only lookups go
+// through gitx's own functions.
 func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	var out, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &stderr
-	if err := cmd.Run(); err != nil {
-		for line := range strings.SplitSeq(stderr.String(), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "hint:") {
-				line = strings.TrimPrefix(strings.TrimPrefix(line, "fatal: "), "error: ")
-				return "", fmt.Errorf("git %s: %s", args[0], line)
-			}
-		}
-		return "", fmt.Errorf("git %s: %w", args[0], err)
-	}
-	return strings.TrimSpace(out.String()), nil
+	return gitx.Git(dir, args...)
 }
 
 // repoBase checks that a team called name can give its members worktrees of
@@ -173,14 +161,26 @@ func (t *Tracker) dropWorktrees(tm store.Team) error {
 	return errors.Join(append(errs, t.Store.ForgetWorktrees(tm.ID))...)
 }
 
+// DiffStat is how much a branch changes against the base.
+type DiffStat struct {
+	Files   int `json:"files"`
+	Added   int `json:"added"`
+	Removed int `json:"removed"`
+}
+
 // WorktreeState is a member's worktree, and how far its branch is from being
 // merged.
 type WorktreeState struct {
 	store.Worktree
-	Ahead   int    `json:"ahead"`             // commits on the branch that the base lacks
-	Dirty   bool   `json:"dirty,omitempty"`   // changes not committed
-	Removed bool   `json:"removed,omitempty"` // --clean took it, with its branch
-	Note    string `json:"note,omitempty"`    // why it stays, or what went wrong
+	Ahead       int      `json:"ahead"`           // commits on the branch that the base lacks
+	Behind      int      `json:"behind"`          // commits on the base that the branch lacks
+	Diff        DiffStat `json:"diff"`            // what the branch changes
+	Uncommitted int      `json:"uncommitted"`     // paths with changes not committed
+	Dirty       bool     `json:"dirty,omitempty"` // changes not committed
+	Merge       string   `json:"merge"`           // how a dry merge goes
+	Conflicts   []string `json:"conflicts,omitempty"`
+	Removed     bool     `json:"removed,omitempty"` // --clean took it, with its branch
+	Note        string   `json:"note,omitempty"`    // why it stays, or what went wrong
 }
 
 // State says, in a few words, where the worktree stands.
@@ -209,6 +209,54 @@ func plural(n int, what string) string {
 		return "1 " + what
 	}
 	return strconv.Itoa(n) + " " + what + "s"
+}
+
+// Arrows words how far a branch is ahead of and behind the base.
+func (w WorktreeState) Arrows() string {
+	var parts []string
+	if w.Ahead > 0 {
+		parts = append(parts, "↑"+strconv.Itoa(w.Ahead))
+	}
+	if w.Behind > 0 {
+		parts = append(parts, "↓"+strconv.Itoa(w.Behind))
+	}
+	return strings.Join(parts, " ")
+}
+
+// DiffWords words what a branch changes and what is uncommitted in its
+// worktree.
+func (w WorktreeState) DiffWords() string {
+	if w.Diff.Files == 0 && w.Uncommitted == 0 {
+		return ""
+	}
+	var parts []string
+	if w.Diff.Files > 0 {
+		parts = append(parts, fmt.Sprintf("%s +%d −%d", plural(w.Diff.Files, "file"), w.Diff.Added, w.Diff.Removed))
+	}
+	if w.Uncommitted > 0 {
+		parts = append(parts, fmt.Sprintf("%d uncommitted", w.Uncommitted))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// MergeWords words a dry merge of the branch into the base.
+func (w WorktreeState) MergeWords() string {
+	switch w.Merge {
+	case gitx.Clean:
+		return "✓ merges clean"
+	case gitx.Merged:
+		return "merged ✓"
+	case gitx.Conflicts:
+		if len(w.Conflicts) == 0 {
+			return "✗ conflicts"
+		}
+		word := "✗ conflicts: " + w.Conflicts[0]
+		if more := len(w.Conflicts) - 1; more > 0 {
+			word += fmt.Sprintf(" (+%d)", more)
+		}
+		return word
+	}
+	return "? merge unknown"
 }
 
 // baseRef is what a team's branches are merged into: the branch its folder
@@ -242,22 +290,32 @@ func (t *Tracker) TeamWorktrees(tm store.Team) ([]WorktreeState, string, error) 
 	}
 	out := make([]WorktreeState, len(known))
 	for i, w := range known {
-		out[i] = WorktreeState{Worktree: w, Ahead: -1}
-		n, err := git(tm.Cwd, "rev-list", "--count", ref+".."+w.Branch)
-		if err != nil {
-			out[i].Note = err.Error()
-			continue
-		}
-		out[i].Ahead, _ = strconv.Atoi(n)
+		out[i] = WorktreeState{Worktree: w, Ahead: -1, Merge: gitx.Unknown}
 		if !isDir(w.Path) {
 			out[i].Note = "its folder is gone"
 			continue
 		}
-		changes, err := git(w.Path, "status", "--porcelain")
+		ahead, behind, err := gitx.AheadBehind(tm.Cwd, ref, w.Branch)
 		if err != nil {
 			out[i].Note = err.Error()
+			continue
 		}
-		out[i].Dirty = changes != ""
+		out[i].Ahead, out[i].Behind = ahead, behind
+		if files, added, removed, err := gitx.DiffStat(tm.Cwd, ref, w.Branch); err != nil {
+			out[i].Note = err.Error()
+		} else {
+			out[i].Diff = DiffStat{Files: files, Added: added, Removed: removed}
+		}
+		if n, err := gitx.Uncommitted(w.Path); err != nil {
+			out[i].Note = err.Error()
+		} else {
+			out[i].Uncommitted, out[i].Dirty = n, n > 0
+		}
+		if m, err := gitx.MergeCheck(tm.Cwd, ref, w.Branch); err != nil {
+			out[i].Note = err.Error()
+		} else {
+			out[i].Merge, out[i].Conflicts = m.Result, m.Conflicts
+		}
 	}
 	return out, name, nil
 }

@@ -104,6 +104,7 @@ type Model struct {
 	usage     usageFetch
 	quotas    map[string]store.Quota // each tool account's last reported rate limits
 	quotasAt  time.Time
+	branches  map[string]branchFetch // each team's last branch report, by team ID
 	roots     []*tree.Node
 
 	flash    string
@@ -560,10 +561,11 @@ func (m *Model) usageCmd() tea.Cmd {
 // previewCmd loads what the selected session shows: its pane's screen when
 // it runs in one, else the end of its transcript; and its usage.
 func (m *Model) previewCmd() tea.Cmd {
+	branches := m.branchesCmd()
 	if m.mode == modeChannel {
-		return m.contentCmd()
+		return tea.Batch(m.contentCmd(), branches)
 	}
-	return tea.Batch(m.contentCmd(), m.usageCmd())
+	return tea.Batch(m.contentCmd(), m.usageCmd(), branches)
 }
 
 func (m *Model) contentCmd() tea.Cmd {
@@ -677,6 +679,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.quotas = msg.quotas
 		}
+		return m, nil
+
+	case branchesMsg:
+		if m.branches == nil {
+			m.branches = map[string]branchFetch{}
+		}
+		f := m.branches[msg.teamID]
+		f.at, f.got = msg.at, true
+		if msg.err != nil {
+			f.err = msg.err.Error()
+		} else {
+			f.err, f.report = "", msg.report
+		}
+		m.branches[msg.teamID] = f
 		return m, nil
 
 	case usageMsg:

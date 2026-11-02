@@ -1231,6 +1231,7 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	for _, mem := range members {
 		roleW = max(roleW, ansi.StringWidth(cleanLine(mem.Role)))
 	}
+	under, shared, branchErr := m.memberBranches(t, max(1, w-2))
 	tools := map[string]bool{}
 	for _, mem := range members {
 		s, ok := m.memberSession(mem)
@@ -1252,7 +1253,16 @@ func (m Model) teamHead(t store.Team, w int) []string {
 		// The part is long text: it stays on the board and the member's own
 		// preview, while the head shows the task the member holds.
 		head = append(head, memberHeadLine(line, model, context, m.heldTitle(t.ID, mem.Role), w))
+		if b := under[mem.Role]; b != "" {
+			head = append(head, "  "+b)
+		}
 		tools[mem.Tool] = true
+	}
+	switch {
+	case branchErr != "":
+		head = append(head, "  "+branchErr)
+	case shared != "":
+		head = append(head, "  "+shared)
 	}
 	// Rate limits are the account's, not one member's: show them once per tool.
 	for _, tool := range sortedKeys(tools) {

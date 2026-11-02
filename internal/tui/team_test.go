@@ -36,6 +36,9 @@ type teamOps struct {
 
 	running []string // the roles a fresh look finds running, panes only too
 
+	branches  map[string]BranchReport
+	branchErr error
+
 	taskAdded   []taskCall
 	taskEdited  []taskCall
 	taskDone    []taskCall
@@ -80,6 +83,9 @@ func (f *teamOps) TeamRead(team string, id int64) error {
 }
 func (f *teamOps) TeamRunning(team string) ([]string, error) {
 	return f.running, nil
+}
+func (f *teamOps) TeamBranches(team string) (BranchReport, error) {
+	return f.branches[team], f.branchErr
 }
 func (f *teamOps) TrashTeam(tm store.Team) ([]store.Session, error) {
 	f.trashedTeams = append(f.trashedTeams, tm.ID)

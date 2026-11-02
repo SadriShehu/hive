@@ -442,7 +442,7 @@ tree, so a teammate can't paint your terminal.
 | Command | Does |
 | --- | --- |
 | `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
-| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
+| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks, latest posts and each worktree's branch line, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready |
 | `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `edit <n> [--title t] [--body b\|-] [--owner role] [--after n,…]` · `reopen <n> --why text` · `ls [n] [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task; `edit` changes only the flags you pass; `reopen` sends a done or blocked task back to open |
@@ -468,6 +468,16 @@ first that the folder is a git repository with a commit, and it only removes the
 worktrees it made: a folder or branch already in a member's place fails that member
 rather than taking someone's work. The brief names each member's branch, and changes not
 committed in the team's folder aren't in the worktrees.
+
+The tree's team header and `hive team board` show where each branch stands, read with
+read-only git in the background (at most every ten seconds, and never while drawing):
+`⎇ hive/api-v2/backend  ↑3 ↓1  5 files +210 −34  ✓ merges clean`, with a red
+`✗ conflicts: web/app.tsx (+1)` when a dry merge can't settle, `merged ✓` when the base
+already has every commit, and `· 2 uncommitted` when the worktree holds changes. A
+shared-folder team gets one line under its roster: `⎇ feat/x · 4 files uncommitted`. At a
+narrow width the diff stat goes first, then `↓`, then the branch name is cut—the merge
+result always stays. `hive team board --json` carries the same numbers under
+`worktrees.trees`.
 
 **Done.** `hive team done <team>` marks the goal met: the team stays in the tree, dimmed
 and folded with its channel, and messages, posts, new members and new tasks are refused
