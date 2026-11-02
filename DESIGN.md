@@ -665,7 +665,9 @@ A team is a node of its own (`⬡`): at the root, or under the session that made
 that session is on the team. Its members sit under it, and a member's own children stay
 under the member. The node takes the most urgent status of its live members, and counts
 tasks done. Its preview is the board and the channel, under a strip of the members; the
-board takes at most half, folding the done tasks first. A member's row is titled by the
+board takes at most half; folded, it counts the board on its first line, then lists
+claimed, blocked and open tasks before done, and the last line says `e opens the board`.
+A member's row is titled by the
 task it holds (`backend · #4 handlers…`), else by what its session does.
 
 `↵` on a team opens its channel full screen: the team's name and goal on one line, how it
