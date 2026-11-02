@@ -158,6 +158,21 @@ func TestBranchesAreFetchedAtMostEveryTenSeconds(t *testing.T) {
 	}
 }
 
+// A refetch keeps the last report on screen until git answers again, so the
+// head doesn't lose its branch lines for a frame every ten seconds.
+func TestARefetchKeepsTheBranchLines(t *testing.T) {
+	m, _ := setupTeam(t)
+	team := m.snap.Teams[0]
+	m.branches = map[string]branchFetch{"t1": {got: true, at: now, report: BranchReport{Head: "feat/x", Uncommitted: 4}}}
+	m.now = func() time.Time { return now.Add(11 * time.Second) }
+	if cmd := m.branchesCmd(); cmd == nil {
+		t.Fatal("no refetch after ten seconds")
+	}
+	if plain := ansi.Strip(strings.Join(m.teamHead(team, 80), "\n")); !strings.Contains(plain, "⎇ feat/x · 4 files uncommitted") {
+		t.Errorf("the branch line went away while git answers again:\n%s", plain)
+	}
+}
+
 // Selecting a member asks for its team's branches, not the session's own.
 func TestBranchFetchFollowsTheSelection(t *testing.T) {
 	m, _ := setupTeam(t)
