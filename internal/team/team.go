@@ -107,6 +107,17 @@ func CheckRoles(specs []Spec) error {
 	return nil
 }
 
+// Roles lists the active members' roles: "lead, uiux, manager".
+func Roles(members []store.Member) string {
+	var roles []string
+	for _, m := range members {
+		if m.Active() {
+			roles = append(roles, m.Role)
+		}
+	}
+	return strings.Join(roles, ", ")
+}
+
 // Roster lists members as "role · tool".
 func Roster(members []store.Member) string {
 	var parts []string
@@ -303,7 +314,7 @@ func Recipients(to, from string, members []store.Member) ([]string, error) {
 			return []string{to}, nil
 		}
 	}
-	return nil, fmt.Errorf("the team has no %s; roles: %s", to, Roster(members))
+	return nil, fmt.Errorf("no member called %q; roles: %s", to, Roles(members))
 }
 
 // Address splits "@role text" into the role and the text. Without a leading

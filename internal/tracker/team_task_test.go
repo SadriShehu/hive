@@ -535,3 +535,11 @@ func TestReopenRefusals(t *testing.T) {
 		t.Errorf("reopening on a done team = %v", err)
 	}
 }
+
+func TestAMemberOffTheTeamIsNamedPlainly(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	if _, _, err := tr.AddTask(theTeam(t, tr), "lead", "x", "", "manager", nil); err == nil ||
+		err.Error() != `no member called "manager"; roles: lead, backend, frontend` {
+		t.Fatalf("AddTask err = %v, want the roles named plainly", err)
+	}
+}

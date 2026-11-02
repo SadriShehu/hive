@@ -324,3 +324,71 @@ func TestInboxHasPeek(t *testing.T) {
 		t.Error("team commands don't say when mail waits")
 	}
 }
+
+func TestAddSaidWordsWhatHappened(t *testing.T) {
+	ready := []store.Task{{N: 4, Title: "handlers", Status: store.TaskOpen, Owner: "manager"}}
+	for _, c := range []struct {
+		name string
+		task store.Task
+		how  string
+		want string
+	}{
+		{"delivered", ready[0], "sent", "#4 added for manager · told now"},
+		{"working", ready[0], "queued; it is working", "#4 added for manager · told when it is idle (working now)"},
+		{"idle", ready[0], "queued; it is idle", "#4 added for manager · told when it is idle (idle now)"},
+		{"no owner", store.Task{N: 3, Title: "docs", Status: store.TaskOpen}, "", "#3 added, no owner"},
+	} {
+		sent := []tracker.Sent{}
+		if c.how != "" {
+			sent = append(sent, tracker.Sent{Role: "manager", How: c.how})
+		}
+		if got := addSaid(c.task, ready, sent); got != c.want {
+			t.Errorf("%s: addSaid = %q, want %q", c.name, got, c.want)
+		}
+	}
+
+	tasks := []store.Task{
+		{N: 1, Title: "schema", Status: store.TaskOpen},
+		{N: 2, Title: "table", Status: store.TaskOpen},
+		{N: 5, Title: "docs", Status: store.TaskOpen, Owner: "manager", After: []int{1, 2}},
+	}
+	if got := addSaid(tasks[2], tasks, nil); got != "#5 added for manager · waits for #1 #2" {
+		t.Errorf("not ready = %q", got)
+	}
+}
+
+func TestTheBoardCutsTaskTextToItsWidth(t *testing.T) {
+	long := strings.Repeat("word ", 80)
+	task := store.Task{N: 1, Title: "schema", Status: store.TaskDone, Owner: "backend", Note: long, Body: long + "\na second line"}
+	lines := taskLines([]store.Task{task}, true, 40)
+	if len(lines) != 1 {
+		t.Fatalf("board lines = %q, want the note and body on one line", lines)
+	}
+	if got := lines[0]; utf8.RuneCountInString(got) != 40 || !strings.HasSuffix(got, "…") {
+		t.Errorf("board line = %q (%d runes), want 40 with …", got, utf8.RuneCountInString(got))
+	}
+	if strings.Contains(lines[0], "\n") {
+		t.Error("the board line has a line break")
+	}
+
+	full := taskLines([]store.Task{task}, true, 0)
+	if !strings.Contains(strings.Join(full, "\n"), long+"\n       a second line") {
+		t.Errorf("task ls = %q, want the body in full", full)
+	}
+}
+
+func TestBoardCanPrintOnePartOnly(t *testing.T) {
+	c := newTeamBoardCmd()
+	for _, name := range []string{"tasks", "channel"} {
+		if c.Flags().Lookup(name) == nil {
+			t.Errorf("team board has no --%s", name)
+		}
+	}
+	ls := newTaskLsCmd(&taskFlags{})
+	if err := ls.Args(ls, []string{"3"}); err != nil {
+		t.Errorf("task ls <n> refused: %v", err)
+	}
+	if err := ls.Args(ls, []string{"1", "2"}); err == nil {
+		t.Error("task ls took two numbers")
+	}
+}

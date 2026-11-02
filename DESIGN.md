@@ -662,8 +662,12 @@ teammate can't paint the user's terminal.
   but hive's own posts. Mail it prints is marked delivered, as `inbox` does, so it isn't
   typed again; a paused team keeps it. When hive's mail says what a task's line would,
   only the mail is printed. A caller off the team, like you in a shell, reads the channel.
-- **Reading it.** `board` lists the tasks, and with each member the task it holds; `task
-  ls` adds the details; `ls` counts them. In JSON each task has `ready` and `waits`.
+- **Reading it.** `board` lists the tasks, and with each member the task it holds; each
+  task's note and body are cut to one line at the terminal width (100 when it isn't one),
+  and `--tasks` or `--channel` prints just that part. `task ls [n]` adds the details in
+  full, for the whole board or one task; `ls` counts them. In JSON each task has `ready`
+  and `waits`. `task add` prints one line: `#4 added for manager · told now`, `· told when
+  it is idle (working now)` or `· waits for #1 #2`.
 - **Editing it from the tree.** `e` on a team opens its board full screen: every task
   with its status, owner and what it waits for, and the selected task's body and note
   under the list. `j`/`k` move, `n` adds a task, `e` or `↵` edits the selected one, `d`

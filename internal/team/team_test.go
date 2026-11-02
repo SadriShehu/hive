@@ -230,3 +230,12 @@ func TestEnvelopeSaysHowOldALateMessageIs(t *testing.T) {
 		t.Errorf("Paste = %q, want %q", paste, want)
 	}
 }
+
+func TestRecipientsNamesAStrangerPlainly(t *testing.T) {
+	members := []store.Member{{Role: "lead"}, {Role: "uiux"}, {Role: "old", LeftAt: 1}}
+	_, err := Recipients("manager", "lead", members)
+	want := `no member called "manager"; roles: lead, uiux`
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
