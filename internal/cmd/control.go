@@ -185,6 +185,9 @@ func newNewCmd() *cobra.Command {
 			}
 			if l.Choice != nil {
 				fmt.Fprintln(os.Stderr, "picked "+l.Choice.Reason)
+				for _, note := range l.Choice.Notes {
+					fmt.Fprintln(os.Stderr, note)
+				}
 			}
 			id := l.SessionID
 			synthetic := false
@@ -258,6 +261,9 @@ func printDryRun(ctx context.Context, tr *tracker.Tracker, o tracker.LaunchOptio
 	}
 	fmt.Fprintln(stdout, choice.Tool, choice.ID)
 	fmt.Fprintln(stderr, choice.Reason)
+	for _, note := range choice.Notes {
+		fmt.Fprintln(stderr, note)
+	}
 	for _, cue := range choice.Need.Cues {
 		fmt.Fprintln(stderr, "  "+cue)
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 )
 
@@ -17,6 +18,7 @@ import (
 const (
 	TeamEnv = "HIVE_TEAM"
 	RoleEnv = "HIVE_ROLE"
+	DirEnv  = "HIVE_TEAM_DIR" // the team's shared files folder
 )
 
 // LeadRole is the role of the agent hive starts to lead a team.
@@ -172,6 +174,8 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 		"- Messages: `hive team say <role> \"text\"` writes to one teammate; `hive team say all \"text\"` to\n" +
 		"  everyone. Messages to you arrive here as lines that start with [" + t.Name + " · from <role>].\n" +
 		"  Answer them with `hive team say` or `hive team post`, not here.\n" +
+		"- Shared files: `$" + DirEnv + "` (" + paths.TeamFilesDir(t.Name) + ") holds drafts and notes every\n" +
+		"  member can read. It is outside the repo, so nothing there gets committed.\n" +
 		"- When you are done or blocked, say so with `hive team post`, then end your turn. hive wakes\n" +
 		"  you here when someone writes to you.\n")
 	b.WriteString(workLine(t, m, members))

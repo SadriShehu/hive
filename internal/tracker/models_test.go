@@ -254,3 +254,58 @@ func TestLaunchResolvesTheModelIntoTheArgv(t *testing.T) {
 		t.Fatalf("a window opened for a model hive refused: %v", started.Argv)
 	}
 }
+
+func TestAutoRanksDownAToolWhoseFiveHourWindowIsNearlySpent(t *testing.T) {
+	tr := modelWorld(t)
+	w := tr.World.(*fakeWorld)
+	w.now = 1_000_000_000_000
+	now := w.now / 1000
+	ctx := context.Background()
+
+	tr.Store.SetQuota(store.Quota{Tool: "claude", FiveUsed: 93, FiveReset: now + 3600, At: now})
+	got, err := tr.Pick(ctx, PickOptions{Tool: fusion.Auto, Prompt: "rename the variable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tool == "claude" {
+		t.Fatalf("picked %s with claude's 5h window at 93%%", got)
+	}
+	if len(got.Notes) != 1 || !strings.Contains(got.Notes[0], "claude ranked down: 5h window at 93%, resets ") {
+		t.Fatalf("notes = %q, want why claude was ranked down", got.Notes)
+	}
+
+	tr.Store.SetQuota(store.Quota{Tool: "claude", FiveUsed: 89, FiveReset: now + 3600, At: now})
+	if got, err := tr.Pick(ctx, PickOptions{Tool: fusion.Auto, Prompt: "rename the variable"}); err != nil || got.Tool != "claude" {
+		t.Fatalf("89%% pick = %v, %v; want claude unchanged", got, err)
+	}
+
+	tr.Store.SetQuota(store.Quota{Tool: "claude", FiveUsed: 93, FiveReset: now - 60, At: now})
+	if got, err := tr.Pick(ctx, PickOptions{Tool: fusion.Auto, Prompt: "rename the variable"}); err != nil || got.Tool != "claude" {
+		t.Fatalf("a reset window pick = %v, %v; want claude unchanged", got, err)
+	}
+
+	tr.Store.SetQuota(store.Quota{Tool: "claude", FiveUsed: 93, FiveReset: now + 3600, At: now - 6*3600})
+	if got, err := tr.Pick(ctx, PickOptions{Tool: fusion.Auto, Prompt: "rename the variable"}); err != nil || got.Tool != "claude" {
+		t.Fatalf("a 6h-old quota pick = %v, %v; want it ignored", got, err)
+	}
+}
+
+func TestAutoChangesNothingWhenEveryToolIsHighOrPinned(t *testing.T) {
+	tr := modelWorld(t)
+	w := tr.World.(*fakeWorld)
+	w.now = 1_000_000_000_000
+	now := w.now / 1000
+	ctx := context.Background()
+	for _, tool := range []string{"claude", "opencode"} {
+		tr.Store.SetQuota(store.Quota{Tool: tool, FiveUsed: 95, FiveReset: now + 3600, At: now})
+	}
+	if got, err := tr.Pick(ctx, PickOptions{Tool: fusion.Auto, Prompt: "rename the variable"}); err != nil || got.Tool != "claude" {
+		t.Fatalf("every tool high pick = %v, %v; want the usual claude", got, err)
+	}
+
+	tr.Store.SetQuota(store.Quota{Tool: "claude", FiveUsed: 93, FiveReset: now + 3600, At: now})
+	tr.Store.SetQuota(store.Quota{Tool: "opencode", FiveUsed: 10, FiveReset: now + 3600, At: now})
+	if got, err := tr.Pick(ctx, PickOptions{Tool: "claude", Model: fusion.Auto, Prompt: "rename the variable"}); err != nil || got.Tool != "claude" {
+		t.Fatalf("pinned pick = %v, %v; want claude kept", got, err)
+	}
+}

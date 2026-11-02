@@ -36,6 +36,9 @@ type teamOps struct {
 
 	running []string // the roles a fresh look finds running, panes only too
 
+	branches  map[string]BranchReport
+	branchErr error
+
 	taskAdded   []taskCall
 	taskEdited  []taskCall
 	taskDone    []taskCall
@@ -80,6 +83,9 @@ func (f *teamOps) TeamRead(team string, id int64) error {
 }
 func (f *teamOps) TeamRunning(team string) ([]string, error) {
 	return f.running, nil
+}
+func (f *teamOps) TeamBranches(team string) (BranchReport, error) {
+	return f.branches[team], f.branchErr
 }
 func (f *teamOps) TrashTeam(tm store.Team) ([]store.Session, error) {
 	f.trashedTeams = append(f.trashedTeams, tm.ID)
@@ -217,7 +223,7 @@ func TestSelectingATeamShowsItsChannelAndMarksItRead(t *testing.T) {
 	m, ops := setupTeam(t)
 	view := ansi.Strip(m.View())
 	for _, want := range []string{"⬡ api-v2", "led by lead", "start with the schema", "you → lead",
-		"backend → frontend", "frontend needs you", "frontend waits on you"} {
+		"backend → front", "frontend needs you", "frontend waits on you"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("channel lacks %q:\n%s", want, view)
 		}
@@ -297,7 +303,7 @@ func TestEnterOnATeamOpensItsChannel(t *testing.T) {
 	}
 	view := ansi.Strip(m.View())
 	for _, want := range []string{"⬡ api-v2", "add the admin API", "3 members", "● lead", "#1 schema for admin users",
-		"start with the schema", "backend → frontend", "message api-v2"} {
+		"start with the schema", "backend → front", "message api-v2"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("channel lacks %q:\n%s", want, view)
 		}
@@ -407,8 +413,8 @@ func TestALongChannelPromptWraps(t *testing.T) {
 func TestHelpNamesTheTeamAndChannelKeys(t *testing.T) {
 	m, _ := setupTeam(t)
 	m = press(t, m, "?")
-	view := ansi.Strip(m.View())
-	for _, want := range []string{"e edits its board", "d trashes it", "bare team:", "pgup/pgdn scroll the feed"} {
+	view := ansi.Strip(strings.Join(m.helpLines(m.width), "\n"))
+	for _, want := range []string{"edit the board", "move the team to the trash", "bare team:", "scroll the feed"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help lacks %q:\n%s", want, view)
 		}

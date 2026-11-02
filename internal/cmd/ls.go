@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,7 +14,6 @@ import (
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
-	"github.com/sadrishehu/hive/internal/tmux"
 	"github.com/sadrishehu/hive/internal/tree"
 )
 
@@ -424,16 +422,7 @@ func listedCost(roots []*tree.Node, usages map[string]store.Usage) string {
 
 // hintInstall points at `hive install` for agents on PATH that aren't connected.
 func hintInstall() {
-	var missing []string
-	for _, a := range adapters.All() {
-		if _, err := exec.LookPath(a.Spec().New[0]); err == nil && !a.Installed() {
-			missing = append(missing, a.Spec().Name)
-		}
-	}
-	if tmux.Available() && tmux.PopupKey(tmux.ConfPath()) == "" {
-		missing = append(missing, "tmux (prefix+a)")
-	}
-	if len(missing) > 0 {
+	if missing := adapters.NotConnected(); len(missing) > 0 {
 		fmt.Fprintf(os.Stderr, "%s not connected yet: run `hive install`\n", strings.Join(missing, ", "))
 	}
 }

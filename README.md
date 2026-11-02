@@ -44,6 +44,17 @@ you, by another agent, or with `n` in the tree. Past sessions are imported too. 
 auto`, or tool `auto` in the tree's form, [picks the model](#picking-the-model-auto), and
 the tool, for the prompt.
 
+## Your first five minutes
+
+1. See the change before you trust it: `hive install --dry-run` prints a unified diff of
+   every file hive would edit, then `hive install` makes it (with backups).
+2. `hive` opens the tree, or **prefix + a** does when you are inside tmux.
+3. Press `n`, type a prompt and press `↵`: the agent starts in its own tmux window, and the
+   right side of the tree shows its screen live.
+4. Press `↵` on a row to jump into that agent's pane.
+5. Come back with **prefix + a**. A `◆` marks an agent that needs you;
+   **prefix + A** jumps straight to the one that has waited longest.
+
 ## Install
 
 ```sh
@@ -65,7 +76,9 @@ which build you run.
 backed up to `hive.json.bak-hive` when an existing file is changed), and adds hooks
 to `~/.codex/hooks.json` for Codex (or `$CODEX_HOME/hooks.json`, backed up to
 `hooks.json.bak-hive`). Codex asks you to trust the new hooks when it next starts.
-It is safe to rerun; `hive uninstall` removes exactly what it added. Hooks load when
+It is safe to rerun, and `hive install --dry-run` shows a unified diff of every file it
+would change without changing anything; `hive uninstall --dry-run` does the same for
+removal. `hive uninstall` removes exactly what it added. Hooks load when
 an agent starts, so running sessions pick them up after a restart; until then they
 show as untracked, or are adopted as soon as they spawn another agent.
 
@@ -75,7 +88,9 @@ Run `hive`. Inside tmux it opens in the current pane; outside tmux it attaches t
 tmux session called `hive`, with the tree in its first window. With the popup key
 bound (`hive install tmux`), **prefix + a** opens the tree over whatever you're doing
 and closes once you jump somewhere. Running `hive install tmux` again picks up the
-popup's new size. The header counts the agents that need you.
+popup's new size. The header counts the agents that need you. While a tool found on
+PATH isn't connected, or tmux has no popup key, it also says `⚠ not connected: claude,
+codex · run hive install`; hive checks at start and on each 30s sync.
 
 ```
  hive  ● 3 live  ·  203 sessions                                           last 24h
@@ -104,6 +119,17 @@ transcript for a headless run, a subagent or a finished session.
 | `a` · `i` · `←/→` | all history or last 24h · hide subagents · fold |
 | `y` · `S` · `tab` · `?` | copy ID · sync now · hide preview · help |
 | `u` | show / hide what the session used: model, tokens, price, context, tools, skills |
+
+`?` opens the help on the keys for where you are: the tree, a team row, the trash, or
+the board; the other sections follow in a fixed order. Its key column fits the longest
+key and descriptions wrap under it with a hanging indent, so nothing is cut at any
+width. `↑`/`↓` (or `j`/`k`), `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) and `g`/`G` scroll it,
+with a line count on the hint when it doesn't all fit; `esc`, `q`, `?` and `↵` close it,
+and other keys do nothing.
+
+A filter says why a row matched: the matched part of a title is in accent, and a row
+found only by its folder or ID gets a dim `folder` or `id` tag. An empty result names
+the query, and the header reads `matching “…” · all history`.
 
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. The form asks for the tool, the model, the
@@ -389,7 +415,13 @@ tool = "codex"
 
 ```sh
 hive team new admin-api --from api
+hive team save admin-api --as api   # add this team as a template, for next time
 ```
+
+`hive team save <team> [--as <name>]` appends one `[[team]]` table to `config.toml` with the
+team's goal, lead, folder, worktrees and members; `--as` names it, the team's name by
+default. It only appends, refuses a name already there, and leaves a config it can't parse
+alone.
 
 The team folder is stored as an absolute path, so a relative `cwd` or `--cwd` resolves
 where you run the command.
@@ -403,7 +435,9 @@ titled by the task it holds; select it and the preview is the board and the chan
 `↵` opens the channel full screen with a live line: type to write to everyone (`@role`
 for one), `↵` sends, `esc` goes back to the tree, `ctrl+g` reads the whole goal, and the
 prompt wraps: `↑/↓` move the caret once you have typed, and `pgup`/`pgdn` (or
-`ctrl+u`/`ctrl+d`) scroll the feed. Each
+`ctrl+u`/`ctrl+d`) scroll the feed. On a narrow screen the live line's placeholder drops
+whole segments, and a long team name drops `(@role for one)` first; a wrapped post
+continues six columns in, under the name. Each
 member's row shows its state, model and effort, short session ID and how full its context
 is; the account's rate-limit windows (`5h 7% · resets 4h54m · 7d 22%`) show once per tool,
 when the tool reports them. Claude Code sends them only to its status line: point that
@@ -442,6 +476,7 @@ blocked and asks why, and `esc` goes back to the tree, or from a form back to th
 The form takes a title, an optional body, an owner role and the tasks it waits for (`1,2`).
 An edit can't make a task wait on itself through a cycle, and clearing the owner of a
 claimed task reopens it. The selected task's body and note are shown under the list.
+`?` shows the board's keys, with esc going back to the board.
 
 Members post progress with `hive team post`; hive adds its own posts (a member started,
 needs you, stopped); you answer with `s`, or on the channel's live line. A message to a
@@ -470,7 +505,9 @@ tree, so a teammate can't paint your terminal.
 | Command | Does |
 | --- | --- |
 | `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
-| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part, and both print both sections without the goal and roster) · the channel (all take `--json`; with `--tasks` or `--channel`, `--json` keeps only that key) |
+| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks, latest posts and each worktree's branch line, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part, and both print both sections without the goal and roster) · the channel (all take `--json`; with `--tasks` or `--channel`, `--json` keeps only that key) |
+| `hive team report [team] [--out path]` | Markdown hand-off: the goal whole, members with state and cost, every task with its note or blocked reason, and the members' posts; `--out team` writes `$HIVE_TEAM_DIR/report.md` |
+| `hive team save <team> [--as name]` | append the team as a `[[team]]` template in config.toml, for `hive team new --from`; only appends, and refuses a name already there |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` · `add --file plan.toml [--dry-run]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready. `--file` adds a whole plan of `[[task]]` tables in one call, checking all of it first |
 | `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `edit <n> [--title t] [--body b\|-] [--owner role] [--after n,…]` · `reopen <n> --why text` · `ls [n] [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task; `edit` changes only the flags you pass; `reopen` sends a done or blocked task back to open |
@@ -523,6 +560,24 @@ first that the folder is a git repository with a commit, and it only removes the
 worktrees it made: a folder or branch already in a member's place fails that member
 rather than taking someone's work. The brief names each member's branch, and changes not
 committed in the team's folder aren't in the worktrees.
+
+The tree's team header and `hive team board` show where each branch stands, read with
+read-only git in the background (at most every ten seconds, and never while drawing):
+`⎇ hive/api-v2/backend  ↑3 ↓1  5 files +210 −34  ✓ merges clean`, with a red
+`✗ conflicts: web/app.tsx (+1)` when a dry merge can't settle, `merged ✓` when the base
+already has every commit, and `· 2 uncommitted` when the worktree holds changes. A
+shared-folder team gets one line under its roster: `⎇ feat/x · 4 files uncommitted`. At a
+narrow width the diff stat goes first, then `↓`, then the branch name is cut—the merge
+result always stays. `hive team board --json` carries the same numbers under
+`worktrees.trees`.
+
+**Shared files.** Each team gets a folder outside its repository, `<data dir>/teams/<team>/files`
+(`~/.local/share/hive` unless `HIVE_HOME` or `XDG_DATA_HOME` says otherwise), where members
+keep drafts and notes the whole team can read. Every member's window has `HIVE_TEAM_DIR`
+pointing at it, the brief names it, and `hive team board` shows `files: <path> · N files`
+(`files_dir` in `--json`). It stays when the team goes to the trash, so restore finds it;
+purging the team removes it. `hive team report` turns the goal, members, tasks and their
+notes, and the members' posts into Markdown for a PR description or a hand-off.
 
 **Done.** `hive team done <team>` marks the goal met: the team stays in the tree, dimmed
 and folded with its channel, and messages, posts, new members and new tasks are refused
@@ -600,6 +655,13 @@ which models of a tool are unrated. The pick takes the models that meet every le
 the prompt asks for, and among them the lowest total rating, then the cheaper (when
 both have a price), then the faster, then one from the preferred tool. When nothing
 meets the bar, the closest to it wins, and `--dry-run` says so.
+
+**Rate limits.** A tool whose 5h rate-limit window is at 90% or more and hasn't reset yet
+goes after every other tool's candidates, so auto doesn't start work on an account about
+to hit its limit. A window older than 5h says nothing about now, and if every tool is
+high nothing changes. Only Claude reports the windows, through `hive status --then` in its
+status line. A tool you pin (`claude:auto`) is never moved to another tool. `--dry-run`
+says why: `claude ranked down: 5h window at 93%, resets 14:20`.
 
 These are hive's starting ratings, not measurements. Change them, or rate a model
 hive doesn't know, in `config.toml`; a rating set by hand replaces the tier's:

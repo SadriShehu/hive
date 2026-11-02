@@ -55,9 +55,34 @@ func (a *Adapter) Installed() bool {
 // Install adds hive's hooks to Codex's hooks.json, keeping everything else.
 func (a *Adapter) Install(hiveBin string) (string, error) {
 	path := a.hooksPath()
-	data, err := readHooks(path)
+	changes, added, updated, err := a.planInstall(hiveBin)
 	if err != nil {
 		return "", err
+	}
+	if len(changes) == 0 {
+		return "already installed in " + path, nil
+	}
+	if err := agent.Apply(changes); err != nil {
+		return "", err
+	}
+	msg := fmt.Sprintf("added %d hooks to %s", added, path)
+	if updated > 0 {
+		msg = fmt.Sprintf("added %d and updated %d hooks in %s", added, updated, path)
+	}
+	return msg + trustNote, nil
+}
+
+// PlanInstall returns the change Install would make, without making it.
+func (a *Adapter) PlanInstall(hiveBin string) ([]agent.Change, error) {
+	changes, _, _, err := a.planInstall(hiveBin)
+	return changes, err
+}
+
+func (a *Adapter) planInstall(hiveBin string) ([]agent.Change, int, int, error) {
+	path := a.hooksPath()
+	data, err := readHooks(path)
+	if err != nil {
+		return nil, 0, 0, err
 	}
 	command := agent.ShellQuote(hiveBin) + " hook codex"
 	type hook struct {
@@ -74,7 +99,7 @@ func (a *Adapter) Install(hiveBin string) (string, error) {
 		refs := findOurs(out, event)
 		if len(refs) == 0 {
 			if out, err = sjson.SetRawBytes(out, "hooks."+event+".-1", entry); err != nil {
-				return "", err
+				return nil, 0, 0, err
 			}
 			added++
 			continue
@@ -85,30 +110,56 @@ func (a *Adapter) Install(hiveBin string) (string, error) {
 			}
 			p := fmt.Sprintf("hooks.%s.%d.hooks.%d.command", r.event, r.entry, r.hook)
 			if out, err = sjson.SetBytes(out, p, command); err != nil {
-				return "", err
+				return nil, 0, 0, err
 			}
 			updated++
 		}
 	}
 	if added == 0 && updated == 0 {
-		return "already installed in " + path, nil
+		return nil, 0, 0, nil
 	}
-	if err := writeHooks(path, data, out); err != nil {
-		return "", err
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, out, "", "  "); err != nil {
+		return nil, 0, 0, err
 	}
-	msg := fmt.Sprintf("added %d hooks to %s", added, path)
-	if updated > 0 {
-		msg = fmt.Sprintf("added %d and updated %d hooks in %s", added, updated, path)
+	buf.WriteString("\n")
+	old, exists, err := agent.Current(path)
+	if err != nil {
+		return nil, 0, 0, err
 	}
-	return msg + trustNote, nil
+	return []agent.Change{{Path: path, Old: old, New: buf.Bytes(), Mode: 0o600, Backup: exists}}, added, updated, nil
 }
 
 // Uninstall removes only the hooks that call hive.
 func (a *Adapter) Uninstall() (string, error) {
 	path := a.hooksPath()
-	data, err := readHooks(path)
+	changes, removed, removedFile, err := a.planUninstall()
 	if err != nil {
 		return "", err
+	}
+	if len(changes) == 0 {
+		return "not installed in " + path, nil
+	}
+	if err := agent.Apply(changes); err != nil {
+		return "", err
+	}
+	if removedFile {
+		return fmt.Sprintf("removed %d hooks and %s", removed, path), nil
+	}
+	return fmt.Sprintf("removed %d hooks from %s", removed, path), nil
+}
+
+// PlanUninstall returns the change Uninstall would make, without making it.
+func (a *Adapter) PlanUninstall() ([]agent.Change, error) {
+	changes, _, _, err := a.planUninstall()
+	return changes, err
+}
+
+func (a *Adapter) planUninstall() ([]agent.Change, int, bool, error) {
+	path := a.hooksPath()
+	data, err := readHooks(path)
+	if err != nil {
+		return nil, 0, false, err
 	}
 	out := data
 	removed := 0
@@ -116,39 +167,42 @@ func (a *Adapter) Uninstall() (string, error) {
 		for _, r := range slices.Backward(findOurs(out, event)) {
 			entryPath := fmt.Sprintf("hooks.%s.%d", r.event, r.entry)
 			if out, err = sjson.DeleteBytes(out, fmt.Sprintf("%s.hooks.%d", entryPath, r.hook)); err != nil {
-				return "", err
+				return nil, 0, false, err
 			}
 			if len(gjson.GetBytes(out, entryPath+".hooks").Array()) == 0 {
 				if out, err = sjson.DeleteBytes(out, entryPath); err != nil {
-					return "", err
+					return nil, 0, false, err
 				}
 			}
 			removed++
 		}
 		if list := gjson.GetBytes(out, "hooks."+event); list.Exists() && len(list.Array()) == 0 {
 			if out, err = sjson.DeleteBytes(out, "hooks."+event); err != nil {
-				return "", err
+				return nil, 0, false, err
 			}
 		}
 	}
 	if removed == 0 {
-		return "not installed in " + path, nil
+		return nil, 0, false, nil
 	}
 	if h := gjson.GetBytes(out, "hooks"); h.IsObject() && len(h.Map()) == 0 {
 		if out, err = sjson.DeleteBytes(out, "hooks"); err != nil {
-			return "", err
+			return nil, 0, false, err
 		}
+	}
+	old, exists, err := agent.Current(path)
+	if err != nil {
+		return nil, 0, false, err
 	}
 	if len(gjson.ParseBytes(out).Map()) == 0 && !hasBackup(path) {
-		if err := os.Remove(path); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("removed %d hooks and %s", removed, path), nil
+		return []agent.Change{{Path: path, Old: old, Remove: true}}, removed, true, nil
 	}
-	if err := writeHooks(path, data, out); err != nil {
-		return "", err
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, out, "", "  "); err != nil {
+		return nil, 0, false, err
 	}
-	return fmt.Sprintf("removed %d hooks from %s", removed, path), nil
+	buf.WriteString("\n")
+	return []agent.Change{{Path: path, Old: old, New: buf.Bytes(), Mode: 0o600, Backup: exists}}, removed, false, nil
 }
 
 func hasBackup(path string) bool {
@@ -174,18 +228,4 @@ func readHooks(path string) ([]byte, error) {
 		return nil, fmt.Errorf("%s has a non-object hooks value; not touching it", path)
 	}
 	return data, nil
-}
-
-func writeHooks(path string, original, edited []byte) error {
-	if _, err := os.Stat(path); err == nil {
-		if err := os.WriteFile(path+".bak-hive", original, 0o600); err != nil {
-			return fmt.Errorf("backup: %w", err)
-		}
-	}
-	var buf bytes.Buffer
-	if err := json.Indent(&buf, edited, "", "  "); err != nil {
-		return err
-	}
-	buf.WriteString("\n")
-	return agent.WriteFileAtomic(path, buf.Bytes(), 0o600)
 }

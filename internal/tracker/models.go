@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/sadrishehu/hive/internal/agent"
@@ -283,13 +284,71 @@ func (t *Tracker) Pick(ctx context.Context, o PickOptions) (fusion.Choice, error
 	if err != nil {
 		return fusion.Choice{}, err
 	}
+	candidates, notes := t.rankDownByQuota(candidates)
 	if len(candidates) == 0 {
 		if mode == fusion.ModeModel {
 			return fusion.Choice{}, fmt.Errorf("no rated model for %s; `hive models %[1]s` lists what it runs, and a [[model]] with a tier rates one", tools[0])
 		}
 		return fusion.Choice{}, errors.New("no installed tool has a rated model; `hive models` lists them")
 	}
-	return fusion.Pick(mode, prefer, candidates, fusion.Assess(o.Prompt))
+	choice, err := fusion.Pick(mode, prefer, candidates, fusion.Assess(o.Prompt))
+	if err != nil {
+		return fusion.Choice{}, err
+	}
+	choice.Notes = notes
+	return choice, nil
+}
+
+// rankDownByQuota leaves out the candidates of a tool whose 5h window is at
+// 90% or more and not reset yet, when another tool still competes. A quota
+// older than 5h says nothing about now. Every tool high changes nothing.
+func (t *Tracker) rankDownByQuota(candidates []fusion.Candidate) ([]fusion.Candidate, []string) {
+	quotas, err := t.Store.Quotas()
+	if err != nil || len(quotas) == 0 {
+		return candidates, nil
+	}
+	now := t.World.Now() / 1000
+	down := map[string]bool{}
+	for tool, q := range quotas {
+		switch {
+		case now-q.At > int64(5*time.Hour/time.Second):
+			continue // older than the window it describes
+		case q.FiveUsed < 90:
+			continue
+		case q.FiveReset != 0 && q.FiveReset <= now:
+			continue // the window reset since
+		}
+		down[tool] = true
+	}
+	var normal []fusion.Candidate
+	for _, c := range candidates {
+		if !down[c.Tool] {
+			normal = append(normal, c)
+		}
+	}
+	if len(normal) == len(candidates) {
+		return candidates, nil // nobody to move down
+	}
+	if len(normal) == 0 {
+		return candidates, nil // every tool is high: nothing changes
+	}
+	var notes []string
+	seen := map[string]bool{}
+	for _, c := range candidates {
+		q := quotas[c.Tool]
+		if !down[c.Tool] || seen[c.Tool] {
+			continue
+		}
+		seen[c.Tool] = true
+		note := fmt.Sprintf("%s ranked down: 5h window at %.0f%%", c.Tool, q.FiveUsed)
+		if q.FiveReset == 0 {
+			note += ", reset unknown"
+		} else {
+			note += ", resets " + time.Unix(q.FiveReset, 0).Format("15:04")
+		}
+		notes = append(notes, note)
+	}
+	return normal, notes
 }
 
 // scope resolves o to a mode, the tools whose models compete, and the tool
