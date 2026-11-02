@@ -1054,7 +1054,7 @@ func newTeamDeliverCmd() *cobra.Command {
 				logf("team deliver %s: %v", s.ID, err)
 				return err
 			}
-			logf("team deliver %s: %s", s.ID, how)
+			logInfo("team deliver %s: %s", s.ID, how)
 			return nil
 		},
 	}

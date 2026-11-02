@@ -152,19 +152,44 @@ func checkLog(c *checkup) {
 	defer f.Close()
 	since := time.Now().Add(-24 * time.Hour)
 	var count int
-	var last string
+	var last []string
 	scan := bufio.NewScanner(f)
 	for scan.Scan() {
-		stamp, _, _ := strings.Cut(scan.Text(), " ")
-		if at, err := time.Parse(time.RFC3339, stamp); err == nil && at.After(since) {
-			count++
-			last = scan.Text()
+		line := scan.Text()
+		stamp, _, _ := strings.Cut(line, " ")
+		at, err := time.Parse(time.RFC3339, stamp)
+		if err != nil || !at.After(since) || !logError(line) {
+			continue
+		}
+		count++
+		last = append(last, line)
+		if len(last) > 3 {
+			last = last[1:]
 		}
 	}
 	if count > 0 {
-		c.warn(fmt.Sprintf("%d log lines in the last day in %s", count, shortPath(paths.LogPath())),
-			"latest: "+truncate(last, 120))
+		c.warn(fmt.Sprintf("%d errors in the last day in %s", count, shortPath(paths.LogPath())), "last:")
+		for _, line := range last {
+			fmt.Println("  " + paint(truncate(line, 160), "2", c.color))
+		}
 	}
+}
+
+// logError says whether a log line is a failure. The level comes after the
+// timestamp; lines from before levels are failures unless they are one of the
+// routine delivery messages.
+func logError(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return true
+	}
+	switch fields[1] {
+	case "INFO":
+		return false
+	case "ERROR":
+		return true
+	}
+	return !strings.Contains(line, ": sent") && !strings.Contains(line, "busy again")
 }
 
 func exists(path string) bool {

@@ -175,9 +175,9 @@ new  = ["opencode", "-m", "deepseek/deepseek-v4-pro", "--prompt", "{prompt}"]
 Fields: `new`, `resume`, `process` (defaults to the program `new` runs), `headless`,
 `title_flags`, `session_flags`, `parent_env`. An empty placeholder drops the flag right
 before it. An `[alerts]` table says how hive tells you an agent needs you: `tmux` (a
-message, on by default) and `desktop` (off). An unknown key, a bad name or a duplicate
-makes hive ignore the whole file, so hooks keep working and alerts keep their defaults;
-`hive doctor` says what is wrong.
+message, on by default), `desktop` (off) and `command` (an argv run without a shell,
+off). An unknown key, a bad name or a duplicate makes hive ignore the whole file, so
+hooks keep working and alerts keep their defaults; `hive doctor` says what is wrong.
 
 **Any tool can report.** `hive hook <tool>` takes JSON on stdin — `event` (start, prompt,
 busy, idle, attention, end, update), `session_id`, and optionally `pid`, `parent_id`,
@@ -240,7 +240,9 @@ started ahead of use until their first message.
 ## TUI
 
 A tree on the left, a live preview on the right, built with Bubble Tea v1. It opens full
-screen (`hive`) or as a tmux popup (prefix + a) that closes when you jump.
+screen (`hive`) or as a tmux popup (prefix + a, 95% by 90%) that closes when you jump.
+The preview needs 100 cols; below that the header says `preview needs 100 cols` in place
+of the cost, so the tree's narrow mode doesn't hide why the preview is gone.
 
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited. `run` marks a headless
 session, `sub` a tool's own subagent.
@@ -291,7 +293,10 @@ Claude Code's idle reminder counts as idle, and Copilot CLI has no hook for eith
   you` with `display-message` on every tmux client whose current window isn't the
   session's (a subagent's is its parent's), and a desktop notification if `[alerts]`
   asks for one. The text is escaped for tmux, as a title could otherwise run a command
-  through `#(…)`.
+  through `#(…)`. `[alerts] command` runs an argv instead, detached and never waited
+  for, so a phone or chat alert adds no daemon; `{text}`, `{title}`, `{id}` and `{cwd}`
+  are substituted per element, and no shell parses it. A failure is logged like any
+  other alert.
 - **prefix + A** is `run-shell -b "hive jump --next --client '#{client_name}'"`. It
   switches that client to the session that has waited longest, by `status_at`, or, from
   one of them, to the next in that order. Output from `run-shell` would show in a pane,
@@ -430,7 +435,7 @@ seen yet triggers a history import and one retry.
 | `hive sync [--full]` | import past sessions and link past spawns |
 | `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a] [--next-key A]` | connect tools and bind the popup and needs-you keys; idempotent, backs up first |
 | `hive uninstall [...]` | remove exactly what install added |
-| `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and hook errors from the last day |
+| `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and the `ERROR` lines logged in the last day, with the last three |
 | `hive team …` | [teams](#teams): start one, follow its channel, write to its members |
 | `hive hook <tool>` | for integrations only; prints nothing, always exits 0 |
 
@@ -680,11 +685,15 @@ teammate can't paint the user's terminal.
 A team is a node of its own (`⬡`): at the root, or under the session that made it unless
 that session is on the team. Its members sit under it, and a member's own children stay
 under the member. The node takes the most urgent status of its live members, and counts
-tasks done. Its preview is the board and the channel, under a strip of the members; the
-board takes at most half, folding the done tasks first. A member's row is titled by the
+tasks done; when every task is done and no member runs it says `all done · hive team
+done?` instead. Its preview is the board and the channel, under a strip of the members; the
+board takes at most half; folded, it counts the board on its first line, then lists
+claimed, blocked and open tasks before done, and the last line says `e opens the board`.
+A member's row is titled by the
 task it holds (`backend · #4 handlers…`), else by what its session does.
 
-`↵` on a team opens its channel full screen: the team's name, goal, roster and state, the
+`↵` on a team opens its channel full screen: the team's name and goal on one line, how it
+runs, then one line per member with its state, model, context and the task it holds, the
 task board and the feed, with a live line at the bottom. Typing writes to everyone
 (`@role` for one), `↵` sends through the same mailbox as `s`, `esc` goes back to the tree,
 and the prompt wraps: `↑/↓` move the caret once typing, and `pgup`/`pgdn` (or `ctrl+u`/
@@ -694,7 +703,7 @@ no preview.
 | Key, on a team | Does |
 | --- | --- |
 | `↵` | open the team's channel full screen; on a member row, jump to that member |
-| `e` | open the board editor: `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
+| `e` | open the board editor (on a team or any of its members): `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
 | `s` | write to everyone (`@role` for one); on a member, to that member |
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |

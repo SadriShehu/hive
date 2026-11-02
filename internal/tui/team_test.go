@@ -646,6 +646,69 @@ func TestNewTeamForm(t *testing.T) {
 	}
 }
 
+// The T form lines its labels up, wraps its explainer and shows the name
+// placeholder, so the form reads as a table rather than a run of text.
+func TestNewTeamFormLayout(t *testing.T) {
+	for _, w := range []int{80, 120} {
+		m, _ := setupTeam(t)
+		m = step(t, m, tea.WindowSizeMsg{Width: w, Height: 24})
+		m = press(t, m, "T")
+		plain := ansi.Strip(m.View())
+		if !strings.Contains(plain, "template ‹ none ›") {
+			t.Errorf("w=%d: the template label touches its value:\n%s", w, plain)
+		}
+		if !strings.Contains(plain, "e.g. api-v2") {
+			t.Errorf("w=%d: the name placeholder looks like a value:\n%s", w, plain)
+		}
+		header := ""
+		for _, line := range strings.Split(plain, "\n") {
+			if strings.Contains(line, "role") && strings.Contains(line, "tool") {
+				header = line
+				break
+			}
+		}
+		if !strings.Contains(header, "    role") {
+			t.Errorf("w=%d: the member header isn't over its values: %q", w, header)
+		}
+		joined := strings.Join(strings.Fields(plain), " ")
+		for _, want := range []string{"roles and tools are required.", "they report to the channel."} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("w=%d: the explainer is cut, missing %q:\n%s", w, want, plain)
+			}
+		}
+		if got := len(strings.Split(m.View(), "\n")); got != m.height {
+			t.Errorf("w=%d: view has %d lines, want %d", w, got, m.height)
+		}
+		m = press(t, m, "esc")
+		if m.mode != modeNormal {
+			t.Errorf("w=%d: esc left mode %v", w, m.mode)
+		}
+	}
+}
+
+// A team with every task done and no member running points at hive team done
+// where its row showed the task count.
+func TestATeamWithEveryTaskDoneSuggestsHiveTeamDone(t *testing.T) {
+	m, ops := setupTeam(t)
+	ops.snap.Tasks = []store.Task{{TeamID: "t1", N: 1, Title: "one", Status: store.TaskOpen}}
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "0/1 tasks") || strings.Contains(view, "all done") {
+		t.Errorf("an open task should show its count:\n%s", view)
+	}
+
+	m = stoppedTeam(t, m, ops)
+	ops.snap.Tasks[0].Status = store.TaskDone
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "all done · hive team done?") {
+		t.Errorf("a finished team doesn't suggest hive team done:\n%s", view)
+	}
+	if strings.Contains(view, "1/1 tasks") {
+		t.Errorf("the row still shows the task count:\n%s", view)
+	}
+}
+
 func TestTeamFormAddsAndRemovesMemberRows(t *testing.T) {
 	m, _ := setupTeam(t)
 	m = press(t, m, "T")
@@ -1111,28 +1174,41 @@ func TestUpDownMoveTheCaretInsideTheTeamGoal(t *testing.T) {
 	}
 }
 
-// A long team goal and a long member part wrap in the channel head instead of
-// running off the edge, and the view keeps its height.
-func TestALongTeamGoalAndPartWrap(t *testing.T) {
+// The head is two lines and then one per member, never wider than the screen.
+// The goal is cut short, the held task shows, and a member's long part stays
+// off it.
+func TestTheTeamHeadIsOneLinePerMember(t *testing.T) {
 	m, ops := setupTeam(t)
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	ops.snap.Teams[0].Goal = "START " + strings.Repeat("what the team is for ", 5) + "END"
-	ops.snap.Members[0].Prompt = "START " + strings.Repeat("what this member owns ", 5) + "END"
+	ops.snap.Members[0].Prompt = "PART " + strings.Repeat("what this member owns ", 5) + "PART"
+	ops.snap.Tasks = []store.Task{{TeamID: "t1", N: 4, Title: "dogfooding notes",
+		Status: store.TaskClaimed, Owner: "lead"}}
 	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
-	m = press(t, m, "enter")
 
-	view := ansi.Strip(m.View())
-	for _, want := range []string{"START", "END"} {
-		if strings.Count(view, want) < 2 {
-			t.Errorf("the channel lacks the goal's and the part's %q:\n%s", want, view)
+	head := m.teamHead(m.snap.Teams[0], 80)
+	if got, want := len(head), 2+len(ops.snap.Members); got != want {
+		t.Fatalf("head has %d lines, want 2 + %d members:\n%s", got, len(ops.snap.Members),
+			ansi.Strip(strings.Join(head, "\n")))
+	}
+	plain := ansi.Strip(strings.Join(head, "\n"))
+	if !strings.Contains(plain, "#4 dogfooding notes") {
+		t.Errorf("the head doesn't show the held task:\n%s", plain)
+	}
+	if strings.Contains(plain, "PART") {
+		t.Errorf("the head still shows a member's part:\n%s", plain)
+	}
+	if !strings.Contains(plain, "START") {
+		t.Errorf("the head doesn't show the start of the goal:\n%s", plain)
+	}
+	for _, line := range head {
+		if width := ansi.StringWidth(line); width > 80 {
+			t.Errorf("a head line is %d wide, past 80: %q", width, ansi.Strip(line))
 		}
 	}
-	for _, line := range strings.Split(view, "\n") {
-		if width := ansi.StringWidth(line); width > m.width {
-			t.Errorf("a line is %d wide, past the %d screen:\n%s", width, m.width, line)
-		}
-	}
-	if got := len(strings.Split(view, "\n")); got != m.height {
+
+	m = press(t, m, "enter")
+	if got := len(strings.Split(ansi.Strip(m.View()), "\n")); got != m.height {
 		t.Errorf("view has %d lines, want %d", got, m.height)
 	}
 }
@@ -1185,8 +1261,8 @@ func TestTheChannelShowsMembersUsageAndTheAccountsQuota(t *testing.T) {
 
 	view := ansi.Strip(m.View())
 	for _, want := range []string{
-		"claude-opus-5-5", "high", "188k/1M", "19%",
-		"claude-sonnet-5-5", "42k/200k", "21%",
+		"claude-opus-5-5", "ctx 19%",
+		"claude-sonnet-5-5", "ctx 21%",
 		"5h 7% · resets 4h54m · 7d 22%",
 	} {
 		if !strings.Contains(view, want) {
@@ -1287,10 +1363,10 @@ func TestTheChannelShowsStartingAndStoppedMembers(t *testing.T) {
 	m = press(t, m, "enter")
 
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "pane · starting") {
+	if !strings.Contains(view, "pane  starting") {
 		t.Errorf("a pane-only member isn't starting:\n%s", view)
 	}
-	if !strings.Contains(view, "gone · stopped") {
+	if !strings.Contains(view, "gone  stopped") {
 		t.Errorf("a cleared member isn't stopped:\n%s", view)
 	}
 }

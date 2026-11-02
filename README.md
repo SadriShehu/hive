@@ -74,7 +74,8 @@ show as untracked, or are adopted as soon as they spawn another agent.
 Run `hive`. Inside tmux it opens in the current pane; outside tmux it attaches to a
 tmux session called `hive`, with the tree in its first window. With the popup key
 bound (`hive install tmux`), **prefix + a** opens the tree over whatever you're doing
-and closes once you jump somewhere. The header counts the agents that need you.
+and closes once you jump somewhere. Running `hive install tmux` again picks up the
+popup's new size. The header counts the agents that need you.
 
 ```
  hive  ● 3 live  ·  203 sessions                                           last 24h
@@ -149,6 +150,20 @@ without the tree open:
   desktop = true   # osascript on macOS, notify-send on Linux
   tmux    = false  # to turn the tmux message off
   ```
+
+- **A command**, to reach a phone or a chat with no daemon: any program on your
+  PATH, run detached with the text, hive's title, the session ID and its folder
+  filled in. It runs without a shell, so each element is one argument and nothing
+  needs quoting. An [ntfy](https://ntfy.sh) push, for example:
+
+  ```toml
+  [alerts]
+  command = ["ntfy", "pub", "my-topic", "{text}"]
+  ```
+
+  `{text}` is `claude ‹Admin phase 2› needs you`; `{title}` is `hive`; `{id}` and
+  `{cwd}` are the session's ID and folder. A failure goes to hive's log, like the
+  other alerts.
 
 ## Use from the shell
 
@@ -388,8 +403,9 @@ mark it done with a note on what changed, or blocked with why. hive posts each, 
 lead when an agent leads, and tells the owner of a task as soon as everything it waits for
 is done, so nobody polls.
 
-Press `e` on a team to open its board full screen: `j`/`k` (or the arrows) move, `n` adds a
-task, `e`/`↵` edits the selected one, `d` marks it done with an optional note, `b` marks it
+Press `e` on a team or any of its members to open its board full screen: `j`/`k` (or the
+arrows) move, `n` adds a task, `e`/`↵` edits the selected one, `d` marks it done with an
+optional note, `b` marks it
 blocked and asks why, and `esc` goes back to the tree, or from a form back to the board.
 The form takes a title, an optional body, an owner role and the tasks it waits for (`1,2`).
 An edit can't make a task wait on itself through a cycle, and clearing the owner of a
@@ -410,7 +426,7 @@ tree, so a teammate can't paint your terminal.
 | Key, on a team | Does |
 | --- | --- |
 | `↵` | open the team's channel full screen; on a member row, jump to that member |
-| `e` | open the board editor: `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
+| `e` | open the board editor (on a team or any of its members): `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
 | `s` | message everyone (`@role` for one); on a member, message that member |
 | `p` | pause or resume: no mail is delivered and no task claimed while paused |
 | `L` | take the lead yourself, or hand it back to an agent |
@@ -628,10 +644,11 @@ fields work as flags: `hive hook mytool --event start --session abc`.
 
 ## Debugging
 
-Hooks never print. Errors go to `~/.local/share/hive/hive.log`; set `HIVE_DEBUG=1` in
-an agent's environment to log every linking decision. `HIVE_HOME` moves the database
-and log elsewhere; `HIVE_TMUX_SOCKET=name` points hive at a named tmux server
-(`tmux -L name`).
+Hooks never print. Errors go to `~/.local/share/hive/hive.log`; routine lines are
+marked `INFO` and failures `ERROR`. `hive doctor` counts only the `ERROR` lines from
+the last day, and shows the last three. Set `HIVE_DEBUG=1` in an agent's environment
+to log every linking decision. `HIVE_HOME` moves the database and log elsewhere;
+`HIVE_TMUX_SOCKET=name` points hive at a named tmux server (`tmux -L name`).
 
 ## Releases
 
