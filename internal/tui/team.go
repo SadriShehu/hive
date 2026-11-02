@@ -600,7 +600,7 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 			f.lead = i
 		}
 	}
-	f.name = newPromptArea("api-v2")
+	f.name = newPromptArea("e.g. api-v2")
 	f.folder = newPromptArea("folder")
 	f.goal = newPromptArea("what the team is for, and who owns what")
 	f.members = []teamRow{newTeamRow("claude")}
@@ -934,8 +934,13 @@ func (m Model) teamFormLines(w, h int) []string {
 		}
 		return "  "
 	}
+	labelW := 0
+	for _, label := range []string{"template", "name", "folder", "work", "lead", "goal"} {
+		labelW = max(labelW, len(label))
+	}
+	labelW++ // a space, so a value never touches its label
 	single := func(i int, name, value string) string {
-		return mark(i) + sDim.Render(fmt.Sprintf("%-8s", name)) + value
+		return mark(i) + sDim.Render(fmt.Sprintf("%-*s", labelW, name)) + value
 	}
 	leadLine := choices(f.leads, f.lead, func(t string) lipgloss.Style { return toolStyle(t) })
 	if f.leads[f.lead] == "none" {
@@ -948,27 +953,37 @@ func (m Model) teamFormLines(w, h int) []string {
 	nameRows := fieldRows(f.name, 3)
 	folderRows := fieldRows(f.folder, 3)
 	role, tool, model, _ := memberWidths(w)
+	numberW := len(fmt.Sprintf("%d", len(f.members)))
 	out := []string{sBold.Render("New team"), "",
 		single(tfTemplate, "template", f.templateLine()),
 	}
-	out = append(out, fieldLines(mark(tfName), "name", f.name, 8, w, nameRows)...)
-	out = append(out, fieldLines(mark(tfFolder), "folder", f.folder, 8, w, folderRows)...)
+	out = append(out, fieldLines(mark(tfName), "name", f.name, labelW, w, nameRows)...)
+	out = append(out, fieldLines(mark(tfFolder), "folder", f.folder, labelW, w, folderRows)...)
 	out = append(out, single(tfWork, "work", f.workLine()), single(tfLead, "lead", leadLine),
-		"  "+sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"))
+		strings.Repeat(" ", 2+numberW+1)+
+			sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"))
+	help := []string{}
+	if row, cell, ok := f.rowOf(f.field); ok && cell == memberModel {
+		help = f.modelHelp(row, w)
+	} else {
+		for _, text := range []string{
+			"+ adds a member row, ctrl+d removes the focused one; roles and tools are required.",
+			"each member opens in its own tmux window with a brief; they report to the channel.",
+		} {
+			for _, line := range strings.Split(ansi.Wrap(text, max(10, w), ""), "\n") {
+				help = append(help, sDim.Render(line))
+			}
+		}
+	}
 	// The member rows take what is left above the goal and the help.
-	after := 1 + goalLines + 1 + 2
+	after := 1 + goalLines + 1 + len(help)
 	room := max(1, h-len(out)-after)
 	start, end := f.memberWindow(room, w)
 	for i := start; i < end; i++ {
 		out = append(out, f.memberLines(i, w)...)
 	}
 	out = append(out, "")
-	out = append(out, fieldLines(mark(f.goalField()), "goal", f.goal, 8, w, goalLines)...)
-	help := []string{sDim.Render("+ adds a member row, ctrl+d removes the focused one; roles and tools are required."),
-		sDim.Render("each member opens in its own tmux window with a brief; they report to the channel.")}
-	if row, cell, ok := f.rowOf(f.field); ok && cell == memberModel {
-		help = f.modelHelp(row, w)
-	}
+	out = append(out, fieldLines(mark(f.goalField()), "goal", f.goal, labelW, w, goalLines)...)
 	out = append(append(out, ""), help...)
 	return fit(out, w, h)
 }
@@ -1019,6 +1034,24 @@ func teamGlyph(n *tree.Node) (string, lipgloss.Style) {
 	return "⬡", lipgloss.NewStyle().Foreground(cRunning)
 }
 
+// allDone says a team has tasks, every one is done, and no member runs: it is
+// ready for hive team done but hasn't been closed.
+func (m Model) allDone(t store.Team) bool {
+	tasks := m.tasks(t.ID)
+	if len(tasks) == 0 {
+		return false
+	}
+	if c := team.Count(tasks); c.Done != c.Total {
+		return false
+	}
+	for _, mem := range m.members(t.ID) {
+		if s, ok := m.memberSession(mem); ok && s.Live() {
+			return false
+		}
+	}
+	return true
+}
+
 // teamRowLine draws a team node: fold mark, name, goal, how many members
 // and unread posts, age.
 func (m Model) teamRowLine(r row, w int, sel bool) string {
@@ -1038,7 +1071,9 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	}
 	g, gs := teamGlyph(n)
 	right := fmt.Sprintf("%d members", len(m.members(t.ID)))
-	if tasks := m.taskCount(t.ID); tasks != "" {
+	if m.allDone(t) {
+		right += " · all done · hive team done?"
+	} else if tasks := m.taskCount(t.ID); tasks != "" {
 		right += " · " + tasks
 	}
 	if _, trashed := m.trashedTeamByID(t.ID); trashed {
