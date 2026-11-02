@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -41,7 +42,8 @@ func newTeamCmd() *cobra.Command {
 	cmd.AddCommand(newTeamNewCmd(), newTeamLsCmd(), newTeamBoardCmd(), newTeamSayCmd(), newTeamPostCmd(),
 		newTeamLogCmd(), newTeamInboxCmd(), newTeamAddCmd(), newTeamRmCmd(), newTeamStopCmd(),
 		newTeamPauseCmd(true), newTeamPauseCmd(false), newTeamLeadCmd(), newTeamDeliverCmd(), newTeamDoneCmd())
-	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd(), newTeamMuteCmd(true), newTeamMuteCmd(false))
+	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd(), newTeamMuteCmd(true), newTeamMuteCmd(false),
+		newTeamReportCmd(), newTeamSaveCmd())
 	cmd.PersistentPostRun = func(cmd *cobra.Command, args []string) { noteWaiting(cmd) }
 	return cmd
 }
@@ -328,7 +330,8 @@ func newTeamNewCmd() *cobra.Command {
 			if wait {
 				waitLaunched(cmd.Context(), e, tm, launched, before, timeout)
 			}
-			printLaunched(tm, launched)
+			all, _ := e.st.All()
+			printLaunched(tm, launched, shortIDs(all))
 			return nil
 		},
 	}
@@ -443,7 +446,7 @@ func waitLaunched(ctx context.Context, e *teamEnv, tm store.Team, launched []tra
 	}
 }
 
-func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
+func printLaunched(tm store.Team, launched []tracker.MemberLaunch, ids map[string]string) {
 	started := 0
 	for _, l := range launched {
 		if l.Err == nil {
@@ -459,23 +462,24 @@ func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
 		case l.Err != nil:
 			note = "failed: " + l.Err.Error()
 		case l.Launched.Choice != nil:
-			note = fmt.Sprintf("%s  pane %s  picked %s", orID(l.Launched.SessionID), l.Launched.Pane, l.Launched.Choice.Reason)
+			picked := append([]string{l.Launched.Choice.Reason}, l.Launched.Choice.Notes...)
+			note = fmt.Sprintf("%s  pane %s  picked %s", orID(ids, l.Launched.SessionID), l.Launched.Pane, strings.Join(picked, "; "))
 		case l.Launched.Pane == "":
-			note = orID(l.Launched.SessionID)
+			note = orID(ids, l.Launched.SessionID)
 		case l.Launched.SessionID == "":
 			note = fmt.Sprintf("pane %s  reports in with its first event", l.Launched.Pane)
 		default:
-			note = fmt.Sprintf("%s  pane %s", l.Launched.SessionID, l.Launched.Pane)
+			note = fmt.Sprintf("%s  pane %s", shortID(ids, l.Launched.SessionID), l.Launched.Pane)
 		}
 		fmt.Printf("  %-9s %-8s %s\n", m.Role, m.Tool, note)
 	}
 }
 
-func orID(id string) string {
+func orID(ids map[string]string, id string) string {
 	if id == "" {
 		return "starting"
 	}
-	return id
+	return shortID(ids, id)
 }
 
 func newTeamLsCmd() *cobra.Command {
@@ -592,16 +596,37 @@ func newTeamBoardCmd() *cobra.Command {
 				rows = append(rows, memberRow{m, e.tr.MemberState(m, s, ok), counts[m.Role], m.Role == tm.LeadRole})
 			}
 			worktrees := teamWorktrees(e.tr, tm)
+			filesDir, fileCount, err := teamFiles(tm)
+			if err != nil {
+				return err
+			}
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
+				// The section flags keep the JSON to the sections they name.
+				switch {
+				case tasksOnly && channelOnly:
+					return enc.Encode(struct {
+						Tasks    []taskRow       `json:"tasks"`
+						Messages []store.Message `json:"messages"`
+					}{taskRows(tasks), msgs})
+				case tasksOnly:
+					return enc.Encode(struct {
+						Tasks []taskRow `json:"tasks"`
+					}{taskRows(tasks)})
+				case channelOnly:
+					return enc.Encode(struct {
+						Messages []store.Message `json:"messages"`
+					}{msgs})
+				}
 				return enc.Encode(struct {
 					store.Team
 					Members   []memberRow     `json:"members"`
 					Tasks     []taskRow       `json:"tasks"`
 					Messages  []store.Message `json:"messages"`
+					FilesDir  string          `json:"files_dir"`
 					Worktrees *worktreeBoard  `json:"worktrees,omitempty"`
-				}{tm, rows, taskRows(tasks), msgs, worktrees})
+				}{tm, rows, taskRows(tasks), msgs, filesDir, worktrees})
 			}
 			width := boardWidth()
 			if tasksOnly || channelOnly {
@@ -625,6 +650,7 @@ func newTeamBoardCmd() *cobra.Command {
 			if tm.Goal != "" {
 				fmt.Printf("goal: %s\n", team.Clean(tm.Goal))
 			}
+			fmt.Printf("files: %s · %d files\n", filesDir, fileCount)
 			fmt.Println("\nmembers")
 			color := useColor()
 			for _, m := range rows {
@@ -642,9 +668,9 @@ func newTeamBoardCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the team, its members, its tasks and the latest messages")
-	cmd.Flags().BoolVar(&tasksOnly, "tasks", false, "print only the task list")
-	cmd.Flags().BoolVar(&channelOnly, "channel", false, "print only the channel lines")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the board; with --tasks or --channel, only those sections")
+	cmd.Flags().BoolVar(&tasksOnly, "tasks", false, "print only the task list (JSON: only tasks)")
+	cmd.Flags().BoolVar(&channelOnly, "channel", false, "print only the channel lines (JSON: only messages)")
 	cmd.Flags().IntVarP(&n, "lines", "n", 12, "how many channel messages")
 	return cmd
 }
@@ -889,7 +915,8 @@ func newTeamAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printLaunched(tm, []tracker.MemberLaunch{{Member: m, Launched: l}})
+			all, _ := e.st.All()
+			printLaunched(tm, []tracker.MemberLaunch{{Member: m, Launched: l}}, shortIDs(all))
 			return nil
 		},
 	}
@@ -1107,4 +1134,148 @@ func boardWidth() int {
 // oneLine turns a member's part into the one line the board shows.
 func oneLine(text string) string {
 	return strings.TrimSpace(strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ").Replace(team.Clean(text)))
+}
+
+// teamFiles makes sure a team has its shared files folder, and counts the
+// files in it.
+func teamFiles(tm store.Team) (string, int, error) {
+	dir := paths.TeamFilesDir(tm.Name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", 0, err
+	}
+	n := 0
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path != dir && !d.IsDir() {
+			n++
+		}
+		return nil
+	})
+	return dir, n, err
+}
+
+func newTeamReportCmd() *cobra.Command {
+	var ref, out string
+	cmd := &cobra.Command{
+		Use:   "report [team]",
+		Short: "Write the team's goal, members, tasks and posts as Markdown",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openTeamEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			tm, err := e.team(first(args))
+			if err != nil {
+				return err
+			}
+			text, err := teamReport(e.st, e.tr, tm)
+			if err != nil {
+				return err
+			}
+			if out == "" {
+				fmt.Print(text)
+				return nil
+			}
+			path := out
+			if out == "team" {
+				dir, _, err := teamFiles(tm)
+				if err != nil {
+					return err
+				}
+				path = filepath.Join(dir, "report.md")
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+				return err
+			}
+			fmt.Println(path)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&ref, "team", "", "the team (default: the caller's)")
+	cmd.Flags().StringVar(&out, "out", "", "write to this file instead of stdout; team writes $HIVE_TEAM_DIR/report.md")
+	return cmd
+}
+
+// teamReport words a team's work as Markdown: the goal whole, its members,
+// every task with its note, and every member's channel posts.
+func teamReport(st *store.Store, tr *tracker.Tracker, tm store.Team) (string, error) {
+	members, err := st.Members(tm.ID)
+	if err != nil {
+		return "", err
+	}
+	tasks, err := st.Tasks(tm.ID)
+	if err != nil {
+		return "", err
+	}
+	msgs, err := st.Messages(tm.ID, 1<<30, false)
+	if err != nil {
+		return "", err
+	}
+	usages, err := tr.AllUsage()
+	if err != nil {
+		return "", err
+	}
+	status := tm.Status
+	if tm.Paused {
+		status += ", paused"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s · %s\n\n", tm.Name, status)
+	fmt.Fprintf(&b, "goal: %s\n\n", tm.Goal)
+	b.WriteString("## Members\n\n")
+	for _, m := range members {
+		if !m.Active() {
+			continue
+		}
+		s, ok, err := st.Get(m.SessionID)
+		if err != nil {
+			return "", err
+		}
+		what := m.Tool
+		if m.Model != "" {
+			what += ":" + m.Model
+		}
+		cost := ""
+		if u, known := usages[m.SessionID]; known {
+			if text := costText(u); text != "" {
+				cost = " · " + text
+			}
+		}
+		fmt.Fprintf(&b, "- %s · %s · %s%s\n", m.Role, what, tr.MemberState(m, s, ok), cost)
+	}
+	b.WriteString("\n## Tasks\n\n")
+	for _, t := range tasks {
+		owner := t.Owner
+		if owner == "" {
+			owner = "unowned"
+		}
+		fmt.Fprintf(&b, "- #%d %s · %s · %s\n", t.N, t.Title, owner, t.Status)
+		switch t.Status {
+		case store.TaskDone:
+			if t.Note != "" {
+				fmt.Fprintf(&b, "  note: %s\n", t.Note)
+			}
+		case store.TaskBlocked:
+			fmt.Fprintf(&b, "  blocked: %s\n", t.Note)
+		}
+	}
+	roles := map[string]bool{}
+	for _, m := range members {
+		roles[m.Role] = true
+	}
+	b.WriteString("\n## Posts\n\n")
+	for _, m := range msgs {
+		if m.Kind != store.MsgPost || !roles[m.From] {
+			continue
+		}
+		fmt.Fprintf(&b, "- %s %s: %s\n", time.UnixMilli(m.At).Format("15:04"), m.From, m.Body)
+	}
+	return b.String(), nil
 }

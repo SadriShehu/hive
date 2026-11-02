@@ -33,6 +33,7 @@ type fakeOps struct {
 	restored []string
 	purged   []string
 	copied   []string
+	popups   []string
 
 	usages      map[string]store.Usage
 	usagesAsked int
@@ -90,7 +91,11 @@ func (f *fakeOps) Purge(s store.Session) (tracker.Purged, error) {
 	f.purged = append(f.purged, s.ID)
 	return tracker.Purged{Sessions: append([]store.Session{s}, under(f.trash, s.ID)...)}, nil
 }
-func (f *fakeOps) Copy(text string) error  { f.copied = append(f.copied, text); return nil }
+func (f *fakeOps) Copy(text string) error { f.copied = append(f.copied, text); return nil }
+func (f *fakeOps) Popup(command string) error {
+	f.popups = append(f.popups, command)
+	return nil
+}
 func (f *fakeOps) Tools() []string         { return []string{"claude", "opencode"} }
 func (f *fakeOps) Fusion() fusion.Settings { return f.fusion }
 func (f *fakeOps) Models(tool string) ([]string, error) {

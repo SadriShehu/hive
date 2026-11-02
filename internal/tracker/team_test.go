@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sadrishehu/hive/internal/agent"
+	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tmux"
@@ -815,5 +818,101 @@ func TestRefreshKeepsPanesWhenItCannotSeeTmux(t *testing.T) {
 	frontend := memberNamed(t, tr, tm, "frontend")
 	if frontend.Pane != "%3" || frontend.PanePID != 300 {
 		t.Fatalf("an empty pane list forgot the member's pane: %+v", frontend)
+	}
+}
+
+func TestTeamStartMakesTheSharedFilesFolderAndTellsEachMember(t *testing.T) {
+	tr, _ := newWorld(t)
+	// A stand-in claude, so the members start on a machine without one (CI).
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var windows []tmux.Window
+	tr.StartWindow = func(w tmux.Window) (tmux.Pane, error) {
+		windows = append(windows, w)
+		return tmux.Pane{ID: "%9", PID: 999}, nil
+	}
+	_, launched, err := tr.NewTeam(context.Background(), TeamOptions{
+		Name: "api", Cwd: t.TempDir(), Lead: &team.Spec{Tool: "claude"},
+		Members: []team.Spec{{Role: "backend", Tool: "claude"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(launched) != 2 || len(windows) != 2 {
+		t.Fatalf("launched %d members in %d windows, want two", len(launched), len(windows))
+	}
+	dir := paths.TeamFilesDir("api")
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("shared folder = %v, want a directory", err)
+	}
+	for _, w := range windows {
+		if got := w.Env[team.DirEnv]; got != dir {
+			t.Errorf("window env %s = %q, want %q", team.DirEnv, got, dir)
+		}
+		prompt := strings.Join(w.Argv, " ")
+		if want := "Shared files: `$HIVE_TEAM_DIR` (" + dir + ")"; !strings.Contains(prompt, want) {
+			t.Errorf("brief lacks %q: %s", want, prompt)
+		}
+	}
+}
+
+func TestTrashKeepsTheTeamsFilesAndPurgeRemovesOnlyItsFolder(t *testing.T) {
+	tr, w, _ := newTeamWorld(t)
+	var purged []string
+	for i, a := range tr.Adapters {
+		tr.Adapters[i] = &fakePurger{Adapter: a, purged: &purged}
+	}
+	backendUp(t, tr, w)
+	tm := theTeam(t, tr)
+
+	dir := paths.TeamFilesDir("api")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "draft.md"), []byte("a draft"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sibling := paths.TeamFilesDir("keep")
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sibling, "keep.md"), []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	delete(w.procs, 100)
+	w.now = 2_000
+	if _, err := tr.TrashTeam(tm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("trashing removed the shared folder: %v", err)
+	}
+	if _, err := tr.PurgeTeam(context.Background(), tm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(paths.TeamDir("api")); !os.IsNotExist(err) {
+		t.Fatalf("purge left the team folder: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sibling, "keep.md")); err != nil {
+		t.Fatalf("purge removed another team's folder: %v", err)
+	}
+}
+
+func TestRemoveTeamDirRefusesOutsideTheTeamsFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HIVE_HOME", home)
+	outside := filepath.Join(home, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeTeamDir(store.Team{Name: "../outside"}); err == nil {
+		t.Fatal("removed a folder outside the teams folder")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("the guard removed %s: %v", outside, err)
 	}
 }

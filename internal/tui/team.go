@@ -230,6 +230,8 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}, true
 	case "c", "r", "u":
 		m.setFlash("pick a member of "+tm.Name+" for that", true)
+	case "D":
+		m.setFlash("pick a member for its changes", true)
 	case "y":
 		name := tm.Name
 		return m, func() tea.Msg { return doneMsg{text: "copied " + name, err: ops.Copy(name)} }, true
@@ -1096,15 +1098,36 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 		right += fmt.Sprintf(" · %d new", u)
 	}
 	when := age(m.now(), n.Last)
+	query, plain := m.filterMatch()
+	field := ""
+	if plain {
+		field = matchesTeam(t, query)
+	}
+	markStyle := sAccent
+	if sel {
+		markStyle = markStyle.Background(cSelect)
+	}
 	sp := on(lipgloss.NewStyle()).Render(" ")
 	lead := ansi.StringWidth(r.prefix) + 2 + 1 + 1
 	tail := 1 + ansi.StringWidth(right) + 1 + 4
 	avail := max(1, w-lead-tail)
 	name := ansi.Truncate(t.Name, avail, "…")
 	goalW := avail - ansi.StringWidth(name) - 2
-	line := on(sDim).Render(r.prefix+fold) + on(gs).Render(g) + sp + on(nameStyle).Render(name)
+	line := on(sDim).Render(r.prefix+fold) + on(gs).Render(g) + sp
+	if field == "name" {
+		line += highlightMatch(name, query, on(nameStyle), markStyle)
+	} else {
+		line += on(nameStyle).Render(name)
+	}
 	if goalW >= 6 && t.Goal != "" {
-		line += on(sDim).Render("  " + pad(ansi.Truncate(cleanLine(t.Goal), goalW, "…"), goalW))
+		goal := ansi.Truncate(cleanLine(t.Goal), goalW, "…")
+		line += on(sDim).Render("  ")
+		if field == "goal" {
+			line += highlightMatch(goal, query, on(sDim), markStyle)
+		} else {
+			line += on(sDim).Render(goal)
+		}
+		line += on(lipgloss.NewStyle()).Render(strings.Repeat(" ", max(0, goalW-ansi.StringWidth(goal))))
 	} else {
 		line += on(sDim).Render(strings.Repeat(" ", max(0, avail-ansi.StringWidth(name)+0)))
 	}
@@ -1231,6 +1254,7 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	for _, mem := range members {
 		roleW = max(roleW, ansi.StringWidth(cleanLine(mem.Role)))
 	}
+	under, shared, branchErr := m.memberBranches(t, max(1, w-2))
 	tools := map[string]bool{}
 	for _, mem := range members {
 		s, ok := m.memberSession(mem)
@@ -1252,7 +1276,16 @@ func (m Model) teamHead(t store.Team, w int) []string {
 		// The part is long text: it stays on the board and the member's own
 		// preview, while the head shows the task the member holds.
 		head = append(head, memberHeadLine(line, model, context, m.heldTitle(t.ID, mem.Role), w))
+		if b := under[mem.Role]; b != "" {
+			head = append(head, "  "+b)
+		}
 		tools[mem.Tool] = true
+	}
+	switch {
+	case branchErr != "":
+		head = append(head, "  "+branchErr)
+	case shared != "":
+		head = append(head, "  "+shared)
 	}
 	// Rate limits are the account's, not one member's: show them once per tool.
 	for _, tool := range sortedKeys(tools) {
@@ -1374,8 +1407,12 @@ func (m Model) feedLines(t store.Team, w int) []string {
 	for _, msg := range msgs {
 		whoW = max(whoW, ansi.StringWidth(who(msg)))
 	}
-	whoW = min(whoW, max(8, w/3))
+	whoW = min(whoW, 16)
 	prefixW := 6 + whoW + 1
+	indent := prefixW
+	if w < 100 {
+		indent = 6 // continuation lines start under the name, after the time
+	}
 	tools := map[string]string{}
 	for _, mem := range m.members(t.ID) {
 		tools[mem.Role] = mem.Tool
@@ -1398,7 +1435,7 @@ func (m Model) feedLines(t store.Team, w int) []string {
 				out = append(out, sDim.Render(time.UnixMilli(msg.At).Format("15:04"))+" "+
 					nameStyle.Render(pad(name, whoW))+" "+bodyStyle.Render(l))
 			} else {
-				out = append(out, strings.Repeat(" ", prefixW)+bodyStyle.Render(l))
+				out = append(out, strings.Repeat(" ", indent)+bodyStyle.Render(l))
 			}
 		}
 		if msg.Kind != store.MsgSay {
@@ -1409,7 +1446,7 @@ func (m Model) feedLines(t store.Team, w int) []string {
 			if ansi.StringWidth(out[last])+ansi.StringWidth(suffix) <= w {
 				out[last] += sDim.Render(suffix)
 			} else {
-				out = append(out, strings.Repeat(" ", prefixW)+sDim.Render(suffix))
+				out = append(out, strings.Repeat(" ", indent)+sDim.Render(suffix))
 			}
 		}
 	}
@@ -1458,12 +1495,16 @@ func (m Model) teamHints() ([]string, bool) {
 	}
 	hints = append(hints,
 		keys("s", "message"),
+		keys("D", "changes"),
 		keys("p", "pause"),
 		keys("L", "lead"),
 		keys("r", "reopen"),
 		keys("x", "stop"),
 		keys("T", "new team"),
 	)
+	if m.showChanges {
+		hints = append([]string{keys("v", "full diff")}, hints...)
+	}
 	return hints, true
 }
 

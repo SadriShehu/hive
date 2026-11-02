@@ -234,6 +234,19 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
+// OpenRead opens the database at path without creating it or migrating it.
+// It is for callers that must not write, like shell completion.
+func OpenRead(path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
 func retryBusy(f func() error) error {
 	var err error
 	for range 100 {

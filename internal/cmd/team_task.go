@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/spf13/cobra"
 
 	"github.com/sadrishehu/hive/internal/store"
@@ -76,16 +78,47 @@ func newTeamTaskCmd() *cobra.Command {
 }
 
 func newTaskAddCmd(f *taskFlags) *cobra.Command {
-	var body, owner, after string
+	var body, owner, after, file string
+	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "add <title...>",
-		Short: "Add a task; its owner is told when it is ready",
+		Use:   "add [title...]",
+		Short: "Add a task, or a whole plan with --file; owners are told when ready",
 		Long: "Put a task on the board and print its number. --owner gives it to a role, which hive tells\n" +
 			"when the task is ready: at once, or when every task in --after is done. --body - reads\n" +
-			"the details from stdin.",
-		Example: "  hive team task add \"handlers for /admin/users\" --owner backend --after 1,2",
-		Args:    cobra.MinimumNArgs(1),
+			"the details from stdin.\n\n" +
+			"--file adds a whole plan in one call, from a TOML file of [[task]] tables (- reads\n" +
+			"stdin): ref, title, owner, body and after. A task waits for earlier refs in the file or\n" +
+			"numbers already on the board. hive checks the whole plan before adding any of it, and\n" +
+			"tells owners only once every task is in. --dry-run with --file checks it and prints the\n" +
+			"tasks it would add, with the numbers they would get.",
+		Example: "  hive team task add \"handlers for /admin/users\" --owner backend --after 1,2\n" +
+			"  hive team task add --file plan.toml --dry-run",
+		Args: func(cmd *cobra.Command, args []string) error {
+			switch {
+			case file != "" && len(args) > 0:
+				return errors.New("give a title or --file, not both")
+			case file != "":
+				return nil
+			case len(args) == 0:
+				return errors.New("hive team task add needs a title: hive team task add <title...>")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if file != "" {
+				if body != "" || owner != "" || after != "" {
+					return errors.New("--body, --owner and --after go on each task in --file")
+				}
+				e, tm, by, err := f.open()
+				if err != nil {
+					return err
+				}
+				defer e.st.Close()
+				return addTaskPlan(e, tm, by, file, dryRun, cmd.InOrStdin())
+			}
+			if dryRun {
+				return errors.New("--dry-run is for --file")
+			}
 			waits, err := team.ParseAfter(after)
 			if err != nil {
 				return err
@@ -117,7 +150,245 @@ func newTaskAddCmd(f *taskFlags) *cobra.Command {
 	cmd.Flags().StringVar(&body, "body", "", "the details; - reads them from stdin")
 	cmd.Flags().StringVar(&owner, "owner", "", "the role that does it")
 	cmd.Flags().StringVar(&after, "after", "", "the tasks it waits for: 1,2")
+	cmd.Flags().StringVar(&file, "file", "", "a TOML plan of [[task]] tables; - reads stdin")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "check a --file plan and print what it would add, adding none")
 	return cmd
+}
+
+// taskPlan is a [[task]] plan for `hive team task add --file`.
+type taskPlan struct {
+	Task []planTask `toml:"task"`
+}
+
+// planTask is one task in a plan. After names earlier refs in the file or
+// numbers already on the board.
+type planTask struct {
+	Ref   string `toml:"ref"`
+	Title string `toml:"title"`
+	Owner string `toml:"owner"`
+	Body  string `toml:"body"`
+	After []any  `toml:"after"`
+}
+
+// readTaskPlan reads and decodes a plan, and reports the keys it doesn't know.
+func readTaskPlan(path string, stdin io.Reader) (taskPlan, []string, error) {
+	var data []byte
+	var err error
+	if path == "-" {
+		data, err = io.ReadAll(stdin)
+	} else {
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return taskPlan{}, nil, err
+	}
+	var plan taskPlan
+	md, err := toml.Decode(string(data), &plan)
+	if err != nil {
+		return taskPlan{}, nil, fmt.Errorf("%s: %w", path, err)
+	}
+	var raw map[string]any
+	_, _ = toml.Decode(string(data), &raw) // the typed decode already succeeded
+	return plan, unknownPlanKeys(plan, raw, md), nil
+}
+
+// unknownPlanKeys words the keys the plan doesn't know. toml names a key in a
+// [[task]] table without its index, so the raw decode places it in the task
+// that has it.
+func unknownPlanKeys(plan taskPlan, raw map[string]any, md toml.MetaData) []string {
+	tasks, _ := raw["task"].([]map[string]any)
+	var problems []string
+	for _, key := range md.Undecoded() {
+		if len(key) >= 2 && key[0] == "task" {
+			name := key[len(key)-1]
+			found := false
+			for i, t := range tasks {
+				if _, ok := t[name]; !ok {
+					continue
+				}
+				found = true
+				title := ""
+				if i < len(plan.Task) {
+					title = plan.Task[i].Title
+				}
+				problems = append(problems, fmt.Sprintf("task %d %q: unknown key %q", i+1, oneLine(title), name))
+			}
+			if found {
+				continue
+			}
+		}
+		problems = append(problems, fmt.Sprintf("unknown key %q", key.String()))
+	}
+	return problems
+}
+
+// planProblems checks a whole plan against the board's members and tasks,
+// naming every problem with its task's place in the file.
+func planProblems(plan taskPlan, members []store.Member, tasks []store.Task) []string {
+	if len(plan.Task) == 0 {
+		return []string{"the file has no [[task]]"}
+	}
+	var problems []string
+	refAt := map[string]int{}
+	for i, t := range plan.Task {
+		ref := strings.TrimSpace(t.Ref)
+		if ref == "" {
+			continue
+		}
+		if j, ok := refAt[ref]; ok {
+			problems = append(problems, fmt.Sprintf("task %d %q: ref %q is already used by task %d", i+1, oneLine(t.Title), ref, j+1))
+			continue
+		}
+		refAt[ref] = i
+	}
+	onBoard := map[int]bool{}
+	for _, t := range tasks {
+		onBoard[t.N] = true
+	}
+	roles := team.Roles(members)
+	for i, t := range plan.Task {
+		label := fmt.Sprintf("task %d %q", i+1, oneLine(t.Title))
+		if strings.TrimSpace(t.Title) == "" {
+			problems = append(problems, label+": a task needs a title")
+		}
+		owner := strings.TrimPrefix(strings.TrimSpace(t.Owner), "@")
+		if owner != "" && !onTeamRole(members, owner) {
+			problems = append(problems, fmt.Sprintf("%s: owner %q is not on the team (roles: %s)", label, owner, roles))
+		}
+		for _, a := range t.After {
+			s := planAfterText(a)
+			if n, ok := planNumber(s); ok {
+				if !onBoard[n] {
+					problems = append(problems, fmt.Sprintf("%s: waits for #%d, which is not on the board", label, n))
+				}
+				continue
+			}
+			j, ok := refAt[s]
+			switch {
+			case ok && j >= i:
+				problems = append(problems, fmt.Sprintf("%s: waits for %q, which is not an earlier task in the file", label, s))
+			case !ok:
+				problems = append(problems, fmt.Sprintf("%s: waits for %q, which is not an earlier ref or a task on the board", label, s))
+			}
+		}
+	}
+	return problems
+}
+
+// addTaskPlan checks and adds a whole plan, in file order, resolving refs to
+// the numbers the tasks just got. It tells owners only after every task is in.
+func addTaskPlan(e *teamEnv, tm store.Team, by, file string, dryRun bool, stdin io.Reader) error {
+	plan, problems, err := readTaskPlan(file, stdin)
+	if err != nil {
+		return err
+	}
+	members, err := e.st.Members(tm.ID)
+	if err != nil {
+		return err
+	}
+	tasks, err := e.st.Tasks(tm.ID)
+	if err != nil {
+		return err
+	}
+	problems = append(problems, planProblems(plan, members, tasks)...)
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "\n"))
+	}
+	next := 1
+	for _, t := range tasks {
+		next = max(next, t.N+1)
+	}
+	refs := map[string]int{}
+	added := make([]store.Task, 0, len(plan.Task))
+	for _, pt := range plan.Task {
+		waits := make([]int, 0, len(pt.After))
+		for _, a := range pt.After {
+			s := planAfterText(a)
+			if n, ok := planNumber(s); ok {
+				waits = append(waits, n)
+				continue
+			}
+			waits = append(waits, refs[s])
+		}
+		var task store.Task
+		if dryRun {
+			task = store.Task{TeamID: tm.ID, N: next, Title: strings.TrimSpace(team.Clean(pt.Title)),
+				Body: strings.TrimSpace(team.Clean(pt.Body)), Owner: strings.TrimPrefix(strings.TrimSpace(pt.Owner), "@"),
+				After: waits, Status: store.TaskOpen}
+			next++
+		} else {
+			task, err = e.tr.AddTaskQuiet(tm, by, pt.Title, pt.Body, pt.Owner, waits)
+			if err != nil {
+				return err
+			}
+		}
+		if ref := strings.TrimSpace(pt.Ref); ref != "" {
+			refs[ref] = task.N
+		}
+		added = append(added, task)
+	}
+	// Everything is in: now the owners can hear that their tasks are ready.
+	sent := make([][]tracker.Sent, len(added))
+	var notifyErr error
+	if !dryRun {
+		for i, task := range added {
+			s, err := e.tr.TellReady(tm, task, by)
+			if err != nil {
+				notifyErr = errors.Join(notifyErr, err)
+			}
+			sent[i] = s
+		}
+	}
+	all := append(tasks, added...)
+	if dryRun {
+		for _, task := range added {
+			fmt.Println(addWouldSaid(task, all))
+		}
+		fmt.Println("dry run: nothing was added")
+		return nil
+	}
+	for i, task := range added {
+		fmt.Println(addSaid(task, all, sent[i]))
+	}
+	return notifyErr
+}
+
+// addWouldSaid words what a dry run would do, so it can't be taken for a task
+// that was really added.
+func addWouldSaid(task store.Task, tasks []store.Task) string {
+	line := fmt.Sprintf("#%d would be added", task.N)
+	if task.Owner == "" {
+		return line + ", no owner"
+	}
+	line += " for " + task.Owner
+	if !team.Ready(task, tasks) {
+		return line + " · would wait for " + team.Numbers(team.Waiting(task, tasks))
+	}
+	return line
+}
+
+func planAfterText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+func planNumber(s string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(s), "#"))
+	return n, err == nil && n > 0
+}
+
+func onTeamRole(members []store.Member, role string) bool {
+	for _, m := range members {
+		if m.Active() && m.Role == role {
+			return true
+		}
+	}
+	return false
 }
 
 // addSaid words what happened to a new task on one line.
