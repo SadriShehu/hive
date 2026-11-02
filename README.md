@@ -472,7 +472,7 @@ tree, so a teammate can't paint your terminal.
 | `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
 | `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part, and both print both sections without the goal and roster) · the channel (all take `--json`; with `--tasks` or `--channel`, `--json` keeps only that key) |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
-| `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready |
+| `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` · `add --file plan.toml [--dry-run]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready. `--file` adds a whole plan of `[[task]]` tables in one call, checking all of it first |
 | `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `edit <n> [--title t] [--body b\|-] [--owner role] [--after n,…]` · `reopen <n> --why text` · `ls [n] [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task; `edit` changes only the flags you pass; `reopen` sends a done or blocked task back to open |
 | `hive team wait [--task n] [--from role] [--any] [--timeout d]` | block until a task is done or blocked, a message arrives, or (`--any`) the board changes; print what happened |
 | `hive team inbox [--wait] [--peek] [--timeout d]` | print the messages queued for this member, on every team it is on, and mark them delivered; `--peek` leaves them queued. Every other `hive team` command tells a member in one stderr line when mail waits for it: `✉ 3 messages wait for you (lead ×2, manager) · hive team inbox` |
@@ -480,6 +480,33 @@ tree, so a teammate can't paint your terminal.
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
 | `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail, members or tasks, and its tasks no longer move; `--clean` removes merged worktrees |
 | `hive team mute <team> <role>` · `unmute <team> <role>` | pause hive's delivery to one member · let it go on |
+
+**A plan in one file.** `hive team task add --file plan.toml` (`-` for stdin) adds a whole
+plan in one call. Each table takes a title, and optionally a ref that later tasks can name,
+an owner, a body, and the tasks it waits for: `after` names earlier refs in the file or
+numbers already on the board.
+
+```toml
+[[task]]
+ref   = "inventory"
+title = "List the features"
+owner = "manager"
+
+[[task]]
+title = "Write the report"
+owner = "manager"
+after = ["inventory"]
+
+[[task]]
+title = "Review it"
+owner = "lead"
+after = ["inventory", 3]
+```
+
+hive checks every task before adding any: a missing title, an unknown owner, a duplicate
+or later ref, a number that isn't on the board, or an unknown key prints each problem with
+its task's place and adds nothing. Owners are told only once the whole plan is in.
+`--dry-run` prints the tasks it would add, with the numbers they would get, and adds none.
 
 Inside a member the team and the role are implied; an agent on two teams names the one
 it means. A message is from the member's role, from `you` when you run the command

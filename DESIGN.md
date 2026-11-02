@@ -656,6 +656,14 @@ teammate can't paint the user's terminal.
   for each other in a ring. A task is open, claimed, done or blocked; its note says what
   done changed, or why it is blocked. A done team's board is closed: no task is added,
   claimed, edited, closed or blocked.
+- **A plan.** `add --file plan.toml` (`-` for stdin) adds a whole plan of `[[task]]`
+  tables in one call: each takes a title, an optional ref, owner, body and `after`, which
+  names earlier refs in the file or numbers on the board. hive checks the whole file first
+  (titles, owners on the team, refs, unknown keys) and adds nothing when any task is wrong;
+  then it adds in file order, resolving refs to the numbers they got, and tells owners only
+  after the last one is in. `AddTaskQuiet` inserts without the notice and `TellReady` gives
+  it afterwards, so one `add` can add many tasks. `--dry-run` prints the same lines with the
+  numbers they would get, and adds none.
 - **Claiming.** `claim <n>` makes a task the caller's. It is refused, with the reason,
   for a task that waits for one that isn't done (naming them), that is another member's
   or claimed by one, and on a paused or done team; `--force` overrides all but the pause,
