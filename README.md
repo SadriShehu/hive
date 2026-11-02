@@ -74,7 +74,8 @@ show as untracked, or are adopted as soon as they spawn another agent.
 Run `hive`. Inside tmux it opens in the current pane; outside tmux it attaches to a
 tmux session called `hive`, with the tree in its first window. With the popup key
 bound (`hive install tmux`), **prefix + a** opens the tree over whatever you're doing
-and closes once you jump somewhere. The header counts the agents that need you.
+and closes once you jump somewhere. Running `hive install tmux` again picks up the
+popup's new size. The header counts the agents that need you.
 
 ```
  hive  ● 3 live  ·  203 sessions                                           last 24h

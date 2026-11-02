@@ -27,7 +27,13 @@ func (m Model) bodyHeight() int {
 	return max(1, m.height-2-hints)
 }
 
-func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
+// previewMinWidth is the narrowest window that shows the preview beside the tree.
+const previewMinWidth = 100
+
+func (m Model) previewVisible() bool { return m.showPreview && m.width >= previewMinWidth }
+
+// previewNarrow says the preview is on but the window is too narrow to show it.
+func (m Model) previewNarrow() bool { return m.showPreview && m.width < previewMinWidth }
 
 func (m Model) usageTakesTheBody() bool {
 	return m.showUsage && m.showPreview && !m.previewVisible() &&
@@ -103,27 +109,27 @@ func (m Model) headerLine() string {
 			live++
 		}
 	}
-	left := sBadge.Render("hive") + "  " +
-		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live))
+	segs := []string{sBadge.Render("hive") + "  " +
+		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live))}
 	if n := len(tracker.NeedsYou(m.sessions)); n > 0 {
-		left += sDim.Render("  ·  ") + lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n))
+		segs = append(segs, lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n)))
 	}
-	left += sDim.Render(fmt.Sprintf("  ·  %d sessions", total))
+	segs = append(segs, sDim.Render(fmt.Sprintf("%d sessions", total)))
 	if n := m.teamCount(); n == 1 {
-		left += sDim.Render("  ·  ") + sAccent.Render("1 team")
+		segs = append(segs, sAccent.Render("1 team"))
 	} else if n > 1 {
-		left += sDim.Render("  ·  ") + sAccent.Render(fmt.Sprintf("%d teams", n))
+		segs = append(segs, sAccent.Render(fmt.Sprintf("%d teams", n)))
 	}
 	if len(m.snap.Trashed) > 0 {
-		left += sDim.Render("  ·  " + m.trashCount() + " in the trash")
+		segs = append(segs, sDim.Render(m.trashCount()+" in the trash"))
 	} else if len(m.trashed) > 0 {
-		left += sDim.Render(fmt.Sprintf("  ·  %d in the trash", len(m.trashed)))
+		segs = append(segs, sDim.Render(fmt.Sprintf("%d in the trash", len(m.trashed))))
 	}
 	scope := "last 24h"
 	switch {
 	case m.trash:
-		left = sBadge.Render("hive") + "  " + sText.Render("trash") +
-			sDim.Render("  ·  "+m.trashCount()+", deleted from hive; their tools still have them")
+		segs = []string{sBadge.Render("hive") + "  " + sText.Render("trash") +
+			sDim.Render("  ·  "+m.trashCount()+", deleted from hive; their tools still have them")}
 		scope = "t goes back"
 	case m.showAll:
 		scope = "all history"
@@ -146,12 +152,23 @@ func (m Model) headerLine() string {
 		scope = "syncing… · " + scope
 	}
 	right := sDim.Render(scope)
-	if total, estimate := m.costInView(); total > 0 {
+	if cost, estimate := m.costInView(); cost > 0 && !m.previewNarrow() {
 		mark := ""
 		if estimate {
 			mark = "~"
 		}
-		right += sDim.Render(" · ") + sText.Render(mark+human.USD(total))
+		right += sDim.Render(" · ") + sText.Render(mark+human.USD(cost))
+	}
+	if m.previewNarrow() {
+		right += sDim.Render(fmt.Sprintf(" · preview needs %d cols", previewMinWidth))
+	}
+	sep := sDim.Render("  ·  ")
+	left := strings.Join(segs, sep)
+	if m.previewNarrow() {
+		for len(segs) > 1 && m.width-ansi.StringWidth(left)-ansi.StringWidth(right) < 1 {
+			segs = segs[:len(segs)-1]
+			left = strings.Join(segs, sep)
+		}
 	}
 	gap := m.width - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 1 {

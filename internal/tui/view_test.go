@@ -138,3 +138,27 @@ func TestChoicesLookTheSameWhenEverythingFits(t *testing.T) {
 		t.Fatalf("choices =\n%q\nwant\n%q", got, want)
 	}
 }
+
+func TestNarrowHeaderSaysWhyThePreviewIsHidden(t *testing.T) {
+	m, _ := setup(t, false)
+	m = step(t, m, tea.WindowSizeMsg{Width: 90, Height: 24})
+	head := ansi.Strip(m.headerLine())
+	if !strings.Contains(head, "preview needs 100 cols") {
+		t.Fatalf("narrow header lacks the preview note:\n%s", head)
+	}
+	if strings.Contains(head, "$") {
+		t.Errorf("narrow header kept the cost beside the preview note:\n%s", head)
+	}
+
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	head = ansi.Strip(m.headerLine())
+	if strings.Contains(head, "preview needs 100 cols") {
+		t.Errorf("wide header still says the preview is hidden:\n%s", head)
+	}
+
+	m = press(t, m, "tab") // hide the preview yourself
+	m = step(t, m, tea.WindowSizeMsg{Width: 90, Height: 24})
+	if head := ansi.Strip(m.headerLine()); strings.Contains(head, "preview needs 100 cols") {
+		t.Errorf("hidden preview still claims it needs cols:\n%s", head)
+	}
+}
