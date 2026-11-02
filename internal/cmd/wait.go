@@ -31,7 +31,7 @@ func newWaitCmd() *cobra.Command {
 			"for the reply, not for the turn before it.\n\n" +
 			"Sessions print as they get there; --any returns at the first. A session whose agent\n" +
 			"doesn't report its turns (untracked, or a tool without hooks) is waited on until it ends.",
-		Args: cobra.MinimumNArgs(1),
+		Args: someArgs("session", "<id>…", "hive ls lists them"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, tr, sessions, err := openTracker()
 			if err != nil {

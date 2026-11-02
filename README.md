@@ -187,7 +187,8 @@ ahead of use (Claude's daemon keeps spares ready for `claude --bg`) stay hidden 
 their first message, and the daemon's own processes are never taken for sessions.
 
 Every action in the tree is also a command, so an agent can start interactive
-children, talk to them and check on them:
+children, talk to them and check on them. `hive --help` groups them: Start here,
+Sessions, Teams, Housekeeping, and For tmux and hooks.
 
 ```sh
 hive new opencode -p "port the tests" --wait   # start it in its own tmux window; prints its ID

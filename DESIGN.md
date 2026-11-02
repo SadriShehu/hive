@@ -409,7 +409,8 @@ models the tool runs. `default` is the tool's default, as an empty model is.
 
 Every tree action is also a command, so agents can run agents of their own. A session is
 named by its full ID, the tool's own ID, or a unique prefix of either; a name hive hasn't
-seen yet triggers a history import and one retry.
+seen yet triggers a history import and one retry. `hive --help` groups the commands as
+Start here, Sessions, Teams, Housekeeping, and For tmux and hooks.
 
 | Command | What it does |
 | --- | --- |
