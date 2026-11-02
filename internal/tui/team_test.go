@@ -646,6 +646,69 @@ func TestNewTeamForm(t *testing.T) {
 	}
 }
 
+// The T form lines its labels up, wraps its explainer and shows the name
+// placeholder, so the form reads as a table rather than a run of text.
+func TestNewTeamFormLayout(t *testing.T) {
+	for _, w := range []int{80, 120} {
+		m, _ := setupTeam(t)
+		m = step(t, m, tea.WindowSizeMsg{Width: w, Height: 24})
+		m = press(t, m, "T")
+		plain := ansi.Strip(m.View())
+		if !strings.Contains(plain, "template ‹ none ›") {
+			t.Errorf("w=%d: the template label touches its value:\n%s", w, plain)
+		}
+		if !strings.Contains(plain, "e.g. api-v2") {
+			t.Errorf("w=%d: the name placeholder looks like a value:\n%s", w, plain)
+		}
+		header := ""
+		for _, line := range strings.Split(plain, "\n") {
+			if strings.Contains(line, "role") && strings.Contains(line, "tool") {
+				header = line
+				break
+			}
+		}
+		if !strings.Contains(header, "    role") {
+			t.Errorf("w=%d: the member header isn't over its values: %q", w, header)
+		}
+		joined := strings.Join(strings.Fields(plain), " ")
+		for _, want := range []string{"roles and tools are required.", "they report to the channel."} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("w=%d: the explainer is cut, missing %q:\n%s", w, want, plain)
+			}
+		}
+		if got := len(strings.Split(m.View(), "\n")); got != m.height {
+			t.Errorf("w=%d: view has %d lines, want %d", w, got, m.height)
+		}
+		m = press(t, m, "esc")
+		if m.mode != modeNormal {
+			t.Errorf("w=%d: esc left mode %v", w, m.mode)
+		}
+	}
+}
+
+// A team with every task done and no member running points at hive team done
+// where its row showed the task count.
+func TestATeamWithEveryTaskDoneSuggestsHiveTeamDone(t *testing.T) {
+	m, ops := setupTeam(t)
+	ops.snap.Tasks = []store.Task{{TeamID: "t1", N: 1, Title: "one", Status: store.TaskOpen}}
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "0/1 tasks") || strings.Contains(view, "all done") {
+		t.Errorf("an open task should show its count:\n%s", view)
+	}
+
+	m = stoppedTeam(t, m, ops)
+	ops.snap.Tasks[0].Status = store.TaskDone
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "all done · hive team done?") {
+		t.Errorf("a finished team doesn't suggest hive team done:\n%s", view)
+	}
+	if strings.Contains(view, "1/1 tasks") {
+		t.Errorf("the row still shows the task count:\n%s", view)
+	}
+}
+
 func TestTeamFormAddsAndRemovesMemberRows(t *testing.T) {
 	m, _ := setupTeam(t)
 	m = press(t, m, "T")
