@@ -823,6 +823,12 @@ func TestRefreshKeepsPanesWhenItCannotSeeTmux(t *testing.T) {
 
 func TestTeamStartMakesTheSharedFilesFolderAndTellsEachMember(t *testing.T) {
 	tr, _ := newWorld(t)
+	// A stand-in claude, so the members start on a machine without one (CI).
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var windows []tmux.Window
 	tr.StartWindow = func(w tmux.Window) (tmux.Pane, error) {
 		windows = append(windows, w)
