@@ -150,27 +150,40 @@ func TestAlerts(t *testing.T) {
 		cfg, err := LoadConfig(path)
 		return cfg.Alerts, err
 	}
+	same := func(a, b Alerts) bool {
+		return a.Tmux == b.Tmux && a.Desktop == b.Desktop && slices.Equal(a.Command, b.Command)
+	}
 	got, err := alerts(filepath.Join(t.TempDir(), "missing.toml"))
-	if err != nil || got != (Alerts{Tmux: true}) {
+	if err != nil || !same(got, Alerts{Tmux: true}) {
 		t.Fatalf("without config: %+v, %v; want the tmux message only", got, err)
 	}
 	got, err = alerts(writeConfig(t, "[alerts]\ndesktop = true\n"))
-	if err != nil || got != (Alerts{Tmux: true, Desktop: true}) {
+	if err != nil || !same(got, Alerts{Tmux: true, Desktop: true}) {
 		t.Fatalf("desktop on: %+v, %v", got, err)
 	}
 	got, err = alerts(writeConfig(t, "[alerts]\ntmux = false\n"))
-	if err != nil || got != (Alerts{}) {
+	if err != nil || !same(got, Alerts{}) {
 		t.Fatalf("tmux off: %+v, %v", got, err)
 	}
 	got, err = alerts(writeConfig(t, "[[agent]]\nname = \"aider\"\nnew = [\"aider\"]\n"))
-	if err != nil || got != (Alerts{Tmux: true}) {
+	if err != nil || !same(got, Alerts{Tmux: true}) {
 		t.Fatalf("a config without [alerts]: %+v, %v; want the defaults", got, err)
+	}
+	got, err = alerts(writeConfig(t, "[alerts]\ncommand = [\"ntfy\", \"pub\", \"my-topic\", \"{text}\"]\n"))
+	want := Alerts{Tmux: true, Command: []string{"ntfy", "pub", "my-topic", "{text}"}}
+	if err != nil || !same(got, want) {
+		t.Fatalf("command: %+v, %v; want %+v", got, err, want)
 	}
 
 	// A mistake anywhere leaves the defaults, and says what it is.
-	got, err = alerts(writeConfig(t, "[alerts]\nsound = true\n"))
-	if err == nil || got != (Alerts{Tmux: true}) {
-		t.Fatalf("unknown setting: %+v, %v", got, err)
+	for name, text := range map[string]string{
+		"unknown setting": "[alerts]\nsound = true\n",
+		"empty command":   "[alerts]\ncommand = [\"\"]\n",
+	} {
+		got, err = alerts(writeConfig(t, text))
+		if err == nil || !same(got, Alerts{Tmux: true}) {
+			t.Fatalf("%s: %+v, %v", name, got, err)
+		}
 	}
 	if _, err := Load(writeConfig(t, "[alerts]\ndesktop = true\n\n[[agent]]\nname = \"aider\"\nnew = [\"aider\"]\n")); err != nil {
 		t.Fatalf("alerts next to agents: %v", err)

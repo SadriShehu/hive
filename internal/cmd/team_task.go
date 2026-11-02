@@ -71,7 +71,7 @@ func newTeamTaskCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().StringVar(&f.team, "team", "", "the team (default: the caller's)")
 	cmd.PersistentFlags().StringVar(&f.as, "as", "", "act as this role: a script's, or one the running agent plays")
-	cmd.AddCommand(newTaskAddCmd(f), newTaskClaimCmd(f), newTaskDoneCmd(f), newTaskBlockCmd(f), newTaskLsCmd(f))
+	cmd.AddCommand(newTaskAddCmd(f), newTaskClaimCmd(f), newTaskDoneCmd(f), newTaskBlockCmd(f), newTaskEditCmd(f), newTaskReopenCmd(f), newTaskLsCmd(f))
 	return cmd
 }
 
@@ -106,8 +106,11 @@ func newTaskAddCmd(f *taskFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("#%d\n", task.N)
-			printSent(sent)
+			tasks, err := e.st.Tasks(tm.ID)
+			if err != nil {
+				return err
+			}
+			fmt.Println(addSaid(task, tasks, sent))
 			return nil
 		},
 	}
@@ -115,6 +118,48 @@ func newTaskAddCmd(f *taskFlags) *cobra.Command {
 	cmd.Flags().StringVar(&owner, "owner", "", "the role that does it")
 	cmd.Flags().StringVar(&after, "after", "", "the tasks it waits for: 1,2")
 	return cmd
+}
+
+// addSaid words what happened to a new task on one line.
+func addSaid(task store.Task, tasks []store.Task, sent []tracker.Sent) string {
+	line := fmt.Sprintf("#%d added", task.N)
+	if task.Owner == "" {
+		return line + ", no owner"
+	}
+	line += " for " + task.Owner
+	if !team.Ready(task, tasks) {
+		return line + " · waits for " + team.Numbers(team.Waiting(task, tasks))
+	}
+	for _, s := range sent {
+		if s.Role == task.Owner {
+			if said := toldWording(s.How); said != "" {
+				return line + " · " + said
+			}
+		}
+	}
+	return line
+}
+
+// toldWording turns what the tracker said about telling the owner into the
+// words `task add` prints.
+func toldWording(how string) string {
+	switch {
+	case how == "sent" || how == "reopened with your message":
+		return "told now"
+	case how == "queued; it hasn't reported in yet":
+		return "told when it reports in"
+	case how == "queued; the team is paused":
+		return "told when the team resumes"
+	case how == "queued; it is muted":
+		return "told when it is unmuted"
+	case how == "queued; it left the team":
+		return "not told; it left the team"
+	case strings.HasPrefix(how, "queued; it is "):
+		return "told when it is idle (" + strings.TrimPrefix(how, "queued; it is ") + " now)"
+	case how != "":
+		return "told when it can take it"
+	}
+	return ""
 }
 
 func newTaskClaimCmd(f *taskFlags) *cobra.Command {
@@ -223,12 +268,125 @@ func newTaskBlockCmd(f *taskFlags) *cobra.Command {
 	return cmd
 }
 
+func newTaskEditCmd(f *taskFlags) *cobra.Command {
+	var title, body, owner, after string
+	cmd := &cobra.Command{
+		Use:   "edit <n>",
+		Short: "Change a task's title, body, owner or the tasks it waits for",
+		Long: "Change a task, keeping its number and status. Only the flags you pass change: the rest keep\n" +
+			"the task's values. --after \"\" clears what it waits for, and --owner \"\" clears its owner.\n" +
+			"--body - reads the details from stdin. The owner must be on the team, and --after must name\n" +
+			"tasks on the board; a claimed task given another owner, or none, is open again.\n\n" +
+			"A concurrent change wins: the edit then loses, naming who moved the task.",
+		Example: "  hive team task edit 4 --owner frontend --after 1,2",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			n, err := team.ParseTask(args[0])
+			if err != nil {
+				return err
+			}
+			if body == "-" {
+				in, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					return err
+				}
+				body = string(in)
+			}
+			e, tm, _, err := f.open()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			task, err := e.st.Task(tm.ID, n)
+			if err != nil {
+				return err
+			}
+			task, err = editValues(task, map[string]bool{
+				"title": cmd.Flags().Changed("title"),
+				"body":  cmd.Flags().Changed("body"),
+				"owner": cmd.Flags().Changed("owner"),
+				"after": cmd.Flags().Changed("after"),
+			}, title, body, owner, after)
+			if err != nil {
+				return err
+			}
+			task, err = e.tr.EditTask(tm, n, task.Title, task.Body, task.Owner, task.After)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("#%d edited\n", task.N)
+			printTasks([]store.Task{task}, false, 0)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "the new title")
+	cmd.Flags().StringVar(&body, "body", "", "the new details; - reads them from stdin")
+	cmd.Flags().StringVar(&owner, "owner", "", "the new owner; \"\" clears it")
+	cmd.Flags().StringVar(&after, "after", "", "the tasks it now waits for: 1,2; \"\" clears them")
+	return cmd
+}
+
+func newTaskReopenCmd(f *taskFlags) *cobra.Command {
+	var why string
+	cmd := &cobra.Command{
+		Use:   "reopen <n>",
+		Short: "Send a done or blocked task back to open, and say why",
+		Long: "Send a done or blocked task back to open. Its owner stays, and its note becomes the why.\n" +
+			"hive posts it to the channel (to the lead, when an agent leads) and tells the owner it is\n" +
+			"theirs again. An open or claimed task isn't reopened: edit or block it instead.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			n, err := team.ParseTask(args[0])
+			if err != nil {
+				return err
+			}
+			e, tm, by, err := f.open()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			task, sent, err := e.tr.ReopenTask(tm, by, n, why)
+			if task.N == 0 {
+				return err
+			}
+			fmt.Printf("#%d reopened\n", task.N)
+			printSent(sent)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&why, "why", "", "why it goes back to open")
+	_ = cmd.MarkFlagRequired("why")
+	return cmd
+}
+
+// editValues changes only the fields the edit command was given: the rest
+// keep the task's values as they were read.
+func editValues(task store.Task, changed map[string]bool, title, body, owner, after string) (store.Task, error) {
+	if changed["title"] {
+		task.Title = title
+	}
+	if changed["body"] {
+		task.Body = body
+	}
+	if changed["owner"] {
+		task.Owner = owner
+	}
+	if changed["after"] {
+		waits, err := team.ParseAfter(after)
+		if err != nil {
+			return store.Task{}, err
+		}
+		task.After = waits
+	}
+	return task, nil
+}
+
 func newTaskLsCmd(f *taskFlags) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List the board's tasks, with their details",
-		Args:  cobra.NoArgs,
+		Use:   "ls [n]",
+		Short: "List the board's tasks, with their details; give a number for one",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, tm, _, err := f.open()
 			if err != nil {
@@ -239,12 +397,29 @@ func newTaskLsCmd(f *taskFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if len(args) > 0 {
+				n, err := team.ParseTask(args[0])
+				if err != nil {
+					return err
+				}
+				i := -1
+				for j := range tasks {
+					if tasks[j].N == n {
+						i = j
+						break
+					}
+				}
+				if i < 0 {
+					return fmt.Errorf("the board has no #%d; `hive team task ls` lists the tasks", n)
+				}
+				tasks = tasks[i : i+1]
+			}
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
 				return enc.Encode(taskRows(tasks))
 			}
-			printTasks(tasks, true)
+			printTasks(tasks, true, 0)
 			return nil
 		},
 	}
@@ -267,12 +442,14 @@ func taskRows(tasks []store.Task) []taskRow {
 	return rows
 }
 
-// printTasks prints the board: number, status, owner and title, then what
-// done changed, why it is blocked, or what it waits for. With bodies, each
-// task's details follow it.
-func printTasks(tasks []store.Task, bodies bool) {
+// taskLines words the board: number, status, owner and title, then what done
+// changed, why it is blocked, or what it waits for. A width cuts each task's
+// note and body to one line; with bodies, each task's details follow it in
+// full when there is no width.
+func taskLines(tasks []store.Task, bodies bool, width int) []string {
+	var out []string
 	if len(tasks) == 0 {
-		fmt.Println("  (no tasks yet; `hive team task add` adds one)")
+		out = append(out, "  (no tasks yet; `hive team task add` adds one)")
 	}
 	for _, t := range tasks {
 		extra := t.Note
@@ -280,13 +457,31 @@ func printTasks(tasks []store.Task, bodies bool) {
 			extra = "waits for " + team.Numbers(w)
 		}
 		line := fmt.Sprintf("  %-4s %-8s %-10s %s", fmt.Sprintf("#%d", t.N), t.Status, team.Clean(t.Owner), team.Clean(t.Title))
+		if width > 0 {
+			if extra != "" {
+				line += " · " + oneLine(extra)
+			}
+			if bodies && t.Body != "" {
+				line += " · " + oneLine(t.Body)
+			}
+			out = append(out, truncate(line, width))
+			continue
+		}
 		if extra != "" {
 			line += " · " + team.Clean(extra)
 		}
-		fmt.Println(line)
+		out = append(out, line)
 		if bodies && t.Body != "" {
-			fmt.Println("       " + strings.ReplaceAll(team.Clean(t.Body), "\n", "\n       "))
+			out = append(out, "       "+strings.ReplaceAll(team.Clean(t.Body), "\n", "\n       "))
 		}
+	}
+	return out
+}
+
+// printTasks prints the board.
+func printTasks(tasks []store.Task, bodies bool, width int) {
+	for _, line := range taskLines(tasks, bodies, width) {
+		fmt.Println(line)
 	}
 }
 

@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"errors"
+	"os"
 	"slices"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/sadrishehu/hive/internal/adapters"
@@ -13,9 +15,14 @@ import (
 	"github.com/sadrishehu/hive/internal/tui"
 )
 
+var errNoTerminal = errors.New("the tree needs a terminal; hive ls prints it")
+
 // rootRun opens the tree: in this pane when inside tmux, otherwise in the
 // "hive" tmux session.
 func rootRun(cmd *cobra.Command, args []string) error {
+	if !term.IsTerminal(os.Stdin.Fd()) {
+		return errNoTerminal
+	}
 	if !tmux.Available() {
 		return errors.New("hive needs tmux to host agents: brew install tmux")
 	}
@@ -46,6 +53,9 @@ func newUICmd() *cobra.Command {
 }
 
 func runUI(popup bool) error {
+	if !term.IsTerminal(os.Stdin.Fd()) {
+		return errNoTerminal
+	}
 	st, err := store.Open(paths.DBPath())
 	if err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/sadrishehu/hive/internal/store"
@@ -106,6 +107,17 @@ func CheckRoles(specs []Spec) error {
 	return nil
 }
 
+// Roles lists the active members' roles: "lead, uiux, manager".
+func Roles(members []store.Member) string {
+	var roles []string
+	for _, m := range members {
+		if m.Active() {
+			roles = append(roles, m.Role)
+		}
+	}
+	return strings.Join(roles, ", ")
+}
+
 // Roster lists members as "role · tool".
 func Roster(members []store.Member) string {
 	var parts []string
@@ -117,6 +129,22 @@ func Roster(members []store.Member) string {
 	return strings.Join(parts, ", ")
 }
 
+// teammateParts lists the other active members' parts, one line each, for the
+// lead's brief. It is empty when no other member has one.
+func teammateParts(members []store.Member, lead string) string {
+	var b strings.Builder
+	for _, o := range members {
+		if !o.Active() || o.Role == lead || o.Prompt == "" {
+			continue
+		}
+		if b.Len() == 0 {
+			b.WriteString("Teammates' parts:\n")
+		}
+		fmt.Fprintf(&b, "- %s: %s\n", o.Role, flat(o.Prompt))
+	}
+	return b.String()
+}
+
 // Brief is the first prompt of a member: the goal, its part, the roster, and
 // how to work through hive. It is the one place hive talks to an agent.
 func Brief(t store.Team, m store.Member, members []store.Member) string {
@@ -124,6 +152,11 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 	fmt.Fprintf(&b, "You are %s on the hive team %s (%s), in %s.\n\n", m.Role, t.Name, Roster(members), Folder(t, m))
 	if t.Goal != "" {
 		fmt.Fprintf(&b, "Goal: %s\n", t.Goal)
+	}
+	parts := ""
+	if t.LeadRole != "" && m.Role == t.LeadRole {
+		parts = teammateParts(members, t.LeadRole)
+		b.WriteString(parts)
 	}
 	if m.Prompt != "" {
 		fmt.Fprintf(&b, "Your part: %s\n", m.Prompt)
@@ -144,14 +177,24 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 	b.WriteString(workLine(t, m, members))
 	switch {
 	case m.Role == t.LeadRole:
-		b.WriteString("\nYou lead. Turn the goal into tasks, each with an owner and the tasks it waits for: " +
+		lead := "\nYou lead. Turn the goal into tasks, each with an owner and the tasks it waits for: "
+		if parts != "" {
+			lead = "\nYou lead. Turn the goal into tasks built around each teammate's part, each with an owner " +
+				"and the tasks it waits for: "
+		}
+		b.WriteString(lead +
 			"`hive team task add \"title\" --owner <role> --after <n,…>`. Review what is marked done, integrate it, " +
 			"and post when the goal is met.\n")
 	case t.LeadRole == "":
 		b.WriteString("\nThe human leads this team from hive and writes to you in the channel. " +
 			"Start by reading `hive team board`, then claim a task of yours, or wait for your part.\n")
 	default:
-		b.WriteString("\nStart with `hive team board`, then claim a task of yours, or wait for one. The lead is " + t.LeadRole + ".\n")
+		if m.Prompt == "" {
+			b.WriteString("\nStart with `hive team board`. You have no part of your own yet: wait for a task " +
+				"from the lead; hive wakes you when one is yours. The lead is " + t.LeadRole + ".\n")
+		} else {
+			b.WriteString("\nStart with `hive team board`, then claim a task of yours, or wait for one. The lead is " + t.LeadRole + ".\n")
+		}
 	}
 	return b.String()
 }
@@ -188,15 +231,25 @@ func Clean(text string) string {
 // "[", so a message can't run a slash command, a shell escape or a memory
 // shortcut in the recipient's TUI, and it holds no control character, so it
 // can't end the paste early and reach the TUI as keys.
-func Envelope(team, from, body string) string {
-	return fmt.Sprintf("[%s · from %s] %s", team, flat(from), flat(body))
+func Envelope(team, from, body string, at, now int64) string {
+	age := ""
+	if d := time.Duration(now-at) * time.Millisecond; at > 0 && now > at && d > time.Minute {
+		if d < time.Hour {
+			age = fmt.Sprintf(" · %dm ago", int(d.Minutes()))
+		} else {
+			age = fmt.Sprintf(" · %dh ago", int(d.Hours()))
+		}
+	}
+	return fmt.Sprintf("[%s · from %s%s] %s", team, flat(from), age, flat(body))
 }
 
 // Paste joins queued messages into the text typed into a pane, one line each.
-func Paste(team string, msgs []store.Message) string {
+// now says how old each message is: one written more than a minute before it
+// is delivered says so in its envelope.
+func Paste(team string, msgs []store.Message, now int64) string {
 	lines := make([]string, len(msgs))
 	for i, m := range msgs {
-		lines[i] = Envelope(team, m.From, m.Body)
+		lines[i] = Envelope(team, m.From, m.Body, m.At, now)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -261,7 +314,7 @@ func Recipients(to, from string, members []store.Member) ([]string, error) {
 			return []string{to}, nil
 		}
 	}
-	return nil, fmt.Errorf("the team has no %s; roles: %s", to, Roster(members))
+	return nil, fmt.Errorf("no member called %q; roles: %s", to, Roles(members))
 }
 
 // Address splits "@role text" into the role and the text. Without a leading

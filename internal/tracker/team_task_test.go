@@ -451,3 +451,95 @@ func TestWaitTimesOutAndLeavesAPausedTeamsMail(t *testing.T) {
 		t.Error("the wait took a paused team's mail")
 	}
 }
+
+func TestReopenSendsADoneOrBlockedTaskBack(t *testing.T) {
+	tr, w, sent := newTeamWorld(t)
+	backendUp(t, tr, w)
+	leadUp(t, tr, w)
+	addTask(t, tr, "schema", "backend")
+	tm := theTeam(t, tr)
+	if _, err := tr.ClaimTask(tm, "backend", 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := tr.DoneTask(tm, "backend", 1, "users.role added"); err != nil {
+		t.Fatal(err)
+	}
+
+	*sent = nil
+	task, _, err := tr.ReopenTask(tm, "lead", 1, "the edge case is broken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != store.TaskOpen || task.Owner != "backend" || task.Note != "the edge case is broken" {
+		t.Fatalf("#1 = %s/%q/%q, want it open for backend with the why as its note", task.Status, task.Owner, task.Note)
+	}
+	if got := hivePosts(tr); !strings.Contains(got, "#1 reopened by lead: the edge case is broken") {
+		t.Errorf("hive posts = %q, want the reopen", got)
+	}
+	want := "[api · from hive] #1 schema is yours again (lead: the edge case is broken). hive team task claim 1 takes it."
+	if got := typedInto(*sent, "%1"); len(got) != 1 || got[0] != want {
+		t.Errorf("typed into backend %q, want %q", got, want)
+	}
+
+	addTask(t, tr, "table", "backend")
+	if _, err := tr.ClaimTask(tm, "backend", 2, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tr.BlockTask(tm, "backend", 2, "no database access"); err != nil {
+		t.Fatal(err)
+	}
+	*sent = nil
+	task, _, err = tr.ReopenTask(tm, "lead", 2, "the database is back")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != store.TaskOpen || task.Note != "the database is back" {
+		t.Fatalf("#2 = %s/%q, want it open with the why as its note", task.Status, task.Note)
+	}
+	if got := hivePosts(tr); !strings.Contains(got, "#2 reopened by lead: the database is back") {
+		t.Errorf("hive posts = %q, want the blocked task's reopen", got)
+	}
+}
+
+func TestReopenRefusals(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	addTask(t, tr, "schema", "backend")
+	tm := theTeam(t, tr)
+
+	if _, _, err := tr.ReopenTask(tm, "lead", 1, "why"); err == nil || !strings.Contains(err.Error(), "#1 is open already") {
+		t.Errorf("reopening an open task = %v", err)
+	}
+	if _, err := tr.ClaimTask(tm, "backend", 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tr.ReopenTask(tm, "lead", 1, "why"); err == nil || !strings.Contains(err.Error(), "#1 is claimed by backend; edit or block it instead") {
+		t.Errorf("reopening a claimed task = %v", err)
+	}
+	if _, _, err := tr.ReopenTask(tm, "lead", 1, " "); err == nil || !strings.Contains(err.Error(), "--why") {
+		t.Errorf("reopening without a why = %v", err)
+	}
+
+	tr.SetPaused(tm, true)
+	if _, _, err := tr.ReopenTask(theTeam(t, tr), "lead", 1, "why"); err == nil || !strings.Contains(err.Error(), "paused") {
+		t.Errorf("reopening on a paused team = %v", err)
+	}
+	tr.SetPaused(tm, false)
+
+	if _, _, _, err := tr.DoneTask(tm, "backend", 1, "done"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Store.SetTeamStatus(tm.ID, store.TeamDone, 99); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tr.ReopenTask(theTeam(t, tr), "lead", 1, "why"); err == nil || !strings.Contains(err.Error(), "is done") {
+		t.Errorf("reopening on a done team = %v", err)
+	}
+}
+
+func TestAMemberOffTheTeamIsNamedPlainly(t *testing.T) {
+	tr, _, _ := newTeamWorld(t)
+	if _, _, err := tr.AddTask(theTeam(t, tr), "lead", "x", "", "manager", nil); err == nil ||
+		err.Error() != `no member called "manager"; roles: lead, backend, frontend` {
+		t.Fatalf("AddTask err = %v, want the roles named plainly", err)
+	}
+}

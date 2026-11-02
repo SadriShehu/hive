@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 type teamOps struct {
 	snap      TeamSnapshot
 	feed      []store.Message
+	waiting   map[int64][]string
 	templates []TeamTemplate
 
 	said        []string // team|to|text
@@ -54,6 +56,7 @@ func (f *teamOps) TeamFeed(team string, _ int) ([]store.Message, error) {
 	f.feedAsked = append(f.feedAsked, team)
 	return f.feed, nil
 }
+func (f *teamOps) TeamWaiting(string) (map[int64][]string, error) { return f.waiting, nil }
 func (f *teamOps) TeamSay(team, to, text string) (string, error) {
 	f.said = append(f.said, team+"|"+to+"|"+text)
 	return to + ": sent", nil
@@ -232,6 +235,41 @@ func TestSelectingATeamShowsItsChannelAndMarksItRead(t *testing.T) {
 	}
 	if strings.Contains(ansi.Strip(strings.Join(m.feedLines(m.snap.Teams[0], 80), "\n")), "hive") {
 		t.Error("m left hive's own posts in the feed")
+	}
+}
+
+// A say that still waits for a teammate's turn says so, with one role or
+// several; once delivered it looks like any other message.
+func TestTheFeedMarksMailThatStillWaits(t *testing.T) {
+	m, _ := setupTeam(t)
+	m.feed = feed{teamID: "t1", msgs: teamFeed()}
+
+	m.feed.waiting = map[int64][]string{4: {"frontend"}}
+	got := strings.Join(m.feedLines(m.snap.Teams[0], 100), "\n")
+	if !strings.Contains(got, "⋯ waits for frontend's turn") {
+		t.Errorf("a waiting say isn't marked:\n%s", got)
+	}
+
+	m.feed.waiting = map[int64][]string{4: {"frontend", "manager"}}
+	got = strings.Join(m.feedLines(m.snap.Teams[0], 100), "\n")
+	if !strings.Contains(got, "⋯ waits for frontend, manager") {
+		t.Errorf("a waiting say with several roles isn't marked:\n%s", got)
+	}
+
+	m.feed.waiting = nil
+	got = strings.Join(m.feedLines(m.snap.Teams[0], 100), "\n")
+	if strings.Contains(got, "waits for") {
+		t.Errorf("a delivered message still shows a wait:\n%s", got)
+	}
+}
+
+// Opening the channel fetches what still waits along with the feed.
+func TestTheChannelFetchesWaitingMail(t *testing.T) {
+	m, ops := setupTeam(t)
+	ops.waiting = map[int64][]string{4: {"frontend"}}
+	m = press(t, m, "enter")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "⋯ waits for frontend's turn") {
+		t.Errorf("the channel doesn't mark waiting mail:\n%s", view)
 	}
 }
 
@@ -643,6 +681,200 @@ func TestNewTeamForm(t *testing.T) {
 	m = press(t, m, "enter")
 	if len(ops.started) != 2 || !ops.started[1].Worktrees {
 		t.Fatalf("started = %+v, want worktrees", ops.started)
+	}
+}
+
+// A cut goal says ctrl+g reads it, and a goal that fits says nothing extra.
+// The line never grows past the width.
+func TestATeamTitleMarksACutGoal(t *testing.T) {
+	for _, w := range []int{60, 80, 120} {
+		m, _ := setupTeam(t)
+		team := m.snap.Teams[0]
+		team.Goal = strings.Repeat("what the team is for ", 20)
+		line := m.teamTitleLine(team, w)
+		plain := ansi.Strip(line)
+		if !strings.Contains(plain, "^g goal") {
+			t.Errorf("w=%d: a cut goal doesn't say ctrl+g:\n%s", w, plain)
+		}
+		if width := ansi.StringWidth(line); width > w {
+			t.Errorf("w=%d: the title is %d wide: %q", w, width, plain)
+		}
+	}
+	m, _ := setupTeam(t)
+	team := m.snap.Teams[0]
+	team.Goal = "short goal"
+	if line := ansi.Strip(m.teamTitleLine(team, 80)); strings.Contains(line, "^g goal") {
+		t.Errorf("a goal that fits still marks ctrl+g:\n%s", line)
+	}
+}
+
+// ctrl+g opens the reader: it keeps the goal's own line breaks, shows every
+// member's part, and stays inside the screen.
+func TestTheGoalReaderShowsTheWholeGoalAndParts(t *testing.T) {
+	for _, w := range []int{60, 120} {
+		m, ops := setupTeam(t)
+		m = step(t, m, tea.WindowSizeMsg{Width: w, Height: 24})
+		ops.snap.Teams[0].Goal = "first line words\n\nsecond line that is long enough to wrap at sixty columns because it keeps going and going"
+		ops.snap.Members[0].Prompt = "the part the lead owns, which is long enough to wrap too"
+		m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlG})
+		if m.mode != modeGoal {
+			t.Fatalf("w=%d: ctrl+g left mode %v", w, m.mode)
+		}
+		plain := ansi.Strip(m.View())
+		for _, want := range []string{"first line words", "second line", "the part the lead owns"} {
+			if !strings.Contains(plain, want) {
+				t.Errorf("w=%d: the reader lacks %q:\n%s", w, want, plain)
+			}
+		}
+		lines := strings.Split(plain, "\n")
+		first, second := -1, -1
+		for i, line := range lines {
+			if strings.Contains(line, "first line words") {
+				first = i
+			}
+			if strings.Contains(line, "second line") {
+				second = i
+			}
+		}
+		if first < 0 || second <= first+1 {
+			t.Errorf("w=%d: the blank line in the goal is gone:\n%s", w, plain)
+		} else if strings.TrimSpace(lines[first+1]) != "" {
+			t.Errorf("w=%d: the goal's blank line isn't blank: %q", w, lines[first+1])
+		}
+		for _, line := range strings.Split(m.View(), "\n") {
+			if width := ansi.StringWidth(line); width > m.width {
+				t.Errorf("w=%d: a line is %d wide: %q", w, width, ansi.Strip(line))
+			}
+		}
+	}
+}
+
+// The reader scrolls a tall goal: j/down move a line, G goes to the last
+// line, and esc goes back to the tree.
+func TestTheGoalReaderScrolls(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	var goal strings.Builder
+	for i := 1; i <= 60; i++ {
+		fmt.Fprintf(&goal, "goal line %d\n", i)
+	}
+	ops.snap.Teams[0].Goal = goal.String()
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlG})
+
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "goal line 1") || strings.Contains(view, "goal line 60") {
+		t.Fatalf("the reader didn't start at the top:\n%s", view)
+	}
+	m = press(t, m, "down")
+	if m.goalScroll != 1 {
+		t.Errorf("down moved %d lines, want 1", m.goalScroll)
+	}
+	m = press(t, m, "G")
+	if want := m.goalMaxScroll(m.bodyHeight()); m.goalScroll != want {
+		t.Errorf("G scrolled to %d, want the last page %d", m.goalScroll, want)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "goal line 60") {
+		t.Errorf("G didn't show the last line:\n%s", view)
+	}
+	m = press(t, m, "esc")
+	if m.mode != modeNormal {
+		t.Errorf("esc left mode %v, want the tree", m.mode)
+	}
+}
+
+// The channel opens the same reader without losing a half-typed message.
+func TestTheChannelKeepsItsTextWhenTheGoalOpens(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = press(t, m, "enter")
+	m = press(t, m, "h", "e", "l")
+	if m.channelInput.Value() != "hel" {
+		t.Fatalf("channel input = %q", m.channelInput.Value())
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	if m.mode != modeGoal {
+		t.Fatalf("ctrl+g in the channel left mode %v", m.mode)
+	}
+	m = press(t, m, "esc")
+	if m.mode != modeChannel || m.channelInput.Value() != "hel" {
+		t.Fatalf("after esc mode = %v, input = %q; want the channel with \"hel\"", m.mode, m.channelInput.Value())
+	}
+}
+
+// The hint on a team row says the reader exists.
+func TestTheTeamHintNamesTheGoalReader(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	hints, ok := m.teamHints()
+	if !ok {
+		t.Fatal("no team hints")
+	}
+	if line := ansi.Strip(strings.Join(hints, "  ")); !strings.Contains(line, "^g goal") {
+		t.Errorf("the team hint lacks ctrl+g:\n%s", line)
+	}
+}
+
+// The T form lines its labels up, wraps its explainer and shows the name
+// placeholder, so the form reads as a table rather than a run of text.
+func TestNewTeamFormLayout(t *testing.T) {
+	for _, w := range []int{80, 120} {
+		m, _ := setupTeam(t)
+		m = step(t, m, tea.WindowSizeMsg{Width: w, Height: 24})
+		m = press(t, m, "T")
+		plain := ansi.Strip(m.View())
+		if !strings.Contains(plain, "template ‹ none ›") {
+			t.Errorf("w=%d: the template label touches its value:\n%s", w, plain)
+		}
+		if !strings.Contains(plain, "e.g. api-v2") {
+			t.Errorf("w=%d: the name placeholder looks like a value:\n%s", w, plain)
+		}
+		header := ""
+		for _, line := range strings.Split(plain, "\n") {
+			if strings.Contains(line, "role") && strings.Contains(line, "tool") {
+				header = line
+				break
+			}
+		}
+		if !strings.Contains(header, "    role") {
+			t.Errorf("w=%d: the member header isn't over its values: %q", w, header)
+		}
+		joined := strings.Join(strings.Fields(plain), " ")
+		for _, want := range []string{"roles and tools are required.", "they report to the channel."} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("w=%d: the explainer is cut, missing %q:\n%s", w, want, plain)
+			}
+		}
+		if got := len(strings.Split(m.View(), "\n")); got != m.height {
+			t.Errorf("w=%d: view has %d lines, want %d", w, got, m.height)
+		}
+		m = press(t, m, "esc")
+		if m.mode != modeNormal {
+			t.Errorf("w=%d: esc left mode %v", w, m.mode)
+		}
+	}
+}
+
+// A team with every task done and no member running points at hive team done
+// where its row showed the task count.
+func TestATeamWithEveryTaskDoneSuggestsHiveTeamDone(t *testing.T) {
+	m, ops := setupTeam(t)
+	ops.snap.Tasks = []store.Task{{TeamID: "t1", N: 1, Title: "one", Status: store.TaskOpen}}
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "0/1 tasks") || strings.Contains(view, "all done") {
+		t.Errorf("an open task should show its count:\n%s", view)
+	}
+
+	m = stoppedTeam(t, m, ops)
+	ops.snap.Tasks[0].Status = store.TaskDone
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "all done · hive team done?") {
+		t.Errorf("a finished team doesn't suggest hive team done:\n%s", view)
+	}
+	if strings.Contains(view, "1/1 tasks") {
+		t.Errorf("the row still shows the task count:\n%s", view)
 	}
 }
 
@@ -1111,28 +1343,41 @@ func TestUpDownMoveTheCaretInsideTheTeamGoal(t *testing.T) {
 	}
 }
 
-// A long team goal and a long member part wrap in the channel head instead of
-// running off the edge, and the view keeps its height.
-func TestALongTeamGoalAndPartWrap(t *testing.T) {
+// The head is two lines and then one per member, never wider than the screen.
+// The goal is cut short, the held task shows, and a member's long part stays
+// off it.
+func TestTheTeamHeadIsOneLinePerMember(t *testing.T) {
 	m, ops := setupTeam(t)
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	ops.snap.Teams[0].Goal = "START " + strings.Repeat("what the team is for ", 5) + "END"
-	ops.snap.Members[0].Prompt = "START " + strings.Repeat("what this member owns ", 5) + "END"
+	ops.snap.Members[0].Prompt = "PART " + strings.Repeat("what this member owns ", 5) + "PART"
+	ops.snap.Tasks = []store.Task{{TeamID: "t1", N: 4, Title: "dogfooding notes",
+		Status: store.TaskClaimed, Owner: "lead"}}
 	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
-	m = press(t, m, "enter")
 
-	view := ansi.Strip(m.View())
-	for _, want := range []string{"START", "END"} {
-		if strings.Count(view, want) < 2 {
-			t.Errorf("the channel lacks the goal's and the part's %q:\n%s", want, view)
+	head := m.teamHead(m.snap.Teams[0], 80)
+	if got, want := len(head), 2+len(ops.snap.Members); got != want {
+		t.Fatalf("head has %d lines, want 2 + %d members:\n%s", got, len(ops.snap.Members),
+			ansi.Strip(strings.Join(head, "\n")))
+	}
+	plain := ansi.Strip(strings.Join(head, "\n"))
+	if !strings.Contains(plain, "#4 dogfooding notes") {
+		t.Errorf("the head doesn't show the held task:\n%s", plain)
+	}
+	if strings.Contains(plain, "PART") {
+		t.Errorf("the head still shows a member's part:\n%s", plain)
+	}
+	if !strings.Contains(plain, "START") {
+		t.Errorf("the head doesn't show the start of the goal:\n%s", plain)
+	}
+	for _, line := range head {
+		if width := ansi.StringWidth(line); width > 80 {
+			t.Errorf("a head line is %d wide, past 80: %q", width, ansi.Strip(line))
 		}
 	}
-	for _, line := range strings.Split(view, "\n") {
-		if width := ansi.StringWidth(line); width > m.width {
-			t.Errorf("a line is %d wide, past the %d screen:\n%s", width, m.width, line)
-		}
-	}
-	if got := len(strings.Split(view, "\n")); got != m.height {
+
+	m = press(t, m, "enter")
+	if got := len(strings.Split(ansi.Strip(m.View()), "\n")); got != m.height {
 		t.Errorf("view has %d lines, want %d", got, m.height)
 	}
 }
@@ -1185,8 +1430,8 @@ func TestTheChannelShowsMembersUsageAndTheAccountsQuota(t *testing.T) {
 
 	view := ansi.Strip(m.View())
 	for _, want := range []string{
-		"claude-opus-5-5", "high", "188k/1M", "19%",
-		"claude-sonnet-5-5", "42k/200k", "21%",
+		"claude-opus-5-5", "ctx 19%",
+		"claude-sonnet-5-5", "ctx 21%",
 		"5h 7% · resets 4h54m · 7d 22%",
 	} {
 		if !strings.Contains(view, want) {
@@ -1287,10 +1532,10 @@ func TestTheChannelShowsStartingAndStoppedMembers(t *testing.T) {
 	m = press(t, m, "enter")
 
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "pane · starting") {
+	if !strings.Contains(view, "pane  starting") {
 		t.Errorf("a pane-only member isn't starting:\n%s", view)
 	}
-	if !strings.Contains(view, "gone · stopped") {
+	if !strings.Contains(view, "gone  stopped") {
 		t.Errorf("a cleared member isn't stopped:\n%s", view)
 	}
 }

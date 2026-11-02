@@ -63,6 +63,23 @@ func newTracker(st *store.Store) *tracker.Tracker {
 	return tr
 }
 
+// checkTool fails for a tool hive has no adapter for, before anything starts,
+// and lists the configured ones.
+func checkTool(tool string) error {
+	if tool == "" || tool == fusion.Auto {
+		return nil
+	}
+	var names []string
+	for _, a := range adapters.Current().Adapters {
+		spec := a.Spec()
+		if spec.Name == tool {
+			return nil
+		}
+		names = append(names, spec.Name)
+	}
+	return fmt.Errorf("no tool %q; hive knows %s (add one with [[agent]] in config.toml)", tool, strings.Join(names, ", "))
+}
+
 func withSession(fn func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, args []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		st, tr, sessions, err := openTracker()
@@ -121,9 +138,12 @@ func newNewCmd() *cobra.Command {
 			"is up, so a `hive send` right after it isn't typed before the agent can read it.\n" +
 			"A tool that starts its session only with its first message gets a stand-in ID,\n" +
 			"<tool>:pid-N, that names the session once it starts.",
-		Args: cobra.ExactArgs(1),
+		Args: oneArg("tool", "<tool|auto>", "hive models lists them"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tool := args[0]
+			if err := checkTool(tool); err != nil {
+				return err
+			}
 			pickMode, ok := fusion.ParseMode(mode)
 			if mode != "" && !ok {
 				return fmt.Errorf("--mode must be %s or %s", fusion.ModeProvider, fusion.ModeModel)
@@ -244,7 +264,7 @@ func newJumpCmd() *cobra.Command {
 			if next {
 				return cobra.NoArgs(cmd, args)
 			}
-			return cobra.ExactArgs(1)(cmd, args)
+			return oneArg("session", "<id>", "or hive jump --next")(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if next {
@@ -365,7 +385,7 @@ func newResumeCmd() *cobra.Command {
 		Use:   "resume <id>",
 		Short: "Reopen an ended session in its own TUI",
 		Long:  "Reopen an ended session in a new tmux window, in the background unless --focus.",
-		Args:  cobra.ExactArgs(1),
+		Args:  oneArg("session", "<id>", "hive ls lists them"),
 		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
 			l, err := tr.Resume(s, prompt, tracker.LaunchOptions{Detached: !focus})
 			if err != nil {
@@ -403,7 +423,7 @@ func newSendCmd() *cobra.Command {
 		Long: "Type a message into a session's pane and press Enter. A session that has ended is\n" +
 			"reopened in the background with the message. With no text, or \"-\", the message\n" +
 			"is read from stdin.",
-		Args: cobra.MinimumNArgs(1),
+		Args: someArgs("session", "<id> [text...]", "hive ls lists them"),
 		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, args []string) error {
 			text, err := readText(args)
 			if err != nil {
@@ -425,7 +445,7 @@ func newTailCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tail <id>",
 		Short: "Print the end of a session's transcript",
-		Args:  cobra.ExactArgs(1),
+		Args:  oneArg("session", "<id>", "hive ls lists them"),
 		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
 			lines, err := tr.Tail(s, n)
 			if err != nil {
@@ -464,7 +484,7 @@ func newUsageCmd() *cobra.Command {
 		Long: "Print what a session used, read from the tool's own records: the model, token counts,\n" +
 			"the price (reported by the tool, or estimated from built-in and [[model]] prices),\n" +
 			"the tools and skills it called, and how much of its context window is in use.",
-		Args: cobra.ExactArgs(1),
+		Args: oneArg("session", "<id>", "hive ls lists them"),
 		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
 			u, err := tr.Usage(cmd.Context(), s)
 			if err != nil {
@@ -597,7 +617,7 @@ func newKillCmd() *cobra.Command {
 		Use:   "kill <id>",
 		Short: "Stop a session's process",
 		Long:  "Stop a session's process. A window hive opened for it closes with it.",
-		Args:  cobra.ExactArgs(1),
+		Args:  oneArg("session", "<id>", ""),
 		RunE: withSession(func(cmd *cobra.Command, tr *tracker.Tracker, s store.Session, _ []string) error {
 			if err := tr.Stop(s); err != nil {
 				return err

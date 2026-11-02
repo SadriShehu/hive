@@ -342,7 +342,7 @@ func TestSendNewChildAndStop(t *testing.T) {
 	if m.mode != modeNew || m.form.folder.Value() != "/src/app" || m.form.tools[m.form.tool] != "claude" {
 		t.Fatalf("child form: mode=%v folder=%q tool=%v", m.mode, m.form.folder.Value(), m.form.tools[m.form.tool])
 	}
-	m = press(t, m, "tab", "tab") // folder → prompt → tool
+	m = press(t, m, "tab") // prompt → tool
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyRight})
 	m = press(t, m, "tab", "tab", "tab", "g", "o", "enter") // model → folder → prompt
 	if len(ops.launched) != 1 {
@@ -368,7 +368,7 @@ func TestSendNewChildAndStop(t *testing.T) {
 
 func TestNewFormWrapsLongPrompt(t *testing.T) {
 	m, ops := setup(t, false)
-	m = press(t, m, "n", "tab")
+	m = press(t, m, "n")
 	long := strings.Repeat("make the admin page load faster ", 6) + "and add tests"
 	m = press(t, m, long)
 	view := ansi.Strip(m.View())
@@ -522,7 +522,7 @@ func TestViewFitsAnySize(t *testing.T) {
 			default:
 				mm = press(t, m, mode)
 				if mode == "n" {
-					mm = press(t, mm, "tab", strings.Repeat("wrap me ", 40))
+					mm = press(t, mm, strings.Repeat("wrap me ", 40))
 				}
 				if mode == "s" {
 					mm = press(t, mm, strings.Repeat("wrap me ", 40))
@@ -705,7 +705,7 @@ func TestNewFormOffersTheToolsModelsAndAuto(t *testing.T) {
 		t.Errorf("model field not drawn:\n%s", view)
 	}
 
-	m = press(t, m, "shift+tab", "right", "right", "right") // model: default → auto → fable → opus
+	m = press(t, m, "shift+tab", "shift+tab", "right", "right", "right") // prompt → folder → model: default → auto → fable → opus
 	m = press(t, m, "enter", "enter", "f", "i", "x", " ", "i", "t", "enter")
 	if l := ops.launched[len(ops.launched)-1]; l.Tool != "claude" || l.Model != "claude-opus-5-5" || l.Prompt != "fix it" {
 		t.Errorf("launch = %+v", l)
@@ -714,7 +714,7 @@ func TestNewFormOffersTheToolsModelsAndAuto(t *testing.T) {
 		t.Errorf("flash = %q", m.flash)
 	}
 
-	m = press(t, m, "n", "shift+tab", "right") // model: auto
+	m = press(t, m, "n", "shift+tab", "shift+tab", "right") // prompt → folder → model: auto
 	m = press(t, m, "enter", "enter", "f", "i", "x", " ", "i", "t", "enter")
 	if l := ops.launched[len(ops.launched)-1]; l.Tool != "claude" || l.Model != fusion.Auto || l.Mode != "" {
 		t.Errorf("launch = %+v", l)
@@ -726,7 +726,7 @@ func TestNewFormOffersTheToolsModelsAndAuto(t *testing.T) {
 
 func TestNewFormAutoToolFlipsTheMode(t *testing.T) {
 	m, ops := setup(t, false)
-	m = press(t, m, "n", "shift+tab", "shift+tab", "left") // tool: claude → auto
+	m = press(t, m, "n", "shift+tab", "shift+tab", "shift+tab", "left") // prompt → folder → model → tool: claude → auto
 	if m.form.toolName() != fusion.Auto || m.form.mode != fusion.ModeProvider {
 		t.Fatalf("tool %s, mode %s", m.form.toolName(), m.form.mode)
 	}
@@ -753,8 +753,43 @@ func TestNewFormTakesTheConfiguredModeAndTool(t *testing.T) {
 	m.now = func() time.Time { return now }
 	m = step(t, m, tea.WindowSizeMsg{Width: 160, Height: 30})
 	m = step(t, m, refreshedMsg{sessions: ops.sessions})
-	m = press(t, m, "n", "shift+tab", "shift+tab", "left")
+	m = press(t, m, "n", "shift+tab", "shift+tab", "shift+tab", "left")
 	if m.form.mode != fusion.ModeModel || m.form.inside != "opencode" {
 		t.Errorf("mode %s inside %s", m.form.mode, m.form.inside)
+	}
+}
+
+func TestNewFormOpensOnThePromptAndFollowsTheFocusedField(t *testing.T) {
+	m, ops := setup(t, false)
+	m = press(t, m, "n")
+	if m.form.field != fieldPrompt {
+		t.Fatalf("form opened on field %d, want the prompt", m.form.field)
+	}
+	check := func(want string) {
+		t.Helper()
+		got := ansi.Strip(strings.Join(m.hintLines(), "\n"))
+		if !strings.Contains(got, want) {
+			t.Fatalf("hint = %q, want %q", got, want)
+		}
+	}
+	check("↵ starts")
+	m = press(t, m, "tab")
+	check("←/→ choose") // tool
+	m = press(t, m, "tab")
+	check("←/→ choose") // model
+	m = press(t, m, "tab")
+	check("tab completes") // folder
+
+	m = press(t, m, "shift+tab") // folder → model
+	if m.form.field != fieldModel {
+		t.Fatalf("shift+tab left the form on field %d, want the model", m.form.field)
+	}
+	m = press(t, m, "tab", "tab") // model → folder → prompt
+	if m.form.field != fieldPrompt {
+		t.Fatalf("tab left the form on field %d, want the prompt", m.form.field)
+	}
+	m = press(t, m, "f", "i", "x", "enter")
+	if len(ops.launched) != 1 || ops.launched[0].Prompt != "fix" {
+		t.Fatalf("launched = %+v, want the prompt's text to start it", ops.launched)
 	}
 }

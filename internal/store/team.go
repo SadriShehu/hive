@@ -537,6 +537,52 @@ func (s *Store) Unclaim(role string, msgs []Message) error {
 	return nil
 }
 
+// Waiting returns, for each role on a team, the messages queued for it and
+// not delivered yet, oldest first. A role with no mail is left out.
+func (s *Store) Waiting(teamID string) (map[string][]Message, error) {
+	rows, err := s.db.Query(`SELECT m.id, m.team_id, m.from_role, m.to_role, m.body, m.kind, m.private, m.created_at, d.role
+		FROM team_messages m JOIN team_deliveries d ON d.message_id = m.id
+		WHERE m.team_id = ? AND d.delivered_at = 0
+		ORDER BY m.id, d.role`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]Message{}
+	for rows.Next() {
+		var m Message
+		var role string
+		if err := rows.Scan(&m.ID, &m.TeamID, &m.From, &m.To, &m.Body, &m.Kind, &m.Private, &m.At, &role); err != nil {
+			return nil, err
+		}
+		out[role] = append(out[role], m)
+	}
+	return out, rows.Err()
+}
+
+// WaitingByMessage returns, for each message of a team, the roles it still
+// waits for, oldest message first. A message nobody waits for is left out.
+func (s *Store) WaitingByMessage(teamID string) (map[int64][]string, error) {
+	rows, err := s.db.Query(`SELECT d.message_id, d.role
+		FROM team_deliveries d JOIN team_messages m ON m.id = d.message_id
+		WHERE m.team_id = ? AND d.delivered_at = 0
+		ORDER BY d.message_id, d.role`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]string{}
+	for rows.Next() {
+		var id int64
+		var role string
+		if err := rows.Scan(&id, &role); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], role)
+	}
+	return out, rows.Err()
+}
+
 // HasPending reports whether messages wait for a role.
 func (s *Store) HasPending(teamID, role string) (bool, error) {
 	var n int

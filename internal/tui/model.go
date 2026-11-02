@@ -45,6 +45,7 @@ const (
 	modeNew
 	modeConfirm
 	modeHelp
+	modeGoal    // a team's whole goal and every member's part
 	modeTeam    // the new-team form
 	modeChannel // a team's channel, full screen
 	modeTasks   // a team's task editor, full screen
@@ -86,6 +87,10 @@ type Model struct {
 	channelInput  textarea.Model
 	channelScroll int  // lines scrolled back from the newest post
 	hideSystem    bool // leave hive's own posts out of the channel
+
+	goalTeam   string // the team whose whole goal is open
+	goalScroll int    // lines scrolled down from the top
+	goalFrom   mode   // where esc goes back to: the tree or the channel
 
 	taskEdit taskEditor // the team whose board is open, and where the cursor is
 
@@ -774,6 +779,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeHelp:
 			m.mode = modeNormal
 			return m, nil
+		case modeGoal:
+			return m.keyGoal(msg)
 		}
 		if m.trash {
 			return m.keyTrash(msg)
@@ -1100,7 +1107,7 @@ func (m Model) openForm(parent store.Session) (tea.Model, tea.Cmd) {
 	}
 	settings := m.ops.Fusion()
 	f := form{parent: parent, tools: append([]string{fusion.Auto}, tools...), models: map[string][]string{},
-		field: fieldFolder, mode: settings.Mode, inside: settings.Tool}
+		field: fieldPrompt, mode: settings.Mode, inside: settings.Tool}
 	if f.mode == "" {
 		f.mode = fusion.ModeProvider
 	}
@@ -1130,7 +1137,7 @@ func (m Model) openForm(parent store.Session) (tea.Model, tea.Cmd) {
 	}
 	m.form = f
 	m.mode = modeNew
-	return m, tea.Batch(m.form.folder.Focus(), m.modelsCmd())
+	return m, tea.Batch(m.form.prompt.Focus(), m.modelsCmd())
 }
 
 // modelsCmd loads what the form's tool can run, once per tool: a tool that

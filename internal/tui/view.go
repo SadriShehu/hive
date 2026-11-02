@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/sadrishehu/hive/internal/human"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tracker"
 )
 
@@ -27,7 +29,13 @@ func (m Model) bodyHeight() int {
 	return max(1, m.height-2-hints)
 }
 
-func (m Model) previewVisible() bool { return m.showPreview && m.width >= 100 }
+// previewMinWidth is the narrowest window that shows the preview beside the tree.
+const previewMinWidth = 100
+
+func (m Model) previewVisible() bool { return m.showPreview && m.width >= previewMinWidth }
+
+// previewNarrow says the preview is on but the window is too narrow to show it.
+func (m Model) previewNarrow() bool { return m.showPreview && m.width < previewMinWidth }
 
 func (m Model) usageTakesTheBody() bool {
 	return m.showUsage && m.showPreview && !m.previewVisible() &&
@@ -59,6 +67,10 @@ func (m Model) View() string {
 	switch {
 	case m.mode == modeHelp:
 		body = fit(helpLines(), m.width, h)
+	case m.mode == modeGoal:
+		lines := m.goalLines(m.width)
+		top := min(max(0, m.goalScroll), max(0, len(lines)-h))
+		body = fit(lines[top:], m.width, h)
 	case m.mode == modeChannel:
 		body = m.channelLines(m.width, h)
 	case m.mode == modeTasks:
@@ -103,27 +115,27 @@ func (m Model) headerLine() string {
 			live++
 		}
 	}
-	left := sBadge.Render("hive") + "  " +
-		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live))
+	segs := []string{sBadge.Render("hive") + "  " +
+		lipgloss.NewStyle().Foreground(cIdle).Render("●") + sText.Render(fmt.Sprintf(" %d live", live))}
 	if n := len(tracker.NeedsYou(m.sessions)); n > 0 {
-		left += sDim.Render("  ·  ") + lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n))
+		segs = append(segs, lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n)))
 	}
-	left += sDim.Render(fmt.Sprintf("  ·  %d sessions", total))
 	if n := m.teamCount(); n == 1 {
-		left += sDim.Render("  ·  ") + sAccent.Render("1 team")
+		segs = append(segs, sAccent.Render("1 team"))
 	} else if n > 1 {
-		left += sDim.Render("  ·  ") + sAccent.Render(fmt.Sprintf("%d teams", n))
+		segs = append(segs, sAccent.Render(fmt.Sprintf("%d teams", n)))
 	}
+	segs = append(segs, sDim.Render(fmt.Sprintf("%d sessions", total)))
 	if len(m.snap.Trashed) > 0 {
-		left += sDim.Render("  ·  " + m.trashCount() + " in the trash")
+		segs = append(segs, sDim.Render(m.trashCount()+" in the trash"))
 	} else if len(m.trashed) > 0 {
-		left += sDim.Render(fmt.Sprintf("  ·  %d in the trash", len(m.trashed)))
+		segs = append(segs, sDim.Render(fmt.Sprintf("%d in the trash", len(m.trashed))))
 	}
 	scope := "last 24h"
 	switch {
 	case m.trash:
-		left = sBadge.Render("hive") + "  " + sText.Render("trash") +
-			sDim.Render("  ·  "+m.trashCount()+", deleted from hive; their tools still have them")
+		segs = []string{sBadge.Render("hive") + "  " + sText.Render("trash") +
+			sDim.Render("  ·  "+m.trashCount()+", deleted from hive; their tools still have them")}
 		scope = "t goes back"
 	case m.showAll:
 		scope = "all history"
@@ -145,19 +157,34 @@ func (m Model) headerLine() string {
 	if m.syncing {
 		scope = "syncing… · " + scope
 	}
-	right := sDim.Render(scope)
-	if total, estimate := m.costInView(); total > 0 {
+	right := []string{sDim.Render(scope)}
+	if m.previewNarrow() {
+		right = append(right, sDim.Render(fmt.Sprintf("preview needs %d cols", previewMinWidth)))
+	} else if cost, estimate := m.costInView(); cost > 0 {
 		mark := ""
 		if estimate {
 			mark = "~"
 		}
-		right += sDim.Render(" · ") + sText.Render(mark+human.USD(total))
+		right = append(right, sText.Render(mark+human.USD(cost)))
 	}
-	gap := m.width - ansi.StringWidth(left) - ansi.StringWidth(right)
-	if gap < 1 {
-		return ansi.Truncate(left, m.width, "")
+	sep, rightSep := sDim.Render("  ·  "), sDim.Render(" · ")
+	// Drop whole segments from the end, the least important first, so the
+	// header never cuts one in half. The right side goes last, which keeps the
+	// preview note while the left still has something to give.
+	for {
+		left, tail := strings.Join(segs, sep), strings.Join(right, rightSep)
+		gap := m.width - ansi.StringWidth(left) - ansi.StringWidth(tail)
+		switch {
+		case gap >= 1:
+			return left + strings.Repeat(" ", gap) + tail
+		case len(segs) > 1:
+			segs = segs[:len(segs)-1]
+		case len(right) > 1:
+			right = right[:len(right)-1]
+		default:
+			return ansi.Truncate(left, m.width, "")
+		}
 	}
-	return left + strings.Repeat(" ", gap) + right
 }
 
 func (m Model) treeLines(w, h int) []string {
@@ -369,8 +396,8 @@ func (m Model) formLines(w, h int) []string {
 	folders := f.folderLines(h - formChromeRows - 1)
 	prompt := visibleRows(f.prompt, h-formChromeRows-len(folders))
 	out = append(out,
-		field(fieldTool, "tool", choices(f.tools, f.tool, func(t string) lipgloss.Style { return toolStyle(t) })),
-		field(fieldModel, "model", f.modelLine()),
+		field(fieldTool, "tool", choices(f.tools, f.tool, max(8, w-9), func(t string) lipgloss.Style { return toolStyle(t) })),
+		field(fieldModel, "model", f.modelLine(max(8, w-9))),
 		field(fieldFolder, "folder", f.folder.View()),
 	)
 	out = append(out, folders...)
@@ -385,22 +412,69 @@ func (m Model) formLines(w, h int) []string {
 	return fit(out, w, h)
 }
 
-// choices draws a row of choices with the selected one in brackets.
-func choices(items []string, selected int, style func(string) lipgloss.Style) string {
-	var parts []string
+// choices draws a row of choices with the selected one in brackets. When the
+// row is wider than w it shows a window around the selected choice, with … on
+// either side of the hidden ones and the position at the end.
+func choices(items []string, selected, w int, style func(string) lipgloss.Style) string {
+	if len(items) == 0 {
+		return ""
+	}
+	selected = max(0, min(selected, len(items)-1))
+	rendered := make([]string, len(items))
 	for i, item := range items {
 		if i == selected {
-			parts = append(parts, style(item).Bold(true).Render("‹ "+item+" ›"))
+			rendered[i] = style(item).Bold(true).Render("‹ " + item + " ›")
 		} else {
-			parts = append(parts, sDim.Render(item))
+			rendered[i] = sDim.Render(item)
 		}
 	}
-	return strings.Join(parts, "  ")
+	all := strings.Join(rendered, "  ")
+	if ansi.StringWidth(all) <= w {
+		return all
+	}
+	pos := sDim.Render(fmt.Sprintf("%d/%d", selected+1, len(items)))
+	line := func(lo, hi int) string {
+		out := strings.Join(rendered[lo:hi+1], "  ")
+		if lo > 0 {
+			out = sDim.Render("…") + "  " + out
+		}
+		if hi < len(items)-1 {
+			out += "  " + sDim.Render("…")
+		}
+		return out + "  " + pos
+	}
+	lo, hi := selected, selected
+	if ansi.StringWidth(line(lo, hi)) > w {
+		label := ansi.Truncate(items[selected], max(1, w-8), "…")
+		return ansi.Truncate(style(label).Bold(true).Render("‹ "+label+" ›"), w, "")
+	}
+	for {
+		grew := false
+		preferLeft := selected-lo <= hi-selected
+		for _, left := range []bool{preferLeft, !preferLeft} {
+			if left && lo > 0 {
+				if next := line(lo-1, hi); ansi.StringWidth(next) <= w {
+					lo, grew = lo-1, true
+					break
+				}
+			}
+			if !left && hi < len(items)-1 {
+				if next := line(lo, hi+1); ansi.StringWidth(next) <= w {
+					hi, grew = hi+1, true
+					break
+				}
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+	return line(lo, hi)
 }
 
 // modelLine draws the model field: for a tool, its choices; for auto, the
 // mode, which ←/→ flips.
-func (f form) modelLine() string {
+func (f form) modelLine(w int) string {
 	if f.toolName() == fusion.Auto {
 		what := "picks the tool and the model for the prompt"
 		if f.mode == fusion.ModeModel {
@@ -408,11 +482,12 @@ func (f form) modelLine() string {
 		}
 		return sAccent.Bold(true).Render("‹ "+string(f.mode)+" ›") + "  " + sDim.Render(what+" · ←/→ changes the mode")
 	}
-	line := choices(f.modelChoices(), min(f.model, len(f.modelChoices())-1), func(string) lipgloss.Style { return sAccent })
+	loading := ""
 	if f.loadingModels() {
-		line += "  " + sDim.Render("loading what it runs…")
+		loading = "  " + sDim.Render("loading what it runs…")
+		w -= ansi.StringWidth("  loading what it runs…")
 	}
-	return line
+	return choices(f.modelChoices(), min(f.model, len(f.modelChoices())-1), max(8, w), func(string) lipgloss.Style { return sAccent }) + loading
 }
 
 // explain says what starts, under the form.
@@ -497,10 +572,18 @@ func (m Model) hintLine() string {
 		}
 		return sError.Render(question) + keys("y", "yes", "any other key", "no")
 	case modeNew:
-		if f := m.form; f.field == fieldFolder && len(f.folders) > 0 {
-			return keys("tab", "fill in", "↑/↓", "pick", "↵", "next", "esc", "hide list")
+		f := m.form
+		if f.field == fieldFolder && len(f.folders) > 0 {
+			return keys("tab", "completes", "↑/↓", "pick", "↵", "next", "esc", "hide list")
 		}
-		return keys("↵", "next / start", "tab", "field", "←/→", "tool / model", "esc", "cancel")
+		switch f.field {
+		case fieldTool, fieldModel:
+			return keys("←/→", "choose", "tab", "field", "↵", "next / start", "esc", "cancel")
+		case fieldFolder:
+			return keys("tab", "completes", "↵", "next", "esc", "cancel")
+		default:
+			return keys("↵", "starts", "tab", "field", "esc", "cancel")
+		}
 	case modeTeam:
 		return keys("↵", "next / start", "tab", "field", "+", "row", "ctrl+d", "remove", "←/→", "work · lead · template · model", "esc", "cancel")
 	case modeTasks:
@@ -511,18 +594,59 @@ func (m Model) hintLine() string {
 			return keys("↵", "next / save", "tab", "field", "esc", "cancel")
 		}
 		return keys("j/k", "move", "n", "add", "e", "edit", "d", "done", "b", "block", "esc", "back")
+	case modeGoal:
+		hint := keys("↑/↓", "scroll", "esc", "back")
+		total := len(m.goalLines(m.width))
+		if h := m.bodyHeight(); total > h {
+			first := min(m.goalScroll+1, total)
+			last := min(m.goalScroll+h, total)
+			hint += "  " + sDim.Render(fmt.Sprintf("· %d–%d of %d lines", first, last, total))
+		}
+		return hint
 	case modeHelp:
 		return keys("any key", "close")
 	}
-	if hint, ok := m.teamHints(); ok {
-		return ansi.Truncate(hint, m.width, "…")
+	if hints, ok := m.teamHints(); ok {
+		return fitHints(hints, m.width, keys("?", "more"))
 	}
 	if m.trash {
-		return ansi.Truncate(keys("r", "restore", "d", "delete for good", "t", "back", "u", "usage", "/", "filter",
-			"i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+		return fitHints([]string{
+			keys("r", "restore"),
+			keys("d", "delete for good"),
+			keys("t", "back"),
+			keys("u", "usage"),
+			keys("/", "filter"),
+			keys("i", "subagents"),
+		}, m.width, keys("?", "more"))
 	}
-	return ansi.Truncate(keys("↵", "jump", "s", "send", "n", "new", "c", "child", "r", "reopen", "x", "stop",
-		"d", "delete", "t", "trash", "u", "usage", "/", "filter", "a", "all", "i", "subagents", "?", "help", "q", "quit"), m.width, "…")
+	return fitHints([]string{
+		keys("↵", "jump"),
+		keys("s", "send"),
+		keys("n", "new"),
+		keys("c", "child"),
+		keys("u", "usage"),
+		keys("/", "filter"),
+		keys("r", "reopen"),
+		keys("x", "stop"),
+		keys("d", "trash"),
+		keys("t", "show trash"),
+		keys("a", "all/24h"),
+		keys("i", "subagents"),
+	}, m.width, keys("?", "more"))
+}
+
+// fitHints joins key hints with two spaces and drops whole hints from the end
+// until the line fits w. tail is always shown, so the reader can find the
+// keys that didn't fit.
+func fitHints(hints []string, w int, tail string) string {
+	for len(hints) > 0 {
+		line := strings.Join(hints, "  ") + "  " + tail
+		if ansi.StringWidth(line) <= w {
+			return line
+		}
+		hints = hints[:len(hints)-1]
+	}
+	return tail
 }
 
 func keys(pairs ...string) string {
@@ -558,8 +682,10 @@ func helpLines() []string {
 		{"←/→ space", "fold and unfold; ← on a leaf goes to its parent"},
 		{"y", "copy the session ID"},
 		{"T", "start a team: agents that work on one goal and report to a channel"},
-		{"on a team", "↵ opens its channel · e edits its board · s messages everyone · p pauses · L leads · x stops all · d trashes it · m hides hive's posts"},
-		{"in a channel", "type to write to everyone (@role for one) · ↵ sends · esc goes back · ↑/↓ move the caret once typing · pgup/pgdn scroll the feed"},
+		{"on a team", "↵ opens its channel · e edits its board · ctrl+g reads the whole goal and every part · s messages everyone"},
+		{"", "p pauses · L leads · x stops all · d trashes it · m hides hive's posts"},
+		{"in a channel", "type to write to everyone (@role for one) · ↵ sends · esc goes back · ↑/↓ move the caret once typing"},
+		{"", "pgup/pgdn scroll the feed · ctrl+g reads the goal"},
 		{"S", "sync history now (it also runs every 30s)"},
 		{"tab", "hide / show the preview"},
 		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills"},
@@ -574,6 +700,101 @@ func helpLines() []string {
 		"  "+sDim.Render("run: a headless run   sub: a tool's own subagent"),
 		"  "+sDim.Render("$ in the header: what the sessions in view cost · ~ an estimate from list prices · partial: totals come when the session ends"))
 	return out
+}
+
+// goalLines draws the team reader full screen: its name, how it runs, the
+// whole goal with its own line breaks, and every active member's part.
+func (m Model) goalLines(w int) []string {
+	t, ok := m.teamByID(m.goalTeam)
+	if !ok {
+		return []string{sDim.Render("this team is gone; esc goes back")}
+	}
+	out := []string{sAccent.Bold(true).Render("⬡ " + cleanLine(t.Name))}
+	if head := m.teamHead(t, w); len(head) > 1 {
+		out = append(out, head[1])
+	}
+	out = append(out, "", sBold.Render("goal"))
+	goal := team.Clean(t.Goal)
+	if strings.TrimSpace(goal) == "" {
+		out = append(out, indentWrapped(
+			"no goal was set; the team form (T on a template, or hive team new --goal) sets one",
+			w, 2, sDim)...)
+	} else {
+		out = append(out, indentWrapped(goal, w, 2, sText)...)
+	}
+	members := m.members(t.ID)
+	hasParts := false
+	for _, mem := range members {
+		if strings.TrimSpace(mem.Prompt) != "" {
+			hasParts = true
+			break
+		}
+	}
+	if hasParts {
+		out = append(out, "", sBold.Render("parts"))
+	}
+	for _, mem := range members {
+		part := strings.TrimSpace(team.Clean(mem.Prompt))
+		if part == "" {
+			continue
+		}
+		meta := mem.Tool
+		if mem.Model != "" && mem.Model != fusion.Auto {
+			meta += " " + mem.Model
+		}
+		out = append(out, "  "+toolStyle(mem.Tool).Bold(true).Render(cleanLine(mem.Role))+"  "+sDim.Render(meta))
+		out = append(out, indentWrapped(part, w, 4, sText)...)
+	}
+	return out
+}
+
+// indentWrapped keeps text's own line breaks and wraps each line at w-indent,
+// indenting it by indent spaces; a blank line stays blank.
+func indentWrapped(text string, w, indent int, style lipgloss.Style) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "" {
+			out = append(out, "")
+			continue
+		}
+		for _, wrapped := range strings.Split(ansi.Wrap(line, max(10, w-indent), ""), "\n") {
+			out = append(out, strings.Repeat(" ", indent)+style.Render(wrapped))
+		}
+	}
+	return out
+}
+
+// goalMaxScroll is how far the reader scrolls: enough to put its last line at
+// the bottom.
+func (m Model) goalMaxScroll(h int) int {
+	return max(0, len(m.goalLines(m.width))-h)
+}
+
+// keyGoal scrolls the team reader; esc, q, enter and ctrl+g close it.
+func (m Model) keyGoal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	h := m.bodyHeight()
+	maxScroll := m.goalMaxScroll(h)
+	switch msg.String() {
+	case "esc", "q", "enter", "ctrl+g":
+		m.mode = m.goalFrom
+		if m.mode == modeChannel {
+			return m, m.channelInput.Focus()
+		}
+		return m, nil
+	case "up", "k":
+		m.goalScroll = max(0, m.goalScroll-1)
+	case "down", "j":
+		m.goalScroll = min(maxScroll, m.goalScroll+1)
+	case "pgup", "ctrl+u":
+		m.goalScroll = max(0, m.goalScroll-max(1, h/2))
+	case "pgdown", "ctrl+d":
+		m.goalScroll = min(maxScroll, m.goalScroll+max(1, h/2))
+	case "home", "g":
+		m.goalScroll = 0
+	case "end", "G":
+		m.goalScroll = maxScroll
+	}
+	return m, nil
 }
 
 // oneLine makes s safe to draw on a single line.

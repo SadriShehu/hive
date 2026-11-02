@@ -74,7 +74,8 @@ show as untracked, or are adopted as soon as they spawn another agent.
 Run `hive`. Inside tmux it opens in the current pane; outside tmux it attaches to a
 tmux session called `hive`, with the tree in its first window. With the popup key
 bound (`hive install tmux`), **prefix + a** opens the tree over whatever you're doing
-and closes once you jump somewhere. The header counts the agents that need you.
+and closes once you jump somewhere. Running `hive install tmux` again picks up the
+popup's new size. The header counts the agents that need you.
 
 ```
  hive  ● 3 live  ·  203 sessions                                           last 24h
@@ -106,7 +107,9 @@ transcript for a headless run, a subagent or a finished session.
 
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. The form asks for the tool, the model, the
-folder and a first prompt. The model is the tool's own default unless you pick one of
+folder and a first prompt. It opens on the prompt, where most launches start: `tab` and
+`shift+tab` move between fields, `←`/`→` picks the tool or model, `tab` completes the
+folder and `↵` starts. The model is the tool's own default unless you pick one of
 the models it runs, or `auto`, which picks one for the prompt; tool `auto` picks the
 tool too, or only the model inside one tool, as the form's mode says. Claude and
 Copilot CLI are given their session IDs up front, so they are in the tree at once;
@@ -150,6 +153,20 @@ without the tree open:
   tmux    = false  # to turn the tmux message off
   ```
 
+- **A command**, to reach a phone or a chat with no daemon: any program on your
+  PATH, run detached with the text, hive's title, the session ID and its folder
+  filled in. It runs without a shell, so each element is one argument and nothing
+  needs quoting. An [ntfy](https://ntfy.sh) push, for example:
+
+  ```toml
+  [alerts]
+  command = ["ntfy", "pub", "my-topic", "{text}"]
+  ```
+
+  `{text}` is `claude ‹Admin phase 2› needs you`; `{title}` is `hive`; `{id}` and
+  `{cwd}` are the session's ID and folder. A failure goes to hive's log, like the
+  other alerts.
+
 ## Use from the shell
 
 ```sh
@@ -173,7 +190,8 @@ ahead of use (Claude's daemon keeps spares ready for `claude --bg`) stay hidden 
 their first message, and the daemon's own processes are never taken for sessions.
 
 Every action in the tree is also a command, so an agent can start interactive
-children, talk to them and check on them:
+children, talk to them and check on them. `hive --help` groups them: Start here,
+Sessions, Teams, Housekeeping, and For tmux and hooks.
 
 ```sh
 hive new opencode -p "port the tests" --wait   # start it in its own tmux window; prints its ID
@@ -308,6 +326,16 @@ the tool's ID (`claude-opus-5-5`), a name for it (`"opus 5.5"`) or `auto`. hive 
 into the ID, and refuses a model the tool doesn't run before anything starts, listing the
 ones it does; `hive models <tool>` lists them too.
 
+`--part role=text` gives a member its part of the brief, which the lead sees and builds its
+tasks around; it wins over a template's `prompt`, and a role that isn't on the team is
+refused before anything starts:
+
+```sh
+hive team new api-v2 --goal "add the admin API" --lead claude \
+    --member backend=claude --member frontend=codex \
+    --part backend="own the API handlers" --part frontend="own the web UI"
+```
+
 Save that roster as a template in `~/.config/hive/config.toml` and start the next team
 with `--from`. The template gives the defaults; a flag you also pass wins, and `--member`
 adds to the template's members:
@@ -345,8 +373,9 @@ template row to fill it from config.toml, and a work row for the shared folder o
 worktree per member. The team is a node in the tree with its members under it, each
 titled by the task it holds; select it and the preview is the board and the channel.
 `↵` opens the channel full screen with a live line: type to write to everyone (`@role`
-for one), `↵` sends, `esc` goes back to the tree, and the prompt wraps: `↑/↓` move the
-caret once you have typed, and `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) scroll the feed. Each
+for one), `↵` sends, `esc` goes back to the tree, `ctrl+g` reads the whole goal, and the
+prompt wraps: `↑/↓` move the caret once you have typed, and `pgup`/`pgdn` (or
+`ctrl+u`/`ctrl+d`) scroll the feed. Each
 member's row shows its state, model and effort, short session ID and how full its context
 is; the account's rate-limit windows (`5h 7% · resets 4h54m · 7d 22%`) show once per tool,
 when the tool reports them. Claude Code sends them only to its status line: point that
@@ -378,8 +407,9 @@ mark it done with a note on what changed, or blocked with why. hive posts each, 
 lead when an agent leads, and tells the owner of a task as soon as everything it waits for
 is done, so nobody polls.
 
-Press `e` on a team to open its board full screen: `j`/`k` (or the arrows) move, `n` adds a
-task, `e`/`↵` edits the selected one, `d` marks it done with an optional note, `b` marks it
+Press `e` on a team or any of its members to open its board full screen: `j`/`k` (or the
+arrows) move, `n` adds a task, `e`/`↵` edits the selected one, `d` marks it done with an
+optional note, `b` marks it
 blocked and asks why, and `esc` goes back to the tree, or from a form back to the board.
 The form takes a title, an optional body, an owner role and the tasks it waits for (`1,2`).
 An edit can't make a task wait on itself through a cycle, and clearing the owner of a
@@ -392,14 +422,16 @@ end; if it is waiting on you, it waits until you answer and the member next goes
 message never answers a permission prompt. A plain post goes to the channel only; it
 reaches a pane only when it names a teammate with `@role`. Every delivered line starts with
 `[team · from role]`, so it can't run a slash command in the member's TUI, and holds no
-control characters, so it can't reach the TUI as keys. hive also strips control characters
-from team text it draws in the board, the channel and the tree, so a teammate can't paint
-your terminal.
+control characters, so it can't reach the TUI as keys. A message delivered more than a
+minute after it was written says how old it is there: `[team · from role · 6m ago]`. hive
+also strips control characters from team text it draws in the board, the channel and the
+tree, so a teammate can't paint your terminal.
 
 | Key, on a team | Does |
 | --- | --- |
 | `↵` | open the team's channel full screen; on a member row, jump to that member |
-| `e` | open the board editor: `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
+| `e` | open the board editor (on a team or any of its members): `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
+| `ctrl+g` | read the whole goal and every member's part (a `^g goal` on the title says when it is cut) |
 | `s` | message everyone (`@role` for one); on a member, message that member |
 | `p` | pause or resume: no mail is delivered and no task claimed while paused |
 | `L` | take the lead yourself, or hand it back to an agent |
@@ -409,13 +441,13 @@ your terminal.
 
 | Command | Does |
 | --- | --- |
-| `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
-| `hive team ls` · `board [team]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts · the channel (all take `--json`) |
+| `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
+| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
-| `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print its number; its owner hears from hive when it is ready |
-| `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `ls [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task |
+| `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready |
+| `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `edit <n> [--title t] [--body b\|-] [--owner role] [--after n,…]` · `reopen <n> --why text` · `ls [n] [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task; `edit` changes only the flags you pass; `reopen` sends a done or blocked task back to open |
 | `hive team wait [--task n] [--from role] [--any] [--timeout d]` | block until a task is done or blocked, a message arrives, or (`--any`) the board changes; print what happened |
-| `hive team inbox [--wait] [--timeout d]` | print the messages queued for this member, on every team it is on |
+| `hive team inbox [--wait] [--peek] [--timeout d]` | print the messages queued for this member, on every team it is on, and mark them delivered; `--peek` leaves them queued. Every other `hive team` command tells a member in one stderr line when mail waits for it: `✉ 3 messages wait for you (lead ×2, manager) · hive team inbox` |
 | `hive team add <team> <role>=<tool>[:<model>]` · `rm <team> <role>` · `stop <team> [--yes]` | add a member · retire one, which reopens the tasks it had claimed · stop them all (asks first; `--yes` skips) |
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
 | `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail, members or tasks, and its tasks no longer move; `--clean` removes merged worktrees |
@@ -617,10 +649,11 @@ fields work as flags: `hive hook mytool --event start --session abc`.
 
 ## Debugging
 
-Hooks never print. Errors go to `~/.local/share/hive/hive.log`; set `HIVE_DEBUG=1` in
-an agent's environment to log every linking decision. `HIVE_HOME` moves the database
-and log elsewhere; `HIVE_TMUX_SOCKET=name` points hive at a named tmux server
-(`tmux -L name`).
+Hooks never print. Errors go to `~/.local/share/hive/hive.log`; routine lines are
+marked `INFO` and failures `ERROR`. `hive doctor` counts only the `ERROR` lines from
+the last day, and shows the last three. Set `HIVE_DEBUG=1` in an agent's environment
+to log every linking decision. `HIVE_HOME` moves the database and log elsewhere;
+`HIVE_TMUX_SOCKET=name` points hive at a named tmux server (`tmux -L name`).
 
 ## Releases
 

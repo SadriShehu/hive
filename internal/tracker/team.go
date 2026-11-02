@@ -397,7 +397,7 @@ func (t *Tracker) SetLead(tm store.Team, role string) error {
 			return err
 		}
 		if !slices.ContainsFunc(members, func(m store.Member) bool { return m.Role == role && m.Active() }) {
-			return fmt.Errorf("the team has no %s; roles: %s", role, team.Roster(members))
+			return fmt.Errorf("no member called %q; roles: %s", role, team.Roles(members))
 		}
 	}
 	if err := t.Store.SetLead(tm.ID, role, t.World.Now()); err != nil {
@@ -801,7 +801,7 @@ func (t *Tracker) deliver(id string, roles []Role) (string, error) {
 		}
 		if len(msgs) > 0 {
 			claims = append(claims, claim{r.Team, r.Member.Role, msgs})
-			text = append(text, team.Paste(r.Team.Name, msgs))
+			text = append(text, team.Paste(r.Team.Name, msgs, t.World.Now()))
 		}
 	}
 	if len(claims) == 0 {
@@ -867,7 +867,7 @@ func (t *Tracker) MuteMember(tm store.Team, role string, on bool) error {
 		return err
 	}
 	if !slices.ContainsFunc(members, func(m store.Member) bool { return m.Active() && m.Role == role }) {
-		return fmt.Errorf("the team has no %s; roles: %s", role, team.Roster(members))
+		return fmt.Errorf("no member called %q; roles: %s", role, team.Roles(members))
 	}
 	if on {
 		return t.Store.Mute(tm.ID, role, t.World.Now())

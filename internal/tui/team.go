@@ -28,15 +28,17 @@ func cleanLine(s string) string { return oneLine.Replace(team.Clean(s)) }
 
 // A team's channel, as loaded for the selected team node.
 type feed struct {
-	teamID string
-	msgs   []store.Message
-	err    string
+	teamID  string
+	msgs    []store.Message
+	waiting map[int64][]string // message ID -> roles it still waits for
+	err     string
 }
 
 type feedMsg struct {
-	teamID string
-	msgs   []store.Message
-	err    error
+	teamID  string
+	msgs    []store.Message
+	waiting map[int64][]string
+	err     error
 }
 
 // sendTarget is where the send prompt's message goes when it goes through a
@@ -108,7 +110,11 @@ func (m *Model) feedCmd(teamID string) tea.Cmd {
 	ops := m.ops
 	return func() tea.Msg {
 		msgs, err := ops.TeamFeed(teamID, feedMessages)
-		return feedMsg{teamID: teamID, msgs: msgs, err: err}
+		if err != nil {
+			return feedMsg{teamID: teamID, msgs: msgs, err: err}
+		}
+		waiting, err := ops.TeamWaiting(teamID)
+		return feedMsg{teamID: teamID, msgs: msgs, waiting: waiting, err: err}
 	}
 }
 
@@ -124,7 +130,7 @@ func (m *Model) onFeed(msg feedMsg) tea.Cmd {
 	if !open && !selected {
 		return nil
 	}
-	m.feed = feed{teamID: msg.teamID, msgs: msg.msgs}
+	m.feed = feed{teamID: msg.teamID, msgs: msg.msgs, waiting: msg.waiting}
 	if msg.err != nil {
 		m.feed.err = msg.err.Error()
 		return nil
@@ -153,6 +159,9 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	isTeam := n.Team != nil
 	ops := m.ops
 	switch msg.String() {
+	case "ctrl+g":
+		m.mode, m.goalTeam, m.goalScroll, m.goalFrom = modeGoal, tm.ID, 0, modeNormal
+		return m, nil, true
 	case "p":
 		pause := !tm.Paused
 		return m, func() tea.Msg {
@@ -194,6 +203,10 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, m.input.Focus(), true
 	}
 	if !isTeam {
+		if msg.String() == "e" {
+			m, cmd := m.openTaskEditor(tm)
+			return m, cmd, true
+		}
 		return m, nil, false
 	}
 	switch msg.String() {
@@ -242,6 +255,10 @@ func (m Model) openChannel(teamID string) (Model, tea.Cmd) {
 // feed.
 func (m Model) keyChannel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "ctrl+g":
+		// The input keeps what was typed: the reader is not a send.
+		m.mode, m.goalTeam, m.goalScroll, m.goalFrom = modeGoal, m.channelTeam, 0, modeChannel
+		return m, nil
 	case "esc":
 		m.mode = modeNormal
 		m.channelInput.Blur()
@@ -600,7 +617,7 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 			f.lead = i
 		}
 	}
-	f.name = newPromptArea("api-v2")
+	f.name = newPromptArea("e.g. api-v2")
 	f.folder = newPromptArea("folder")
 	f.goal = newPromptArea("what the team is for, and who owns what")
 	f.members = []teamRow{newTeamRow("claude")}
@@ -620,12 +637,12 @@ func (m Model) openTeamForm() (tea.Model, tea.Cmd) {
 }
 
 // templateLine draws the template row: none, or a saved roster.
-func (f teamForm) templateLine() string {
+func (f teamForm) templateLine(w int) string {
 	names := []string{"none"}
 	for _, t := range f.templates {
 		names = append(names, t.Name)
 	}
-	line := choices(names, f.template, func(string) lipgloss.Style { return sAccent })
+	line := choices(names, f.template, w, func(string) lipgloss.Style { return sAccent })
 	switch {
 	case f.template > 0:
 		line += "  " + sDim.Render("fills the form; the name stays yours")
@@ -934,10 +951,15 @@ func (m Model) teamFormLines(w, h int) []string {
 		}
 		return "  "
 	}
-	single := func(i int, name, value string) string {
-		return mark(i) + sDim.Render(fmt.Sprintf("%-8s", name)) + value
+	labelW := 0
+	for _, label := range []string{"template", "name", "folder", "work", "lead", "goal"} {
+		labelW = max(labelW, len(label))
 	}
-	leadLine := choices(f.leads, f.lead, func(t string) lipgloss.Style { return toolStyle(t) })
+	labelW++ // a space, so a value never touches its label
+	single := func(i int, name, value string) string {
+		return mark(i) + sDim.Render(fmt.Sprintf("%-*s", labelW, name)) + value
+	}
+	leadLine := choices(f.leads, f.lead, max(8, w-labelW-2), func(t string) lipgloss.Style { return toolStyle(t) })
 	if f.leads[f.lead] == "none" {
 		leadLine += "  " + sDim.Render("you lead from the tree")
 	}
@@ -948,27 +970,37 @@ func (m Model) teamFormLines(w, h int) []string {
 	nameRows := fieldRows(f.name, 3)
 	folderRows := fieldRows(f.folder, 3)
 	role, tool, model, _ := memberWidths(w)
+	numberW := len(fmt.Sprintf("%d", len(f.members)))
 	out := []string{sBold.Render("New team"), "",
-		single(tfTemplate, "template", f.templateLine()),
+		single(tfTemplate, "template", f.templateLine(max(8, w-labelW-2))),
 	}
-	out = append(out, fieldLines(mark(tfName), "name", f.name, 8, w, nameRows)...)
-	out = append(out, fieldLines(mark(tfFolder), "folder", f.folder, 8, w, folderRows)...)
-	out = append(out, single(tfWork, "work", f.workLine()), single(tfLead, "lead", leadLine),
-		"  "+sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"))
+	out = append(out, fieldLines(mark(tfName), "name", f.name, labelW, w, nameRows)...)
+	out = append(out, fieldLines(mark(tfFolder), "folder", f.folder, labelW, w, folderRows)...)
+	out = append(out, single(tfWork, "work", f.workLine(max(8, w-labelW-2))), single(tfLead, "lead", leadLine),
+		strings.Repeat(" ", 2+numberW+1)+
+			sDim.Render(pad("role", role)+" "+pad("tool", tool)+" "+pad("model", model)+" part"))
+	help := []string{}
+	if row, cell, ok := f.rowOf(f.field); ok && cell == memberModel {
+		help = f.modelHelp(row, w)
+	} else {
+		for _, text := range []string{
+			"+ adds a member row, ctrl+d removes the focused one; roles and tools are required.",
+			"each member opens in its own tmux window with a brief; they report to the channel.",
+		} {
+			for _, line := range strings.Split(ansi.Wrap(text, max(10, w), ""), "\n") {
+				help = append(help, sDim.Render(line))
+			}
+		}
+	}
 	// The member rows take what is left above the goal and the help.
-	after := 1 + goalLines + 1 + 2
+	after := 1 + goalLines + 1 + len(help)
 	room := max(1, h-len(out)-after)
 	start, end := f.memberWindow(room, w)
 	for i := start; i < end; i++ {
 		out = append(out, f.memberLines(i, w)...)
 	}
 	out = append(out, "")
-	out = append(out, fieldLines(mark(f.goalField()), "goal", f.goal, 8, w, goalLines)...)
-	help := []string{sDim.Render("+ adds a member row, ctrl+d removes the focused one; roles and tools are required."),
-		sDim.Render("each member opens in its own tmux window with a brief; they report to the channel.")}
-	if row, cell, ok := f.rowOf(f.field); ok && cell == memberModel {
-		help = f.modelHelp(row, w)
-	}
+	out = append(out, fieldLines(mark(f.goalField()), "goal", f.goal, labelW, w, goalLines)...)
 	out = append(append(out, ""), help...)
 	return fit(out, w, h)
 }
@@ -982,22 +1014,12 @@ func (f teamForm) modelHelp(row, w int) []string {
 		return []string{sDim.Render("tool auto picks the model too, for the goal and the member's part."),
 			sDim.Render("name a tool to pick its model here.")}
 	}
-	items, at := f.modelChoices(row), f.modelChoice(row)
-	shown := func(from int) string {
-		line := choices(items[from:], at-from, func(string) lipgloss.Style { return sAccent })
-		if from > 0 {
-			line = sDim.Render("…") + "  " + line
-		}
-		return line
-	}
-	from := 0
-	for from < at && ansi.StringWidth(shown(from)) > w {
-		from++
-	}
-	line := shown(from)
+	loading := ""
 	if f.loadingModels(row) {
-		line += "  " + sDim.Render("loading what it runs…")
+		loading = "  " + sDim.Render("loading what it runs…")
+		w -= ansi.StringWidth("  loading what it runs…")
 	}
+	line := choices(f.modelChoices(row), f.modelChoice(row), max(8, w), func(string) lipgloss.Style { return sAccent }) + loading
 	return []string{line, sDim.Render("←/→ picks one, or type an ID or a name like opus 5.5.")}
 }
 
@@ -1019,6 +1041,24 @@ func teamGlyph(n *tree.Node) (string, lipgloss.Style) {
 	return "⬡", lipgloss.NewStyle().Foreground(cRunning)
 }
 
+// allDone says a team has tasks, every one is done, and no member runs: it is
+// ready for hive team done but hasn't been closed.
+func (m Model) allDone(t store.Team) bool {
+	tasks := m.tasks(t.ID)
+	if len(tasks) == 0 {
+		return false
+	}
+	if c := team.Count(tasks); c.Done != c.Total {
+		return false
+	}
+	for _, mem := range m.members(t.ID) {
+		if s, ok := m.memberSession(mem); ok && s.Live() {
+			return false
+		}
+	}
+	return true
+}
+
 // teamRowLine draws a team node: fold mark, name, goal, how many members
 // and unread posts, age.
 func (m Model) teamRowLine(r row, w int, sel bool) string {
@@ -1038,7 +1078,9 @@ func (m Model) teamRowLine(r row, w int, sel bool) string {
 	}
 	g, gs := teamGlyph(n)
 	right := fmt.Sprintf("%d members", len(m.members(t.ID)))
-	if tasks := m.taskCount(t.ID); tasks != "" {
+	if m.allDone(t) {
+		right += " · all done · hive team done?"
+	} else if tasks := m.taskCount(t.ID); tasks != "" {
 		right += " · " + tasks
 	}
 	if _, trashed := m.trashedTeamByID(t.ID); trashed {
@@ -1098,6 +1140,71 @@ func memberState(mem store.Member, s store.Session, found bool) string {
 	return s.Status
 }
 
+// teamTitleLine is "⬡ name · goal" on one line, cut to the width so the
+// channel keeps its room for the feed.
+func (m Model) teamTitleLine(t store.Team, w int) string {
+	name := "⬡ " + cleanLine(t.Name)
+	line := sAccent.Bold(true).Render(name)
+	goal := strings.TrimSpace(cleanLine(t.Goal))
+	if goal == "" {
+		return ansi.Truncate(line, w, "…")
+	}
+	room := w - ansi.StringWidth(name) - 3 // " · "
+	if room <= 0 {
+		return sAccent.Bold(true).Render(ansi.Truncate(name, w, "…"))
+	}
+	if ansi.StringWidth(goal) <= room {
+		return ansi.Truncate(line+sDim.Render(" · "+goal), w, "…")
+	}
+	// The goal is cut: say how to read all of it, unless that would leave no
+	// room for the goal, or push the name out.
+	marker := keys("^g", "goal")
+	if rest := room - 2 - ansi.StringWidth(marker); rest > 0 {
+		line += sDim.Render(" · " + ansi.Truncate(goal, rest, "…"))
+		line += "  " + marker
+	} else {
+		line += sDim.Render(" · " + ansi.Truncate(goal, room, "…"))
+	}
+	return ansi.Truncate(line, w, "…")
+}
+
+// memberHeadLine adds a member's model, context and held task to its head
+// line. When the width is short it drops the context first, then the model,
+// and cuts the task title last.
+func memberHeadLine(line, model, context, task string, w int) string {
+	base := func() string {
+		out := line
+		if model != "" {
+			out += sDim.Render("  ") + sText.Render(model)
+		}
+		if context != "" {
+			out += sDim.Render("  " + context)
+		}
+		return out
+	}
+	full := func() string {
+		out := base()
+		if task != "" {
+			out += sDim.Render("  ") + sText.Render(task)
+		}
+		return out
+	}
+	if context != "" && ansi.StringWidth(full()) > w {
+		context = ""
+	}
+	if model != "" && ansi.StringWidth(full()) > w {
+		model = ""
+	}
+	if task != "" {
+		if room := w - ansi.StringWidth(base()) - 2; room < 1 {
+			task = ""
+		} else {
+			task = ansi.Truncate(task, room, "…")
+		}
+	}
+	return ansi.Truncate(full(), w, "…")
+}
+
 // teamHead draws who a team is: its name and goal, how it runs, its state and
 // its roster.
 func (m Model) teamHead(t store.Team, w int) []string {
@@ -1110,16 +1217,7 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	if t.Workspace == store.WorkspaceWorktrees {
 		where += " · a worktree per member"
 	}
-	head := []string{sAccent.Bold(true).Render("⬡ " + t.Name)}
-	if goal := strings.TrimSpace(cleanLine(t.Goal)); goal != "" {
-		for i, line := range strings.Split(ansi.Wrap(goal, max(10, w-4), ""), "\n") {
-			prefix := "    "
-			if i == 0 {
-				prefix = "  " + sDim.Render("· ")
-			}
-			head = append(head, prefix+sDim.Render(line))
-		}
-	}
+	head := []string{m.teamTitleLine(t, w)}
 	head = append(head, sDim.Render(ansi.Truncate(fmt.Sprintf("%d members · led by %s · %s · started %s ago",
 		len(members), led, where, age(m.now(), t.CreatedAt)), w, "…")))
 	if _, trashed := m.trashedTeamByID(t.ID); trashed {
@@ -1129,6 +1227,10 @@ func (m Model) teamHead(t store.Team, w int) []string {
 	} else if t.Paused {
 		head = append(head, sError.Render("⏸ paused: no mail is delivered · p resumes"))
 	}
+	roleW := 0
+	for _, mem := range members {
+		roleW = max(roleW, ansi.StringWidth(cleanLine(mem.Role)))
+	}
 	tools := map[string]bool{}
 	for _, mem := range members {
 		s, ok := m.memberSession(mem)
@@ -1136,34 +1238,20 @@ func (m Model) teamHead(t store.Team, w int) []string {
 		if ok {
 			g, gs = glyph(s)
 		}
-		line := sText.Render(mem.Role) + sDim.Render(" · "+memberState(mem, s, ok))
+		line := "  " + gs.Render(g) + " " + sText.Render(pad(cleanLine(mem.Role), roleW))
+		line += "  " + sDim.Render(memberState(mem, s, ok))
+		model, context := "", ""
 		if u, ok := m.usageFor(mem.SessionID); ok {
-			if u.Model != "" {
-				line += sDim.Render(" · ") + sText.Render(u.Model)
-			}
-			if u.Effort != "" {
-				line += sText.Render(" " + u.Effort)
-			}
-			if context := contextLine(u, w, 10); context != "" {
-				line += sDim.Render(" · ") + context
+			model = u.Model
+			if u.ContextWindow > 0 {
+				context = fmt.Sprintf("ctx %d%%", contextPercent(u))
 			}
 		} else if mem.Model != "" && mem.Model != fusion.Auto {
-			line += sDim.Render(" · " + mem.Model)
+			model = mem.Model
 		}
-		if id := shortSessionID(mem.SessionID); id != "" {
-			line += sDim.Render(" · " + id)
-		}
-		// The member's part is long text: it wraps under its role.
-		if part := strings.TrimSpace(cleanLine(mem.Prompt)); part != "" {
-			line += sDim.Render(" · ") + sText.Render(part)
-		}
-		for i, wrapped := range strings.Split(ansi.Wrap(line, max(10, w-4), ""), "\n") {
-			prefix := "    "
-			if i == 0 {
-				prefix = "  " + gs.Render(g) + " "
-			}
-			head = append(head, prefix+wrapped)
-		}
+		// The part is long text: it stays on the board and the member's own
+		// preview, while the head shows the task the member holds.
+		head = append(head, memberHeadLine(line, model, context, m.heldTitle(t.ID, mem.Role), w))
 		tools[mem.Tool] = true
 	}
 	// Rate limits are the account's, not one member's: show them once per tool.
@@ -1313,20 +1401,70 @@ func (m Model) feedLines(t store.Team, w int) []string {
 				out = append(out, strings.Repeat(" ", prefixW)+bodyStyle.Render(l))
 			}
 		}
+		if msg.Kind != store.MsgSay {
+			continue
+		}
+		if suffix := waitingSuffix(m.feed.waiting[msg.ID]); suffix != "" {
+			last := len(out) - 1
+			if ansi.StringWidth(out[last])+ansi.StringWidth(suffix) <= w {
+				out[last] += sDim.Render(suffix)
+			} else {
+				out = append(out, strings.Repeat(" ", prefixW)+sDim.Render(suffix))
+			}
+		}
 	}
 	return out
 }
 
+// waitingSuffix says who still has to take a message: "⋯ waits for uiux's
+// turn", or "⋯ waits for uiux, manager" for several.
+func waitingSuffix(roles []string) string {
+	if len(roles) == 0 {
+		return ""
+	}
+	clean := make([]string, len(roles))
+	for i, role := range roles {
+		clean[i] = team.Clean(role)
+	}
+	if len(clean) == 1 {
+		return " ⋯ waits for " + clean[0] + "'s turn"
+	}
+	return " ⋯ waits for " + strings.Join(clean, ", ")
+}
+
 // teamHints are the key hints while a team or one of its members is selected.
-func (m Model) teamHints() (string, bool) {
+func (m Model) teamHints() ([]string, bool) {
 	_, n, ok := m.selectedTeam()
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	if n.Team != nil {
-		return keys("↵", "channel", "s", "message", "p", "pause", "L", "lead", "x", "stop", "m", "system", "T", "new team", "?", "help", "q", "quit"), true
+		return []string{
+			keys("↵", "channel"),
+			keys("e", "board"),
+			keys("^g", "goal"),
+			keys("s", "message"),
+			keys("p", "pause"),
+			keys("L", "lead"),
+			keys("x", "stop"),
+			keys("d", "trash"),
+			keys("m", "hide hive posts"),
+			keys("T", "new team"),
+		}, true
 	}
-	return keys("↵", "jump", "s", "message", "p", "pause", "L", "lead", "r", "reopen", "x", "stop", "T", "new team", "?", "help", "q", "quit"), true
+	hints := []string{keys("↵", "jump")}
+	if n.TeamID != "" {
+		hints = append(hints, keys("e", "board"), keys("^g", "goal"))
+	}
+	hints = append(hints,
+		keys("s", "message"),
+		keys("p", "pause"),
+		keys("L", "lead"),
+		keys("r", "reopen"),
+		keys("x", "stop"),
+		keys("T", "new team"),
+	)
+	return hints, true
 }
 
 // teamCount is how many teams are still active.

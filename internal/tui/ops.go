@@ -48,7 +48,8 @@ type Ops interface {
 	Teams() (TeamSnapshot, error)
 	TeamTemplates() []TeamTemplate // the [[team]] templates the config holds, for the new-team form
 	TeamFeed(teamID string, n int) ([]store.Message, error)
-	TeamSay(teamID, to, text string) (string, error) // to: a role or "all"; says what happened to each
+	TeamWaiting(teamID string) (map[int64][]string, error) // message ID -> roles it still waits for
+	TeamSay(teamID, to, text string) (string, error)       // to: a role or "all"; says what happened to each
 	TeamPause(teamID string, paused bool) error
 	TeamLead(teamID, role string) error // "" for the user
 	TeamStop(teamID string) (int, error)
@@ -222,6 +223,10 @@ func (o *liveOps) PurgeTeam(tm store.Team) (tracker.Purged, error) {
 
 func (o *liveOps) TeamFeed(teamID string, n int) ([]store.Message, error) {
 	return o.st.Messages(teamID, n, false)
+}
+
+func (o *liveOps) TeamWaiting(teamID string) (map[int64][]string, error) {
+	return o.st.WaitingByMessage(teamID)
 }
 
 func (o *liveOps) TeamSay(teamID, to, text string) (string, error) {

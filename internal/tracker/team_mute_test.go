@@ -51,7 +51,7 @@ func TestMuteOnlySilencesOneMember(t *testing.T) {
 	if err != nil || len(mutes) != 1 || mutes[0] != "backend" {
 		t.Fatalf("Mutes = %v, %v", mutes, err)
 	}
-	if err := tr.MuteMember(tm, "nobody", true); err == nil || !strings.Contains(err.Error(), "no nobody") {
+	if err := tr.MuteMember(tm, "nobody", true); err == nil || !strings.Contains(err.Error(), `no member called "nobody"`) {
 		t.Fatalf("muting a role off the team: %v, want an error", err)
 	}
 }
