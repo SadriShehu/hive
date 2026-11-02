@@ -443,6 +443,19 @@ Start here, Sessions, Teams, Housekeeping, and For tmux and hooks.
 | `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and the `ERROR` lines logged in the last day, with the last three |
 | `hive team …` | [teams](#teams): start one, follow its channel, write to its members |
 | `hive hook <tool>` | for integrations only; prints nothing, always exits 0 |
+| `hive completion <shell>` | print the shell's completion script; its dynamic values come from the database, read-only |
+
+**Shell completion.** `hive completion <shell>` prints cobra's script for zsh, bash or
+fish, and the hidden `__complete` command behind it fills in the dynamic parts. Each
+kind has one function returning `value\tdescription`: sessions in the short form
+`tool:8hex`, live ones first and then the last day's, with the tool, role, held task
+and state after a tab; teams with their goal; a team's roles with their tool and
+state; and the task numbers each board verb can act on. `--member` completes tools
+after `role=`, models after `tool:`, `--lead` does the same and adds `self` and
+`none`, `--model` completes the models of the tool `hive new` names, and `--after`
+completes the comma list after its last comma. Completion opens the database with
+`store.OpenRead`, which neither creates nor migrates it, calls neither tmux nor the
+network, and prints nothing when it fails or when there is no database.
 
 **Interactive children from inside an agent.** Claude runs
 `hive new opencode -p "port the tests" --wait` and gets back an ID; the opencode TUI opens

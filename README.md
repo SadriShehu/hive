@@ -223,6 +223,24 @@ A tool that starts its session only with its first message (opencode without `-p
 gets a stand-in ID, `opencode:pid-N`, which the other commands accept and which
 names the session once it starts.
 
+### Shell completion
+
+hive completes session IDs, teams, roles, task numbers, tools and models as you
+type. Install it once for your shell:
+
+```sh
+hive completion zsh > "${fpath[1]}/_hive"
+hive completion bash > /etc/bash_completion.d/hive
+hive completion fish > ~/.config/fish/completions/hive.fish
+```
+
+`hive send <TAB>` lists the live sessions first, each with its tool, role, task
+and state, as `claude:1043899d  claude · lead · #4 handlers · working`.
+`hive team task done <TAB>` lists the tasks it can close, and
+`hive team new api --member "backend=claude:<TAB>"` lists claude's models.
+Completion opens the database read-only, makes nothing, and calls neither tmux
+nor the network.
+
 `hive wait <id>...` returns once each agent is done with what it was given: its turn
 is over (idle), it stopped to ask you (attention), or it ended (exited). A message hive
 gave it (`new -p`, `send`, `resume -p`) counts only once the agent has answered it, so
