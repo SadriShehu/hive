@@ -587,6 +587,9 @@ editing a file a teammate is working in, and to commit only their own files.
   tree, or on the channel's live line, goes through the same mailbox.
 - **Unread.** `team_reads` keeps the last message you have seen per team; the node shows
   what others wrote since.
+- **Waiting mail.** In the tree and the channel, a `say` whose delivery still waits shows
+  a dim `⋯ waits for uiux's turn` (or `⋯ waits for uiux, manager` for several); once it is
+  delivered the suffix is gone, so you can tell what a teammate has seen.
 
 **Delivery rules**, per recipient, in order:
 

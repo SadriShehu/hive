@@ -28,15 +28,17 @@ func cleanLine(s string) string { return oneLine.Replace(team.Clean(s)) }
 
 // A team's channel, as loaded for the selected team node.
 type feed struct {
-	teamID string
-	msgs   []store.Message
-	err    string
+	teamID  string
+	msgs    []store.Message
+	waiting map[int64][]string // message ID -> roles it still waits for
+	err     string
 }
 
 type feedMsg struct {
-	teamID string
-	msgs   []store.Message
-	err    error
+	teamID  string
+	msgs    []store.Message
+	waiting map[int64][]string
+	err     error
 }
 
 // sendTarget is where the send prompt's message goes when it goes through a
@@ -108,7 +110,11 @@ func (m *Model) feedCmd(teamID string) tea.Cmd {
 	ops := m.ops
 	return func() tea.Msg {
 		msgs, err := ops.TeamFeed(teamID, feedMessages)
-		return feedMsg{teamID: teamID, msgs: msgs, err: err}
+		if err != nil {
+			return feedMsg{teamID: teamID, msgs: msgs, err: err}
+		}
+		waiting, err := ops.TeamWaiting(teamID)
+		return feedMsg{teamID: teamID, msgs: msgs, waiting: waiting, err: err}
 	}
 }
 
@@ -124,7 +130,7 @@ func (m *Model) onFeed(msg feedMsg) tea.Cmd {
 	if !open && !selected {
 		return nil
 	}
-	m.feed = feed{teamID: msg.teamID, msgs: msg.msgs}
+	m.feed = feed{teamID: msg.teamID, msgs: msg.msgs, waiting: msg.waiting}
 	if msg.err != nil {
 		m.feed.err = msg.err.Error()
 		return nil
@@ -1375,8 +1381,35 @@ func (m Model) feedLines(t store.Team, w int) []string {
 				out = append(out, strings.Repeat(" ", prefixW)+bodyStyle.Render(l))
 			}
 		}
+		if msg.Kind != store.MsgSay {
+			continue
+		}
+		if suffix := waitingSuffix(m.feed.waiting[msg.ID]); suffix != "" {
+			last := len(out) - 1
+			if ansi.StringWidth(out[last])+ansi.StringWidth(suffix) <= w {
+				out[last] += sDim.Render(suffix)
+			} else {
+				out = append(out, strings.Repeat(" ", prefixW)+sDim.Render(suffix))
+			}
+		}
 	}
 	return out
+}
+
+// waitingSuffix says who still has to take a message: "⋯ waits for uiux's
+// turn", or "⋯ waits for uiux, manager" for several.
+func waitingSuffix(roles []string) string {
+	if len(roles) == 0 {
+		return ""
+	}
+	clean := make([]string, len(roles))
+	for i, role := range roles {
+		clean[i] = team.Clean(role)
+	}
+	if len(clean) == 1 {
+		return " ⋯ waits for " + clean[0] + "'s turn"
+	}
+	return " ⋯ waits for " + strings.Join(clean, ", ")
 }
 
 // teamHints are the key hints while a team or one of its members is selected.

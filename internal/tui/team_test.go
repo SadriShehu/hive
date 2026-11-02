@@ -17,6 +17,7 @@ import (
 type teamOps struct {
 	snap      TeamSnapshot
 	feed      []store.Message
+	waiting   map[int64][]string
 	templates []TeamTemplate
 
 	said        []string // team|to|text
@@ -54,6 +55,7 @@ func (f *teamOps) TeamFeed(team string, _ int) ([]store.Message, error) {
 	f.feedAsked = append(f.feedAsked, team)
 	return f.feed, nil
 }
+func (f *teamOps) TeamWaiting(string) (map[int64][]string, error) { return f.waiting, nil }
 func (f *teamOps) TeamSay(team, to, text string) (string, error) {
 	f.said = append(f.said, team+"|"+to+"|"+text)
 	return to + ": sent", nil
@@ -232,6 +234,41 @@ func TestSelectingATeamShowsItsChannelAndMarksItRead(t *testing.T) {
 	}
 	if strings.Contains(ansi.Strip(strings.Join(m.feedLines(m.snap.Teams[0], 80), "\n")), "hive") {
 		t.Error("m left hive's own posts in the feed")
+	}
+}
+
+// A say that still waits for a teammate's turn says so, with one role or
+// several; once delivered it looks like any other message.
+func TestTheFeedMarksMailThatStillWaits(t *testing.T) {
+	m, _ := setupTeam(t)
+	m.feed = feed{teamID: "t1", msgs: teamFeed()}
+
+	m.feed.waiting = map[int64][]string{4: {"frontend"}}
+	got := strings.Join(m.feedLines(m.snap.Teams[0], 100), "\n")
+	if !strings.Contains(got, "⋯ waits for frontend's turn") {
+		t.Errorf("a waiting say isn't marked:\n%s", got)
+	}
+
+	m.feed.waiting = map[int64][]string{4: {"frontend", "manager"}}
+	got = strings.Join(m.feedLines(m.snap.Teams[0], 100), "\n")
+	if !strings.Contains(got, "⋯ waits for frontend, manager") {
+		t.Errorf("a waiting say with several roles isn't marked:\n%s", got)
+	}
+
+	m.feed.waiting = nil
+	got = strings.Join(m.feedLines(m.snap.Teams[0], 100), "\n")
+	if strings.Contains(got, "waits for") {
+		t.Errorf("a delivered message still shows a wait:\n%s", got)
+	}
+}
+
+// Opening the channel fetches what still waits along with the feed.
+func TestTheChannelFetchesWaitingMail(t *testing.T) {
+	m, ops := setupTeam(t)
+	ops.waiting = map[int64][]string{4: {"frontend"}}
+	m = press(t, m, "enter")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "⋯ waits for frontend's turn") {
+		t.Errorf("the channel doesn't mark waiting mail:\n%s", view)
 	}
 }
 
