@@ -397,7 +397,7 @@ func (t *Tracker) SetLead(tm store.Team, role string) error {
 			return err
 		}
 		if !slices.ContainsFunc(members, func(m store.Member) bool { return m.Role == role && m.Active() }) {
-			return fmt.Errorf("the team has no %s; roles: %s", role, team.Roster(members))
+			return fmt.Errorf("no member called %q; roles: %s", role, team.Roles(members))
 		}
 	}
 	if err := t.Store.SetLead(tm.ID, role, t.World.Now()); err != nil {
@@ -867,7 +867,7 @@ func (t *Tracker) MuteMember(tm store.Team, role string, on bool) error {
 		return err
 	}
 	if !slices.ContainsFunc(members, func(m store.Member) bool { return m.Active() && m.Role == role }) {
-		return fmt.Errorf("the team has no %s; roles: %s", role, team.Roster(members))
+		return fmt.Errorf("no member called %q; roles: %s", role, team.Roles(members))
 	}
 	if on {
 		return t.Store.Mute(tm.ID, role, t.World.Now())

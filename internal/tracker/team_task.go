@@ -57,7 +57,7 @@ func (t *Tracker) AddTask(tm store.Team, by, title, body, owner string, after []
 	}
 	owner = strings.TrimPrefix(strings.TrimSpace(owner), "@")
 	if owner != "" && !onTeam(members, owner) {
-		return store.Task{}, nil, fmt.Errorf("the team has no %s; roles: %s", owner, team.Roster(members))
+		return store.Task{}, nil, fmt.Errorf("no member called %q; roles: %s", owner, team.Roles(members))
 	}
 	if err := team.CheckAfter(after, tasks); err != nil {
 		return store.Task{}, nil, err
@@ -98,7 +98,7 @@ func (t *Tracker) EditTask(tm store.Team, n int, title, body, owner string, afte
 	}
 	owner = strings.TrimPrefix(strings.TrimSpace(owner), "@")
 	if owner != "" && !onTeam(members, owner) {
-		return store.Task{}, fmt.Errorf("the team has no %s; roles: %s", owner, team.Roster(members))
+		return store.Task{}, fmt.Errorf("no member called %q; roles: %s", owner, team.Roles(members))
 	}
 	if err := team.CheckAfter(after, tasks); err != nil {
 		return store.Task{}, err
@@ -438,7 +438,7 @@ func (t *Tracker) WaitTeam(ctx context.Context, tm store.Team, role string, o Wa
 	}
 	if o.From != "" && o.From != store.FromYou && o.From != store.FromHive &&
 		!slices.ContainsFunc(members, func(m store.Member) bool { return m.Role == o.From }) {
-		return nil, fmt.Errorf("the team has no %s; roles: %s", o.From, team.Roster(members))
+		return nil, fmt.Errorf("no member called %q; roles: %s", o.From, team.Roles(members))
 	}
 	mark, err := t.markBoard(tm.ID)
 	if err != nil {

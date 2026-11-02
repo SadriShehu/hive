@@ -106,8 +106,11 @@ func newTaskAddCmd(f *taskFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("#%d\n", task.N)
-			printSent(sent)
+			tasks, err := e.st.Tasks(tm.ID)
+			if err != nil {
+				return err
+			}
+			fmt.Println(addSaid(task, tasks, sent))
 			return nil
 		},
 	}
@@ -115,6 +118,48 @@ func newTaskAddCmd(f *taskFlags) *cobra.Command {
 	cmd.Flags().StringVar(&owner, "owner", "", "the role that does it")
 	cmd.Flags().StringVar(&after, "after", "", "the tasks it waits for: 1,2")
 	return cmd
+}
+
+// addSaid words what happened to a new task on one line.
+func addSaid(task store.Task, tasks []store.Task, sent []tracker.Sent) string {
+	line := fmt.Sprintf("#%d added", task.N)
+	if task.Owner == "" {
+		return line + ", no owner"
+	}
+	line += " for " + task.Owner
+	if !team.Ready(task, tasks) {
+		return line + " · waits for " + team.Numbers(team.Waiting(task, tasks))
+	}
+	for _, s := range sent {
+		if s.Role == task.Owner {
+			if said := toldWording(s.How); said != "" {
+				return line + " · " + said
+			}
+		}
+	}
+	return line
+}
+
+// toldWording turns what the tracker said about telling the owner into the
+// words `task add` prints.
+func toldWording(how string) string {
+	switch {
+	case how == "sent" || how == "reopened with your message":
+		return "told now"
+	case how == "queued; it hasn't reported in yet":
+		return "told when it reports in"
+	case how == "queued; the team is paused":
+		return "told when the team resumes"
+	case how == "queued; it is muted":
+		return "told when it is unmuted"
+	case how == "queued; it left the team":
+		return "not told; it left the team"
+	case strings.HasPrefix(how, "queued; it is "):
+		return "told when it is idle (" + strings.TrimPrefix(how, "queued; it is ") + " now)"
+	case how != "":
+		return "told when it can take it"
+	}
+	return ""
 }
 
 func newTaskClaimCmd(f *taskFlags) *cobra.Command {
@@ -270,7 +315,7 @@ func newTaskEditCmd(f *taskFlags) *cobra.Command {
 				return err
 			}
 			fmt.Printf("#%d edited\n", task.N)
-			printTasks([]store.Task{task}, false)
+			printTasks([]store.Task{task}, false, 0)
 			return nil
 		},
 	}
@@ -339,9 +384,9 @@ func editValues(task store.Task, changed map[string]bool, title, body, owner, af
 func newTaskLsCmd(f *taskFlags) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List the board's tasks, with their details",
-		Args:  cobra.NoArgs,
+		Use:   "ls [n]",
+		Short: "List the board's tasks, with their details; give a number for one",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, tm, _, err := f.open()
 			if err != nil {
@@ -352,12 +397,29 @@ func newTaskLsCmd(f *taskFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if len(args) > 0 {
+				n, err := team.ParseTask(args[0])
+				if err != nil {
+					return err
+				}
+				i := -1
+				for j := range tasks {
+					if tasks[j].N == n {
+						i = j
+						break
+					}
+				}
+				if i < 0 {
+					return fmt.Errorf("the board has no #%d; `hive team task ls` lists the tasks", n)
+				}
+				tasks = tasks[i : i+1]
+			}
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
 				return enc.Encode(taskRows(tasks))
 			}
-			printTasks(tasks, true)
+			printTasks(tasks, true, 0)
 			return nil
 		},
 	}
@@ -380,12 +442,14 @@ func taskRows(tasks []store.Task) []taskRow {
 	return rows
 }
 
-// printTasks prints the board: number, status, owner and title, then what
-// done changed, why it is blocked, or what it waits for. With bodies, each
-// task's details follow it.
-func printTasks(tasks []store.Task, bodies bool) {
+// taskLines words the board: number, status, owner and title, then what done
+// changed, why it is blocked, or what it waits for. A width cuts each task's
+// note and body to one line; with bodies, each task's details follow it in
+// full when there is no width.
+func taskLines(tasks []store.Task, bodies bool, width int) []string {
+	var out []string
 	if len(tasks) == 0 {
-		fmt.Println("  (no tasks yet; `hive team task add` adds one)")
+		out = append(out, "  (no tasks yet; `hive team task add` adds one)")
 	}
 	for _, t := range tasks {
 		extra := t.Note
@@ -393,13 +457,31 @@ func printTasks(tasks []store.Task, bodies bool) {
 			extra = "waits for " + team.Numbers(w)
 		}
 		line := fmt.Sprintf("  %-4s %-8s %-10s %s", fmt.Sprintf("#%d", t.N), t.Status, team.Clean(t.Owner), team.Clean(t.Title))
+		if width > 0 {
+			if extra != "" {
+				line += " · " + oneLine(extra)
+			}
+			if bodies && t.Body != "" {
+				line += " · " + oneLine(t.Body)
+			}
+			out = append(out, truncate(line, width))
+			continue
+		}
 		if extra != "" {
 			line += " · " + team.Clean(extra)
 		}
-		fmt.Println(line)
+		out = append(out, line)
 		if bodies && t.Body != "" {
-			fmt.Println("       " + strings.ReplaceAll(team.Clean(t.Body), "\n", "\n       "))
+			out = append(out, "       "+strings.ReplaceAll(team.Clean(t.Body), "\n", "\n       "))
 		}
+	}
+	return out
+}
+
+// printTasks prints the board.
+func printTasks(tasks []store.Task, bodies bool, width int) {
+	for _, line := range taskLines(tasks, bodies, width) {
+		fmt.Println(line)
 	}
 }
 

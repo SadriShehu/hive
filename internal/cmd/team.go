@@ -551,7 +551,7 @@ func newTeamLsCmd() *cobra.Command {
 }
 
 func newTeamBoardCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, tasksOnly, channelOnly bool
 	var n int
 	cmd := &cobra.Command{
 		Use:   "board [team]",
@@ -603,6 +603,16 @@ func newTeamBoardCmd() *cobra.Command {
 					Worktrees *worktreeBoard  `json:"worktrees,omitempty"`
 				}{tm, rows, taskRows(tasks), msgs, worktrees})
 			}
+			width := boardWidth()
+			if tasksOnly || channelOnly {
+				if tasksOnly {
+					printTasks(tasks, true, width)
+				}
+				if channelOnly {
+					printMessages(msgs)
+				}
+				return nil
+			}
 			state := tm.Status
 			if tm.Paused {
 				state += ", paused"
@@ -616,7 +626,7 @@ func newTeamBoardCmd() *cobra.Command {
 				fmt.Printf("goal: %s\n", team.Clean(tm.Goal))
 			}
 			fmt.Println("\nmembers")
-			width, color := boardWidth(), useColor()
+			color := useColor()
 			for _, m := range rows {
 				if !m.Active() {
 					continue
@@ -625,7 +635,7 @@ func newTeamBoardCmd() *cobra.Command {
 				fmt.Println(memberBoardText(m.Role, m.Tool, m.State, m.Messages, held, hasHeld, m.Prompt, width, color))
 			}
 			fmt.Println("\ntasks")
-			printTasks(tasks, false)
+			printTasks(tasks, true, width)
 			worktrees.print()
 			fmt.Println("\nchannel")
 			printMessages(msgs)
@@ -633,6 +643,8 @@ func newTeamBoardCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the team, its members, its tasks and the latest messages")
+	cmd.Flags().BoolVar(&tasksOnly, "tasks", false, "print only the task list")
+	cmd.Flags().BoolVar(&channelOnly, "channel", false, "print only the channel lines")
 	cmd.Flags().IntVarP(&n, "lines", "n", 12, "how many channel messages")
 	return cmd
 }
