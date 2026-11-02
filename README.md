@@ -204,16 +204,22 @@ hive sync         # import history now (hive ls does this on its own); --full re
 ```
 
 ```
-● claude        Admin phase 2                      working    2m  ~/go/src/…/kudoesim     claude:48873400
-├─ ● opencode   admin-phase2-backend          run  working    1m  …/kudoesim/backend      opencode:ses_f18cd743
-│  └─ ◉ claude  lint-fix                      run  idle       1m  …/kudoesim/backend      claude:0d683b5d
-└─ ○ opencode   admin-phase2-app              run  exited    40m  …/kudoesim/admin        opencode:ses_f18cd367
+⬡ hive-review   we want to improve hive…         3 members · 2/6 tasks
+├─ ● claude     uiux · #2 TUI UX audit          working    0s  ~$1.48  ~/go/src/…/hive    claude:1043899d
+└─ ◉ claude     lead · Hive team review         idle      22s  ~$0.90  ~/go/src/…/hive    claude:0332aec3
+● claude        Admin phase 2                     working    2m          ~/go/src/…/kudoesim   claude:48873400
+├─ ● opencode   admin-phase2-backend         run  working    1m          …/kudoesim/backend    opencode:ses_f18cd743
+│  └─ ◉ claude  lint-fix                     run  idle       1m          …/kudoesim/backend    claude:0d683b5d
+└─ ○ opencode   admin-phase2-app             run  exited    40m          …/kudoesim/admin      opencode:ses_9a41b2c7
 ```
 
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited.
-`run` marks a headless session, `sub` a tool's own subagent. Sessions a tool starts
-ahead of use (Claude's daemon keeps spares ready for `claude --bg`) stay hidden until
-their first message, and the daemon's own processes are never taken for sessions.
+A team is a `⬡` node with its members under it, each shown by its role and the task
+it holds; a done team folds to one dim line unless `--all`. Sessions that aren't on a
+team follow the teams. `run` marks a headless session, `sub` a tool's own subagent.
+Sessions a tool starts ahead of use (Claude's daemon keeps spares ready for
+`claude --bg`) stay hidden until their first message, and the daemon's own processes
+are never taken for sessions.
 
 Every action in the tree is also a command, so an agent can start interactive
 children, talk to them and check on them. `hive --help` groups them: Start here,
@@ -240,7 +246,11 @@ hive doctor                                    # check tmux, the database and ev
 ```
 
 An `<id>` is the full ID (`claude:48873400-…`), the tool's own ID, or any unique
-prefix of either. `hive new` starts in the current folder (`--cwd` to change it), in
+prefix of either. hive prints a short form: the tool, then the shortest prefix of its
+ID that no other session of that tool shares, at least eight characters (not counting
+a leading `ses_`, so opencode keeps `ses_` plus eight), like git's short hashes. It is
+still a prefix, so every command accepts it. `hive new` starts in the
+current folder (`--cwd` to change it), in
 the background (`--focus` to switch to it), linked under the agent running the command
 (`--parent none` or `--parent <id>` to change that), with the tool's default model
 (`--model <name>` to set one: the tool's ID or a name for it, like `opus 5.5`, which
@@ -508,11 +518,11 @@ tree, so a teammate can't paint your terminal.
 | Command | Does |
 | --- | --- |
 | `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
-| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks, latest posts and each worktree's branch line, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
+| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks, latest posts and each worktree's branch line, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part, and both print both sections without the goal and roster) · the channel (all take `--json`; with `--tasks` or `--channel`, `--json` keeps only that key) |
 | `hive team report [team] [--out path]` | Markdown hand-off: the goal whole, members with state and cost, every task with its note or blocked reason, and the members' posts; `--out team` writes `$HIVE_TEAM_DIR/report.md` |
 | `hive team save <team> [--as name]` | append the team as a `[[team]]` template in config.toml, for `hive team new --from`; only appends, and refuses a name already there |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
-| `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready |
+| `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` · `add --file plan.toml [--dry-run]` | add a task and print one line: `#4 added for manager · told now`, `· told when it is idle (working now)` or `· waits for #1 #2`; its owner hears from hive when it is ready. `--file` adds a whole plan of `[[task]]` tables in one call, checking all of it first |
 | `hive team task claim <n> [--force]` · `done <n> [--note text]` · `block <n> --why text` · `edit <n> [--title t] [--body b\|-] [--owner role] [--after n,…]` · `reopen <n> --why text` · `ls [n] [--json]` | work the board; `claim` refuses a task whose `--after` tasks aren't done, another member's task, or any claim on a paused or done team; `--force` overrides the first two, not the pause, a done team or a done task; `edit` changes only the flags you pass; `reopen` sends a done or blocked task back to open |
 | `hive team wait [--task n] [--from role] [--any] [--timeout d]` | block until a task is done or blocked, a message arrives, or (`--any`) the board changes; print what happened |
 | `hive team inbox [--wait] [--peek] [--timeout d]` | print the messages queued for this member, on every team it is on, and mark them delivered; `--peek` leaves them queued. Every other `hive team` command tells a member in one stderr line when mail waits for it: `✉ 3 messages wait for you (lead ×2, manager) · hive team inbox` |
@@ -520,6 +530,34 @@ tree, so a teammate can't paint your terminal.
 | `hive team pause` · `resume` · `lead <team> <role\|none>` | pause delivery · resume it · change who leads |
 | `hive team done <team> [--clean]` | mark the goal met: the team stays, folded with its history, and takes no more mail, members or tasks, and its tasks no longer move; `--clean` removes merged worktrees |
 | `hive team mute <team> <role>` · `unmute <team> <role>` | pause hive's delivery to one member · let it go on |
+
+**A plan in one file.** `hive team task add --file plan.toml` (`-` for stdin) adds a whole
+plan in one call. Each table takes a title, and optionally a ref that later tasks can name,
+an owner, a body, and the tasks it waits for: `after` names earlier refs in the file or
+numbers already on the board.
+
+```toml
+[[task]]
+ref   = "inventory"
+title = "List the features"
+owner = "manager"
+
+[[task]]
+title = "Write the report"
+owner = "manager"
+after = ["inventory"]
+
+[[task]]
+title = "Review it"
+owner = "lead"
+after = ["inventory", 3]
+```
+
+hive checks every task before adding any: a missing title, an unknown owner, a duplicate
+or later ref, a number that isn't on the board, or an unknown key prints each problem with
+its task's place and adds nothing. Owners are told only once the whole plan is in.
+`--dry-run` prints `#5 would be added for manager · would wait for #3`, with the numbers the
+tasks would get, then `dry run: nothing was added`.
 
 Inside a member the team and the role are implied; an agent on two teams names the one
 it means. A message is from the member's role, from `you` when you run the command

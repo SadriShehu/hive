@@ -187,8 +187,8 @@ func Brief(t store.Team, m store.Member, members []store.Member) string {
 				"and the tasks it waits for: "
 		}
 		b.WriteString(lead +
-			"`hive team task add \"title\" --owner <role> --after <n,…>`. Review what is marked done, integrate it, " +
-			"and post when the goal is met.\n")
+			"`hive team task add \"title\" --owner <role> --after <n,…>`. `hive team task add --file plan.toml` " +
+			"adds a whole plan in one call. Review what is marked done, integrate it, and post when the goal is met.\n")
 	case t.LeadRole == "":
 		b.WriteString("\nThe human leads this team from hive and writes to you in the channel. " +
 			"Start by reading `hive team board`, then claim a task of yours, or wait for your part.\n")

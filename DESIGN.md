@@ -452,14 +452,18 @@ models the tool runs. `default` is the tool's default, as an empty model is.
 
 Every tree action is also a command, so agents can run agents of their own. A session is
 named by its full ID, the tool's own ID, or a unique prefix of either; a name hive hasn't
-seen yet triggers a history import and one retry. `hive --help` groups the commands as
-Start here, Sessions, Teams, Housekeeping, and For tmux and hooks.
+seen yet triggers a history import and one retry. Text output prints one short form,
+`tool` and the shortest prefix of the native ID that is unique among the stored sessions
+of that tool, at least eight characters and not counting a leading `ses_` (so opencode
+keeps `ses_` plus eight), like git's short hashes. It stays a prefix every command
+accepts, and `--json` keeps the full IDs. `hive --help` groups the commands as Start here, Sessions, Teams,
+Housekeeping, and For tmux and hooks.
 
 | Command | What it does |
 | --- | --- |
 | `hive` | the tree; outside tmux it starts or attaches the `hive` tmux session |
 | `hive popup` | the tree in a tmux popup; quits after a jump |
-| `hive ls [--all \| --live] [--json] [--no-sync]` | print the tree; `--json` is a flat list with depth, for agents |
+| `hive ls [--all \| --live] [--json] [--no-sync]` | print the teams with their members by role and held task, then the sessions not on a team, in short IDs; a done team folds to one dim line without `--all`; `--json` is a flat list with depth, full IDs, and team and role, for agents |
 | `hive new <tool\|auto> [-p text] [--model name\|auto] [--mode provider\|model] [--dry-run] [--cwd dir] [--parent auto\|none\|<id>] [--wait] [--focus]` | start an agent in a background tmux window, linked under the calling agent; print its ID. `auto` [picks the model](#picking-the-model), and the tool too |
 | `hive models [tool] [--json]` | what each installed tool can run, with the ratings `auto` picks by |
 | `hive send <id> [text \| -]` | type into its pane and press Enter; an ended session reopens with the message |
@@ -698,6 +702,15 @@ teammate can't paint the user's terminal.
   for each other in a ring. A task is open, claimed, done or blocked; its note says what
   done changed, or why it is blocked. A done team's board is closed: no task is added,
   claimed, edited, closed or blocked.
+- **A plan.** `add --file plan.toml` (`-` for stdin) adds a whole plan of `[[task]]`
+  tables in one call: each takes a title, an optional ref, owner, body and `after`, which
+  names earlier refs in the file or numbers on the board. hive checks the whole file first
+  (titles, owners on the team, refs, unknown keys) and adds nothing when any task is wrong;
+  then it adds in file order, resolving refs to the numbers they got, and tells owners only
+  after the last one is in. `AddTaskQuiet` inserts without the notice and `TellReady` gives
+  it afterwards, so one `add` can add many tasks. `--dry-run` prints the same lines as
+  `#5 would be added for manager · would wait for #3` with the numbers they would get,
+  then `dry run: nothing was added`, and adds none.
 - **Claiming.** `claim <n>` makes a task the caller's. It is refused, with the reason,
   for a task that waits for one that isn't done (naming them), that is another member's
   or claimed by one, and on a paused or done team; `--force` overrides all but the pause,
@@ -731,7 +744,9 @@ teammate can't paint the user's terminal.
   only the mail is printed. A caller off the team, like you in a shell, reads the channel.
 - **Reading it.** `board` lists the tasks, and with each member the task it holds; each
   task's note and body are cut to one line at the terminal width (100 when it isn't one),
-  and `--tasks` or `--channel` prints just that part. `task ls [n]` adds the details in
+  and `--tasks` or `--channel` prints just that part (both flags print both sections, without
+the goal and roster); with `--json` those flags keep only the `tasks` or `messages` key.
+`task ls [n]` adds the details in
   full, for the whole board or one task; `ls` counts them. In JSON each task has `ready`
   and `waits`. `task add` prints one line: `#4 added for manager · told now`, `· told when
   it is idle (working now)` or `· waits for #1 #2`.

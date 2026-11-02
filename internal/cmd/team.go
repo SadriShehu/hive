@@ -330,7 +330,8 @@ func newTeamNewCmd() *cobra.Command {
 			if wait {
 				waitLaunched(cmd.Context(), e, tm, launched, before, timeout)
 			}
-			printLaunched(tm, launched)
+			all, _ := e.st.All()
+			printLaunched(tm, launched, shortIDs(all))
 			return nil
 		},
 	}
@@ -445,7 +446,7 @@ func waitLaunched(ctx context.Context, e *teamEnv, tm store.Team, launched []tra
 	}
 }
 
-func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
+func printLaunched(tm store.Team, launched []tracker.MemberLaunch, ids map[string]string) {
 	started := 0
 	for _, l := range launched {
 		if l.Err == nil {
@@ -462,23 +463,23 @@ func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
 			note = "failed: " + l.Err.Error()
 		case l.Launched.Choice != nil:
 			picked := append([]string{l.Launched.Choice.Reason}, l.Launched.Choice.Notes...)
-			note = fmt.Sprintf("%s  pane %s  picked %s", orID(l.Launched.SessionID), l.Launched.Pane, strings.Join(picked, "; "))
+			note = fmt.Sprintf("%s  pane %s  picked %s", orID(ids, l.Launched.SessionID), l.Launched.Pane, strings.Join(picked, "; "))
 		case l.Launched.Pane == "":
-			note = orID(l.Launched.SessionID)
+			note = orID(ids, l.Launched.SessionID)
 		case l.Launched.SessionID == "":
 			note = fmt.Sprintf("pane %s  reports in with its first event", l.Launched.Pane)
 		default:
-			note = fmt.Sprintf("%s  pane %s", l.Launched.SessionID, l.Launched.Pane)
+			note = fmt.Sprintf("%s  pane %s", shortID(ids, l.Launched.SessionID), l.Launched.Pane)
 		}
 		fmt.Printf("  %-9s %-8s %s\n", m.Role, m.Tool, note)
 	}
 }
 
-func orID(id string) string {
+func orID(ids map[string]string, id string) string {
 	if id == "" {
 		return "starting"
 	}
-	return id
+	return shortID(ids, id)
 }
 
 func newTeamLsCmd() *cobra.Command {
@@ -602,6 +603,22 @@ func newTeamBoardCmd() *cobra.Command {
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
+				// The section flags keep the JSON to the sections they name.
+				switch {
+				case tasksOnly && channelOnly:
+					return enc.Encode(struct {
+						Tasks    []taskRow       `json:"tasks"`
+						Messages []store.Message `json:"messages"`
+					}{taskRows(tasks), msgs})
+				case tasksOnly:
+					return enc.Encode(struct {
+						Tasks []taskRow `json:"tasks"`
+					}{taskRows(tasks)})
+				case channelOnly:
+					return enc.Encode(struct {
+						Messages []store.Message `json:"messages"`
+					}{msgs})
+				}
 				return enc.Encode(struct {
 					store.Team
 					Members   []memberRow     `json:"members"`
@@ -651,9 +668,9 @@ func newTeamBoardCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the team, its members, its tasks and the latest messages")
-	cmd.Flags().BoolVar(&tasksOnly, "tasks", false, "print only the task list")
-	cmd.Flags().BoolVar(&channelOnly, "channel", false, "print only the channel lines")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the board; with --tasks or --channel, only those sections")
+	cmd.Flags().BoolVar(&tasksOnly, "tasks", false, "print only the task list (JSON: only tasks)")
+	cmd.Flags().BoolVar(&channelOnly, "channel", false, "print only the channel lines (JSON: only messages)")
 	cmd.Flags().IntVarP(&n, "lines", "n", 12, "how many channel messages")
 	return cmd
 }
@@ -898,7 +915,8 @@ func newTeamAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printLaunched(tm, []tracker.MemberLaunch{{Member: m, Launched: l}})
+			all, _ := e.st.All()
+			printLaunched(tm, []tracker.MemberLaunch{{Member: m, Launched: l}}, shortIDs(all))
 			return nil
 		},
 	}

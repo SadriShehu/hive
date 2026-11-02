@@ -44,32 +44,53 @@ func findTask(tasks []store.Task, n int) (int, error) {
 // AddTask puts a task on a team's board, added by by. An owner whose task is
 // ready as it is added is told so.
 func (t *Tracker) AddTask(tm store.Team, by, title, body, owner string, after []int) (store.Task, []Sent, error) {
+	task, err := t.AddTaskQuiet(tm, by, title, body, owner, after)
+	if err != nil {
+		return task, nil, err
+	}
+	sent, err := t.TellReady(tm, task, by)
+	return task, sent, err
+}
+
+// AddTaskQuiet puts a task on a team's board without telling its owner it is
+// ready. Adding a whole plan uses it, so nobody hears ready while a task the
+// plan still has to add is missing; TellReady says so once they are all in.
+func (t *Tracker) AddTaskQuiet(tm store.Team, by, title, body, owner string, after []int) (store.Task, error) {
 	title = strings.TrimSpace(team.Clean(title))
 	if title == "" {
-		return store.Task{}, nil, errors.New("a task needs a title")
+		return store.Task{}, errors.New("a task needs a title")
 	}
 	tm, members, tasks, err := t.board(tm.ID)
 	if err != nil {
-		return store.Task{}, nil, err
+		return store.Task{}, err
 	}
 	if err := closed(tm); err != nil {
-		return store.Task{}, nil, err
+		return store.Task{}, err
 	}
 	owner = strings.TrimPrefix(strings.TrimSpace(owner), "@")
 	if owner != "" && !onTeam(members, owner) {
-		return store.Task{}, nil, fmt.Errorf("no member called %q; roles: %s", owner, team.Roles(members))
+		return store.Task{}, fmt.Errorf("no member called %q; roles: %s", owner, team.Roles(members))
 	}
 	if err := team.CheckAfter(after, tasks); err != nil {
-		return store.Task{}, nil, err
+		return store.Task{}, err
 	}
 	now := t.World.Now()
-	task, err := t.Store.AddTask(store.Task{TeamID: tm.ID, Title: title, Body: strings.TrimSpace(team.Clean(body)), Owner: owner,
+	return t.Store.AddTask(store.Task{TeamID: tm.ID, Title: title, Body: strings.TrimSpace(team.Clean(body)), Owner: owner,
 		After: after, CreatedBy: by, CreatedAt: now, UpdatedAt: now})
-	if err != nil || owner == "" || owner == by || !team.Ready(task, tasks) {
-		return task, nil, err
+}
+
+// TellReady tells a task's owner that it is ready to take, unless the caller
+// added it for itself or it still waits for an open task. It reads the board
+// afresh, so a task that waits for another still missing isn't announced.
+func (t *Tracker) TellReady(tm store.Team, task store.Task, by string) ([]Sent, error) {
+	tm, members, tasks, err := t.board(tm.ID)
+	if err != nil {
+		return nil, err
 	}
-	sent, err := t.tell(tm, members, owner, team.ReadyNote(task, ""))
-	return task, sent, err
+	if task.Owner == "" || task.Owner == by || !team.Ready(task, tasks) {
+		return nil, nil
+	}
+	return t.tell(tm, members, task.Owner, team.ReadyNote(task, ""))
 }
 
 // EditTask changes a task's title, body, owner and the tasks it waits for,

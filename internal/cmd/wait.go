@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -39,13 +38,14 @@ func newWaitCmd() *cobra.Command {
 			}
 			defer st.Close()
 			var pending []string
+			ids := shortIDs(sessions)
 			for _, ref := range args {
 				s, err := find(cmd.Context(), tr, sessions, ref)
 				if err != nil {
 					return err
 				}
 				if s.Live() && s.Status == store.StatusUnknown && s.Source != "pending" {
-					fmt.Fprintf(os.Stderr, "%s doesn't report its turns to hive; waiting until it ends\n", s.ID)
+					fmt.Fprintf(os.Stderr, "%s doesn't report its turns to hive; waiting until it ends\n", shortID(ids, s.ID))
 				}
 				if !slices.Contains(pending, s.ID) {
 					pending = append(pending, s.ID)
@@ -58,6 +58,7 @@ func newWaitCmd() *cobra.Command {
 				defer cancel()
 			}
 			for {
+				ids = shortIDs(sessions)
 				var still []string
 				for _, id := range pending {
 					state, done := store.StatusExited, true
@@ -78,7 +79,7 @@ func newWaitCmd() *cobra.Command {
 						still = append(still, id)
 						continue
 					}
-					fmt.Println(id, state)
+					fmt.Println(shortID(ids, id), state)
 					if anyOne {
 						return nil
 					}
@@ -89,7 +90,7 @@ func newWaitCmd() *cobra.Command {
 				select {
 				case <-ctx.Done():
 					if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-						return fmt.Errorf("still busy after %s: %s", timeout, strings.Join(pending, ", "))
+						return fmt.Errorf("still busy after %s: %s", timeout, shortIDList(ids, pending))
 					}
 					return ctx.Err()
 				case <-time.After(waitPoll):
