@@ -28,8 +28,8 @@ type Binding struct {
 // PopupBinding opens hive's tree in a popup.
 func PopupBinding(key, hiveBin string) Binding {
 	return Binding{Key: key, what: "the hive popup", marker: popupMarker,
-		argv: []string{"display-popup", "-E", "-w", "90%", "-h", "85%", "-T", " hive ", quote(hiveBin) + " popup"},
-		text: fmt.Sprintf(`display-popup -E -w 90%% -h 85%% -T " hive " "%s popup"`, quote(hiveBin)),
+		argv: []string{"display-popup", "-E", "-w", "95%", "-h", "90%", "-T", " hive ", quote(hiveBin) + " popup"},
+		text: fmt.Sprintf(`display-popup -E -w 95%% -h 90%% -T " hive " "%s popup"`, quote(hiveBin)),
 	}
 }
 

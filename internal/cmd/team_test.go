@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/store"
@@ -192,7 +193,134 @@ func TestTeamTextIsNotCutShort(t *testing.T) {
 		t.Errorf("ls line = %q, want the whole goal", got)
 	}
 	title := "write the docs " + strings.Repeat("for every endpoint ", 5) + "END"
-	if got := memberBoardText("backend", "claude", "working", 2, store.Task{N: 4, Title: title}, true); !strings.Contains(got, title) {
+	if got := memberBoardText("backend", "claude", "working", 2, store.Task{N: 4, Title: title}, true, "", 0, false); !strings.Contains(got, title) {
 		t.Errorf("board line = %q, want the whole held title", got)
+	}
+}
+
+func TestBoardShowsEachMembersPart(t *testing.T) {
+	got := memberBoardText("backend", "claude", "working", 2, store.Task{}, false,
+		"own the parsers\nand the routes", 200, false)
+	if !strings.Contains(got, "\n  own the parsers and the routes") {
+		t.Errorf("board line = %q, want the part on one dim line", got)
+	}
+
+	long := strings.Repeat("x", 200)
+	got = memberBoardText("backend", "claude", "working", 0, store.Task{}, false, long, 40, false)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("board line = %q, want the member's line and its part", got)
+	}
+	if n := utf8.RuneCountInString(lines[1]); n != 40 || !strings.HasSuffix(lines[1], "…") {
+		t.Errorf("part line = %q (%d runes), want it cut to 40 with …", lines[1], n)
+	}
+}
+
+func TestPartFlagNamesTheMembersParts(t *testing.T) {
+	if newTeamNewCmd().Flags().Lookup("part") == nil {
+		t.Fatal("team new has no --part flag")
+	}
+	specs := []team.Spec{
+		{Role: "backend", Tool: "claude", Prompt: "from the template"},
+		{Role: "frontend", Tool: "codex"},
+	}
+	got, err := applyParts(specs, []string{"backend=own the handlers", "frontend=own the web UI"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Prompt != "own the handlers" || got[1].Prompt != "own the web UI" {
+		t.Errorf("specs = %+v, want --part to set each part", got)
+	}
+	if got[1].Tool != "codex" {
+		t.Errorf("--part changed a member's tool: %+v", got[1])
+	}
+
+	_, err = applyParts([]team.Spec{{Role: "backend"}}, []string{"mobile=own the app"})
+	want := `no member called "mobile" in --member; roles: backend`
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+func TestTaskEditChangesOnlyTheFlagsItWasGiven(t *testing.T) {
+	task := store.Task{N: 3, Title: "old", Body: "old body", Owner: "backend", After: []int{1, 2},
+		Status: store.TaskClaimed, Note: "working"}
+	got, err := editValues(task, map[string]bool{"title": true}, "new title", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "new title" || got.Body != "old body" || got.Owner != "backend" ||
+		len(got.After) != 2 || got.Status != store.TaskClaimed {
+		t.Errorf("a title edit = %+v, want the rest kept", got)
+	}
+
+	got, err = editValues(task, map[string]bool{"owner": true}, "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Owner != "" || got.Title != "old" || len(got.After) != 2 {
+		t.Errorf("an owner edit = %+v, want --owner \"\" to clear only the owner", got)
+	}
+
+	got, err = editValues(task, map[string]bool{"after": true}, "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.After) != 0 || got.Title != "old" || got.Owner != "backend" {
+		t.Errorf("an after edit = %+v, want --after \"\" to clear only the waits", got)
+	}
+
+	got, err = editValues(task, map[string]bool{"body": true}, "", "new body", "", "")
+	if err != nil || got.Body != "new body" || got.Title != "old" {
+		t.Errorf("a body edit = %+v, %v", got, err)
+	}
+}
+
+func TestTeamTaskHasEditAndReopen(t *testing.T) {
+	c := newTeamTaskCmd()
+	found := map[string]bool{}
+	for _, sub := range c.Commands() {
+		found[sub.Name()] = true
+		switch sub.Name() {
+		case "edit":
+			for _, f := range []string{"title", "body", "owner", "after"} {
+				if sub.Flags().Lookup(f) == nil {
+					t.Errorf("task edit has no --%s", f)
+				}
+			}
+		case "reopen":
+			if sub.Flags().Lookup("why") == nil {
+				t.Error("task reopen has no --why")
+			}
+		}
+	}
+	for _, name := range []string{"edit", "reopen"} {
+		if !found[name] {
+			t.Errorf("team task has no %s command", name)
+		}
+	}
+}
+
+func TestWaitingNoteNamesTheSenders(t *testing.T) {
+	got := waitingNote(3, map[string]int{"lead": 2, "manager": 1})
+	want := "✉ 3 messages wait for you (lead ×2, manager) · hive team inbox"
+	if got != want {
+		t.Errorf("waitingNote = %q, want %q", got, want)
+	}
+	if got := waitingNote(1, map[string]int{"lead": 1}); got != "✉ 1 message waits for you (lead) · hive team inbox" {
+		t.Errorf("one message = %q", got)
+	}
+	if got := waitingNote(0, nil); got != "" {
+		t.Errorf("no mail = %q, want nothing", got)
+	}
+}
+
+func TestInboxHasPeek(t *testing.T) {
+	c := newTeamInboxCmd()
+	if c.Flags().Lookup("peek") == nil {
+		t.Error("inbox has no --peek")
+	}
+	if newTeamCmd().PersistentPostRun == nil {
+		t.Error("team commands don't say when mail waits")
 	}
 }

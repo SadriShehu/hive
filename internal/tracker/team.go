@@ -801,7 +801,7 @@ func (t *Tracker) deliver(id string, roles []Role) (string, error) {
 		}
 		if len(msgs) > 0 {
 			claims = append(claims, claim{r.Team, r.Member.Role, msgs})
-			text = append(text, team.Paste(r.Team.Name, msgs))
+			text = append(text, team.Paste(r.Team.Name, msgs, t.World.Now()))
 		}
 	}
 	if len(claims) == 0 {

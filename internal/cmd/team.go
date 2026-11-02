@@ -8,10 +8,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/sadrishehu/hive/internal/adapters"
@@ -40,7 +42,72 @@ func newTeamCmd() *cobra.Command {
 		newTeamLogCmd(), newTeamInboxCmd(), newTeamAddCmd(), newTeamRmCmd(), newTeamStopCmd(),
 		newTeamPauseCmd(true), newTeamPauseCmd(false), newTeamLeadCmd(), newTeamDeliverCmd(), newTeamDoneCmd())
 	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd(), newTeamMuteCmd(true), newTeamMuteCmd(false))
+	cmd.PersistentPostRun = func(cmd *cobra.Command, args []string) { noteWaiting(cmd) }
 	return cmd
+}
+
+// noteWaiting says on stderr that mail waits for the member running a team
+// command, after its own output. It changes nothing else: not the exit code,
+// not the queue, and it says nothing to the human or to a member with none.
+func noteWaiting(cmd *cobra.Command) {
+	switch cmd.Name() {
+	case "inbox", "wait":
+		return
+	}
+	e, err := openTeamEnv()
+	if err != nil {
+		return
+	}
+	defer e.st.Close()
+	if len(e.roles) == 0 {
+		return
+	}
+	froms := map[string]int{}
+	total := 0
+	for _, r := range e.roles {
+		waiting, err := e.st.Waiting(r.Team.ID)
+		if err != nil {
+			return
+		}
+		for _, m := range waiting[r.Member.Role] {
+			froms[m.From]++
+			total++
+		}
+	}
+	if line := waitingNote(total, froms); line != "" {
+		fmt.Fprintln(os.Stderr, line)
+	}
+}
+
+// waitingNote words the line about mail that waits for a member, or "" when
+// none does.
+func waitingNote(total int, froms map[string]int) string {
+	if total == 0 {
+		return ""
+	}
+	order := make([]string, 0, len(froms))
+	for from := range froms {
+		order = append(order, from)
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if froms[order[i]] != froms[order[j]] {
+			return froms[order[i]] > froms[order[j]]
+		}
+		return order[i] < order[j]
+	})
+	parts := make([]string, len(order))
+	for i, from := range order {
+		if n := froms[from]; n > 1 {
+			parts[i] = fmt.Sprintf("%s ×%d", from, n)
+		} else {
+			parts[i] = from
+		}
+	}
+	noun, verb := "messages", "wait"
+	if total == 1 {
+		noun, verb = "message", "waits"
+	}
+	return fmt.Sprintf("✉ %d %s %s for you (%s) · hive team inbox", total, noun, verb, strings.Join(parts, ", "))
 }
 
 // teamEnv is what a team command works with.
@@ -164,7 +231,7 @@ func (e *teamEnv) session(m store.Member) (store.Session, bool) {
 
 func newTeamNewCmd() *cobra.Command {
 	var goal, cwd, lead, from string
-	var members []string
+	var members, parts []string
 	var worktrees, wait bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
@@ -226,6 +293,10 @@ func newTeamNewCmd() *cobra.Command {
 					return err
 				}
 			}
+			var err error
+			if specs, err = applyParts(specs, parts); err != nil {
+				return err
+			}
 			e, err := openTeamEnv()
 			if err != nil {
 				return err
@@ -267,6 +338,7 @@ func newTeamNewCmd() *cobra.Command {
 	_ = cmd.MarkFlagDirname("cwd")
 	f.StringVar(&lead, "lead", "claude", "who leads: a tool[:model], self, or none (you lead from the tree)")
 	f.StringArrayVar(&members, "member", nil, "a member: role=tool[:model]; repeat for each")
+	f.StringArrayVar(&parts, "part", nil, "a member's part of the brief: role=text; repeat for each")
 	f.StringVar(&from, "from", "", "a [[team]] template in config.toml: its goal, lead, worktrees and members")
 	f.BoolVar(&worktrees, "worktrees", false, "a git worktree and branch per member; the lead works in the folder and merges")
 	f.BoolVarP(&wait, "wait", "w", false, "wait until each member reports in, then print the roster with its session IDs")
@@ -319,6 +391,34 @@ func templateTeam(t adapters.Team, goal, lead, cwd string, worktrees bool, chang
 	}
 	specs = append(specs, members...)
 	return goal, lead, cwd, worktrees, specs, nil
+}
+
+// applyParts sets each member's part from --part role=text, and refuses one
+// naming a role that isn't on the team.
+func applyParts(specs []team.Spec, parts []string) ([]team.Spec, error) {
+	if len(parts) == 0 {
+		return specs, nil
+	}
+	at := map[string]int{}
+	for i, sp := range specs {
+		at[sp.Role] = i
+	}
+	for _, p := range parts {
+		role, text, ok := strings.Cut(p, "=")
+		if !ok || role == "" {
+			return nil, fmt.Errorf("--part %q must look like role=text", p)
+		}
+		i, ok := at[role]
+		if !ok {
+			roles := make([]string, len(specs))
+			for i, sp := range specs {
+				roles[i] = sp.Role
+			}
+			return nil, fmt.Errorf("no member called %q in --member; roles: %s", role, strings.Join(roles, ", "))
+		}
+		specs[i].Prompt = text
+	}
+	return specs, nil
 }
 
 // waitLaunched waits for each member hive started to report its session, and
@@ -516,12 +616,13 @@ func newTeamBoardCmd() *cobra.Command {
 				fmt.Printf("goal: %s\n", team.Clean(tm.Goal))
 			}
 			fmt.Println("\nmembers")
+			width, color := boardWidth(), useColor()
 			for _, m := range rows {
 				if !m.Active() {
 					continue
 				}
 				held, hasHeld := team.Held(m.Role, tasks)
-				fmt.Println(memberBoardText(m.Role, m.Tool, m.State, m.Messages, held, hasHeld))
+				fmt.Println(memberBoardText(m.Role, m.Tool, m.State, m.Messages, held, hasHeld, m.Prompt, width, color))
 			}
 			fmt.Println("\ntasks")
 			printTasks(tasks, false)
@@ -684,14 +785,14 @@ func newTeamLogCmd() *cobra.Command {
 }
 
 func newTeamInboxCmd() *cobra.Command {
-	var wait bool
+	var wait, peek bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "Print the messages queued for this member, and mark them delivered",
 		Long: "Print the messages hive hasn't typed into this member yet, for an agent that reads its mail\n" +
 			"instead of waiting for it, from every team it is on. A paused team keeps its mail.\n" +
-			"--wait blocks until one arrives.",
+			"--wait blocks until one arrives. --peek prints the queue and leaves it queued.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := openTeamEnv()
@@ -702,20 +803,38 @@ func newTeamInboxCmd() *cobra.Command {
 			if len(e.roles) == 0 {
 				return errors.New("inbox is for a team member; run it inside one")
 			}
+			if peek {
+				now := time.Now().UnixMilli()
+				for _, r := range e.roles {
+					msgs, err := e.st.Pending(r.Team.ID, r.Member.Role)
+					if err != nil {
+						return err
+					}
+					for _, m := range msgs {
+						fmt.Println(team.Envelope(r.Team.Name, m.From, m.Body, m.At, now))
+					}
+				}
+				return nil
+			}
 			deadline := time.Now().Add(timeout)
 			for {
 				got := 0
+				now := time.Now().UnixMilli()
 				for _, r := range e.roles {
 					msgs, err := e.tr.Inbox(r.Team.ID, r.Member.Role)
 					if err != nil {
 						return err
 					}
 					for _, m := range msgs {
-						fmt.Println(team.Envelope(r.Team.Name, m.From, m.Body))
+						fmt.Println(team.Envelope(r.Team.Name, m.From, m.Body, m.At, now))
 					}
 					got += len(msgs)
 				}
-				if got > 0 || !wait {
+				if got > 0 {
+					fmt.Println("(marked delivered)")
+					return nil
+				}
+				if !wait {
 					return nil
 				}
 				if timeout > 0 && time.Now().After(deadline) {
@@ -726,6 +845,7 @@ func newTeamInboxCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait for the next message")
+	cmd.Flags().BoolVar(&peek, "peek", false, "print the queue and leave it queued")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "give up after this long (0: as long as it takes)")
 	return cmd
 }
@@ -952,11 +1072,27 @@ func teamRowText(name, state, goal string) string {
 }
 
 // memberBoardText words a member on `hive team board`, with the whole title
-// of the task it holds.
-func memberBoardText(role, tool, state string, posts int, held store.Task, hasHeld bool) string {
+// of the task it holds and its part on a dim line under it.
+func memberBoardText(role, tool, state string, posts int, held store.Task, hasHeld bool, part string, width int, color bool) string {
 	line := fmt.Sprintf("  %-10s %-9s %-9s %d posts", role, tool, state, posts)
 	if hasHeld {
 		line += fmt.Sprintf("  #%d %s", held.N, team.Clean(held.Title))
 	}
+	if part = oneLine(part); part != "" {
+		line += "\n" + paint(truncate("  "+part, width), "2", color)
+	}
 	return line
+}
+
+// boardWidth is the terminal's width, or 100 when stdout isn't one.
+func boardWidth() int {
+	if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil && w > 0 {
+		return w
+	}
+	return 100
+}
+
+// oneLine turns a member's part into the one line the board shows.
+func oneLine(text string) string {
+	return strings.TrimSpace(strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ").Replace(team.Clean(text)))
 }

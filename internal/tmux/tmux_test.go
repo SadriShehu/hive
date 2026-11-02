@@ -190,7 +190,7 @@ func TestBindingRoundTrip(t *testing.T) {
 		t.Fatalf("install: %q, %v", msg, err)
 	}
 	data, _ := os.ReadFile(conf)
-	popup := popupMarker + "\n" + `bind-key a display-popup -E -w 90% -h 85% -T " hive " "/Users/me/go/bin/hive popup"` + "\n"
+	popup := popupMarker + "\n" + `bind-key a display-popup -E -w 95% -h 90% -T " hive " "/Users/me/go/bin/hive popup"` + "\n"
 	next := nextMarker + "\n" + `bind-key A run-shell -b "/Users/me/go/bin/hive jump --next --client '#{client_name}'"` + "\n"
 	if want := "set -g mouse on\n\n" + popup + "\n" + next; string(data) != want {
 		t.Fatalf("conf =\n%s\nwant\n%s", data, want)
@@ -284,4 +284,14 @@ func TestFailedProgramLeavesAMessageEnterCloses(t *testing.T) {
 
 	run("send-keys", "-t", failing.ID, "Enter")
 	waitFor(t, "Enter to close the window", func() bool { return !PaneExists(failing.ID) })
+}
+
+func TestPopupBindingUsesTheWiderSize(t *testing.T) {
+	b := PopupBinding("a", "/bin/hive")
+	if got := strings.Join(b.argv, " "); !strings.Contains(got, "-w 95% -h 90%") {
+		t.Errorf("popup argv = %q, want 95%% by 90%%", got)
+	}
+	if !strings.Contains(b.text, "-w 95% -h 90%") {
+		t.Errorf("popup text = %q, want 95%% by 90%%", b.text)
+	}
 }
