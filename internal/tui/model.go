@@ -409,13 +409,12 @@ func New(ops Ops, popup bool) Model {
 // layoutChannel fits the channel's live line to the screen, naming the team
 // it writes to.
 func (m *Model) layoutChannel() {
-	label := "message "
+	name := "the team"
 	if t, ok := m.teamByID(m.channelTeam); ok {
-		label += t.Name + " (@role for one)"
-	} else {
-		label += "the team (@role for one)"
+		name = t.Name
 	}
-	label += " › "
+	label := channelPrompt(name, m.width)
+	m.channelInput.Placeholder = channelPlaceholder(m.width - ansi.StringWidth(label))
 	m.channelInput.SetPromptFunc(ansi.StringWidth(label), func(line int) string {
 		if line == 0 {
 			return label
@@ -423,6 +422,34 @@ func (m *Model) layoutChannel() {
 		return ""
 	})
 	m.channelInput.SetWidth(max(ansi.StringWidth(label)+10, m.width))
+}
+
+// channelPrompt names the team the live line writes to. When the room left
+// for the placeholder is too short, it drops "(@role for one)" first.
+func channelPrompt(name string, width int) string {
+	full := "message " + name + " (@role for one) › "
+	if width-ansi.StringWidth(full) < ansi.StringWidth(channelHintTypes[0]) {
+		return "message " + name + " › "
+	}
+	return full
+}
+
+// channelHintTypes is the live line's placeholder, one whole segment at a
+// time: the last ones drop when the prompt leaves no room.
+var channelHintTypes = []string{"type a message", "↵ sends", "esc goes back"}
+
+// channelPlaceholder fits the placeholder segments to room, dropping whole
+// ones from the end. No room for the first means no placeholder.
+func channelPlaceholder(room int) string {
+	segs := channelHintTypes
+	for len(segs) > 0 {
+		line := strings.Join(segs, " · ")
+		if ansi.StringWidth(line) <= room {
+			return line
+		}
+		segs = segs[:len(segs)-1]
+	}
+	return ""
 }
 
 func (m *Model) layoutSend() {
