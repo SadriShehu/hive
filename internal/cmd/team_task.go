@@ -340,10 +340,31 @@ func addTaskPlan(e *teamEnv, tm store.Team, by, file string, dryRun bool, stdin 
 		}
 	}
 	all := append(tasks, added...)
+	if dryRun {
+		for _, task := range added {
+			fmt.Println(addWouldSaid(task, all))
+		}
+		fmt.Println("dry run: nothing was added")
+		return nil
+	}
 	for i, task := range added {
 		fmt.Println(addSaid(task, all, sent[i]))
 	}
 	return notifyErr
+}
+
+// addWouldSaid words what a dry run would do, so it can't be taken for a task
+// that was really added.
+func addWouldSaid(task store.Task, tasks []store.Task) string {
+	line := fmt.Sprintf("#%d would be added", task.N)
+	if task.Owner == "" {
+		return line + ", no owner"
+	}
+	line += " for " + task.Owner
+	if !team.Ready(task, tasks) {
+		return line + " · would wait for " + team.Numbers(team.Waiting(task, tasks))
+	}
+	return line
 }
 
 func planAfterText(v any) string {

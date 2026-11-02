@@ -701,8 +701,9 @@ teammate can't paint the user's terminal.
   (titles, owners on the team, refs, unknown keys) and adds nothing when any task is wrong;
   then it adds in file order, resolving refs to the numbers they got, and tells owners only
   after the last one is in. `AddTaskQuiet` inserts without the notice and `TellReady` gives
-  it afterwards, so one `add` can add many tasks. `--dry-run` prints the same lines with the
-  numbers they would get, and adds none.
+  it afterwards, so one `add` can add many tasks. `--dry-run` prints the same lines as
+  `#5 would be added for manager · would wait for #3` with the numbers they would get,
+  then `dry run: nothing was added`, and adds none.
 - **Claiming.** `claim <n>` makes a task the caller's. It is refused, with the reason,
   for a task that waits for one that isn't done (naming them), that is another member's
   or claimed by one, and on a paused or done team; `--force` overrides all but the pause,

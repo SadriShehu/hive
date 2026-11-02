@@ -543,7 +543,8 @@ after = ["inventory", 3]
 hive checks every task before adding any: a missing title, an unknown owner, a duplicate
 or later ref, a number that isn't on the board, or an unknown key prints each problem with
 its task's place and adds nothing. Owners are told only once the whole plan is in.
-`--dry-run` prints the tasks it would add, with the numbers they would get, and adds none.
+`--dry-run` prints `#5 would be added for manager · would wait for #3`, with the numbers the
+tasks would get, then `dry run: nothing was added`.
 
 Inside a member the team and the role are implied; an agent on two teams names the one
 it means. A message is from the member's role, from `you` when you run the command

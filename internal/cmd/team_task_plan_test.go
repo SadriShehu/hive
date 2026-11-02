@@ -190,10 +190,13 @@ after = ["one"]
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
-	for _, want := range []string{"#2 added", "#3 added for", "waits for #2"} {
+	for _, want := range []string{"#2 would be added", "#3 would be added for manager · would wait for #2", "dry run: nothing was added"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run = %q, want %q", out, want)
 		}
+	}
+	if strings.Contains(out, "\n#2 added") || strings.HasSuffix(strings.TrimSpace(out), "#3 added for manager") {
+		t.Errorf("dry run = %q, must not read as if it added tasks", out)
 	}
 	if tasks := planTasks(t, dir); len(tasks) != 1 {
 		t.Errorf("dry run added tasks: %d", len(tasks))
