@@ -242,7 +242,9 @@ started ahead of use until their first message.
 A tree on the left, a live preview on the right, built with Bubble Tea v1. It opens full
 screen (`hive`) or as a tmux popup (prefix + a, 95% by 90%) that closes when you jump.
 The preview needs 100 cols; below that the header says `preview needs 100 cols` in place
-of the cost, so the tree's narrow mode doesn't hide why the preview is gone.
+of the cost, so the tree's narrow mode doesn't hide why the preview is gone. A header too
+wide for the window drops whole segments from the end, the least important first, never
+cutting one in half.
 
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited. `run` marks a headless
 session, `sub` a tool's own subagent.
@@ -266,9 +268,11 @@ price, context, tools, skills) in place of the pane preview, `←` / `→` colla
 `?` help, `q` quit.
 
 **New agent.** `n` and `c` open a form: the tool, the folder (the parent's by default) and
-an optional first prompt. Editing the folder lists up to eight folders that complete it:
-those inside what's typed up to its last `/` whose names start with the rest, ignoring
-case, with hidden ones once that starts with a dot. `↑` / `↓` highlight one; `tab` fills
+an optional first prompt. It opens on the prompt, since most launches keep the defaults;
+the hint follows the focused field: `←`/`→` choose on the tool and model, `tab` completes
+on the folder, `↵` starts on the prompt. Editing the folder lists up to eight folders that
+complete it: those inside what's typed up to its last `/` whose names start with the
+rest, ignoring case, with hidden ones once that starts with a dot. `↑` / `↓` highlight one; `tab` fills
 it in (the first if none is) and lists the folders inside it; `enter` takes the
 highlighted one and moves on, or keeps what's typed when none is; `esc` hides the list.
 `~` and relative paths resolve as starting the agent does. `hive new --cwd` gets the same

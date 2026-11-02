@@ -107,7 +107,9 @@ transcript for a headless run, a subagent or a finished session.
 
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. The form asks for the tool, the model, the
-folder and a first prompt. The model is the tool's own default unless you pick one of
+folder and a first prompt. It opens on the prompt, where most launches start: `tab` and
+`shift+tab` move between fields, `←`/`→` picks the tool or model, `tab` completes the
+folder and `↵` starts. The model is the tool's own default unless you pick one of
 the models it runs, or `auto`, which picks one for the prompt; tool `auto` picks the
 tool too, or only the model inside one tool, as the form's mode says. Claude and
 Copilot CLI are given their session IDs up front, so they are in the tree at once;
