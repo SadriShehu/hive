@@ -206,4 +206,3 @@ func readHooks(path string) (data, original []byte, err error) {
 	}
 	return data, original, nil
 }
-
