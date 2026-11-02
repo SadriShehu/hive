@@ -433,7 +433,7 @@ seen yet triggers a history import and one retry.
 | `hive sync [--full]` | import past sessions and link past spawns |
 | `hive install [claude\|opencode\|copilot\|codex\|tmux] [--key a] [--next-key A]` | connect tools and bind the popup and needs-you keys; idempotent, backs up first |
 | `hive uninstall [...]` | remove exactly what install added |
-| `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and hook errors from the last day |
+| `hive doctor` | check hive on PATH, tmux, the popup key, the database, the config, every tool's hooks, and the `ERROR` lines logged in the last day, with the last three |
 | `hive team …` | [teams](#teams): start one, follow its channel, write to its members |
 | `hive hook <tool>` | for integrations only; prints nothing, always exits 0 |
 

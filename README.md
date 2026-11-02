@@ -631,10 +631,11 @@ fields work as flags: `hive hook mytool --event start --session abc`.
 
 ## Debugging
 
-Hooks never print. Errors go to `~/.local/share/hive/hive.log`; set `HIVE_DEBUG=1` in
-an agent's environment to log every linking decision. `HIVE_HOME` moves the database
-and log elsewhere; `HIVE_TMUX_SOCKET=name` points hive at a named tmux server
-(`tmux -L name`).
+Hooks never print. Errors go to `~/.local/share/hive/hive.log`; routine lines are
+marked `INFO` and failures `ERROR`. `hive doctor` counts only the `ERROR` lines from
+the last day, and shows the last three. Set `HIVE_DEBUG=1` in an agent's environment
+to log every linking decision. `HIVE_HOME` moves the database and log elsewhere;
+`HIVE_TMUX_SOCKET=name` points hive at a named tmux server (`tmux -L name`).
 
 ## Releases
 
