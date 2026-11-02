@@ -484,6 +484,10 @@ filter and demo.
   `--lead self` makes the agent running `hive team new` the lead without starting
   another, and `--lead none` leaves it to you. `L` and `hive team lead` move it at any
   time; retiring the lead hands it to you.
+- **Parts.** `--part role=text`, the command line's `prompt =`, gives a member its part of
+  the brief. It wins over a template's prompt with `--from`, and naming a role that isn't
+  on the team is refused before anything starts. The board shows each member's part under
+  its line.
 - **Starting.** hive starts each member through the usual launch, detached, with the
   brief as its first prompt and `HIVE_TEAM` and `HIVE_ROLE` in its window's environment,
   next to `HIVE_PARENT`. Members start in the order given, the lead first. A member
@@ -554,7 +558,9 @@ its roster and folder, the goal, the member's own part, how to use `hive team bo
 `task claim`, `done` and `block`, `post`, `say` and `log`, and that hive wakes it when
 someone writes to it or a task of its own is ready. The lead is told to turn the goal into
 tasks with owners and `--after`, then review what is marked done, integrate and post when
-the goal is met. When you lead, every member is told so, including one whose role
+the goal is met. Its brief lists the other active members' parts, and it is told to build
+the tasks around each one. A member with no part of its own yet is told to wait for a task
+from the lead. When you lead, every member is told so, including one whose role
 happens to be called `lead`: who leads goes by the team's lead role alone. On a shared
 folder the brief says everyone works in the same checkout, so teammates see your edits at
 once; it tells them not to pull, rebase, stash or switch branches, to say so before

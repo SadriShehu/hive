@@ -308,6 +308,16 @@ the tool's ID (`claude-opus-5-5`), a name for it (`"opus 5.5"`) or `auto`. hive 
 into the ID, and refuses a model the tool doesn't run before anything starts, listing the
 ones it does; `hive models <tool>` lists them too.
 
+`--part role=text` gives a member its part of the brief, which the lead sees and builds its
+tasks around; it wins over a template's `prompt`, and a role that isn't on the team is
+refused before anything starts:
+
+```sh
+hive team new api-v2 --goal "add the admin API" --lead claude \
+    --member backend=claude --member frontend=codex \
+    --part backend="own the API handlers" --part frontend="own the web UI"
+```
+
 Save that roster as a template in `~/.config/hive/config.toml` and start the next team
 with `--from`. The template gives the defaults; a flag you also pass wins, and `--member`
 adds to the template's members:
@@ -409,7 +419,7 @@ your terminal.
 
 | Command | Does |
 | --- | --- |
-| `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
+| `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
 | `hive team ls` · `board [team]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts · the channel (all take `--json`) |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
 | `hive team task add <title> [--body text\|-] [--owner role] [--after n,…]` | add a task and print its number; its owner hears from hive when it is ready |

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/store"
@@ -192,7 +193,51 @@ func TestTeamTextIsNotCutShort(t *testing.T) {
 		t.Errorf("ls line = %q, want the whole goal", got)
 	}
 	title := "write the docs " + strings.Repeat("for every endpoint ", 5) + "END"
-	if got := memberBoardText("backend", "claude", "working", 2, store.Task{N: 4, Title: title}, true); !strings.Contains(got, title) {
+	if got := memberBoardText("backend", "claude", "working", 2, store.Task{N: 4, Title: title}, true, "", 0, false); !strings.Contains(got, title) {
 		t.Errorf("board line = %q, want the whole held title", got)
+	}
+}
+
+func TestBoardShowsEachMembersPart(t *testing.T) {
+	got := memberBoardText("backend", "claude", "working", 2, store.Task{}, false,
+		"own the parsers\nand the routes", 200, false)
+	if !strings.Contains(got, "\n  own the parsers and the routes") {
+		t.Errorf("board line = %q, want the part on one dim line", got)
+	}
+
+	long := strings.Repeat("x", 200)
+	got = memberBoardText("backend", "claude", "working", 0, store.Task{}, false, long, 40, false)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("board line = %q, want the member's line and its part", got)
+	}
+	if n := utf8.RuneCountInString(lines[1]); n != 40 || !strings.HasSuffix(lines[1], "…") {
+		t.Errorf("part line = %q (%d runes), want it cut to 40 with …", lines[1], n)
+	}
+}
+
+func TestPartFlagNamesTheMembersParts(t *testing.T) {
+	if newTeamNewCmd().Flags().Lookup("part") == nil {
+		t.Fatal("team new has no --part flag")
+	}
+	specs := []team.Spec{
+		{Role: "backend", Tool: "claude", Prompt: "from the template"},
+		{Role: "frontend", Tool: "codex"},
+	}
+	got, err := applyParts(specs, []string{"backend=own the handlers", "frontend=own the web UI"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Prompt != "own the handlers" || got[1].Prompt != "own the web UI" {
+		t.Errorf("specs = %+v, want --part to set each part", got)
+	}
+	if got[1].Tool != "codex" {
+		t.Errorf("--part changed a member's tool: %+v", got[1])
+	}
+
+	_, err = applyParts([]team.Spec{{Role: "backend"}}, []string{"mobile=own the app"})
+	want := `no member called "mobile" in --member; roles: backend`
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
