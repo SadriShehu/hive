@@ -114,12 +114,12 @@ func (m Model) headerLine() string {
 	if n := len(tracker.NeedsYou(m.sessions)); n > 0 {
 		segs = append(segs, lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n)))
 	}
-	segs = append(segs, sDim.Render(fmt.Sprintf("%d sessions", total)))
 	if n := m.teamCount(); n == 1 {
 		segs = append(segs, sAccent.Render("1 team"))
 	} else if n > 1 {
 		segs = append(segs, sAccent.Render(fmt.Sprintf("%d teams", n)))
 	}
+	segs = append(segs, sDim.Render(fmt.Sprintf("%d sessions", total)))
 	if len(m.snap.Trashed) > 0 {
 		segs = append(segs, sDim.Render(m.trashCount()+" in the trash"))
 	} else if len(m.trashed) > 0 {
@@ -151,30 +151,34 @@ func (m Model) headerLine() string {
 	if m.syncing {
 		scope = "syncing… · " + scope
 	}
-	right := sDim.Render(scope)
-	if cost, estimate := m.costInView(); cost > 0 && !m.previewNarrow() {
+	right := []string{sDim.Render(scope)}
+	if m.previewNarrow() {
+		right = append(right, sDim.Render(fmt.Sprintf("preview needs %d cols", previewMinWidth)))
+	} else if cost, estimate := m.costInView(); cost > 0 {
 		mark := ""
 		if estimate {
 			mark = "~"
 		}
-		right += sDim.Render(" · ") + sText.Render(mark+human.USD(cost))
+		right = append(right, sText.Render(mark+human.USD(cost)))
 	}
-	if m.previewNarrow() {
-		right += sDim.Render(fmt.Sprintf(" · preview needs %d cols", previewMinWidth))
-	}
-	sep := sDim.Render("  ·  ")
-	left := strings.Join(segs, sep)
-	if m.previewNarrow() {
-		for len(segs) > 1 && m.width-ansi.StringWidth(left)-ansi.StringWidth(right) < 1 {
+	sep, rightSep := sDim.Render("  ·  "), sDim.Render(" · ")
+	// Drop whole segments from the end, the least important first, so the
+	// header never cuts one in half. The right side goes last, which keeps the
+	// preview note while the left still has something to give.
+	for {
+		left, tail := strings.Join(segs, sep), strings.Join(right, rightSep)
+		gap := m.width - ansi.StringWidth(left) - ansi.StringWidth(tail)
+		switch {
+		case gap >= 1:
+			return left + strings.Repeat(" ", gap) + tail
+		case len(segs) > 1:
 			segs = segs[:len(segs)-1]
-			left = strings.Join(segs, sep)
+		case len(right) > 1:
+			right = right[:len(right)-1]
+		default:
+			return ansi.Truncate(left, m.width, "")
 		}
 	}
-	gap := m.width - ansi.StringWidth(left) - ansi.StringWidth(right)
-	if gap < 1 {
-		return ansi.Truncate(left, m.width, "")
-	}
-	return left + strings.Repeat(" ", gap) + right
 }
 
 func (m Model) treeLines(w, h int) []string {
@@ -562,10 +566,18 @@ func (m Model) hintLine() string {
 		}
 		return sError.Render(question) + keys("y", "yes", "any other key", "no")
 	case modeNew:
-		if f := m.form; f.field == fieldFolder && len(f.folders) > 0 {
-			return keys("tab", "fill in", "↑/↓", "pick", "↵", "next", "esc", "hide list")
+		f := m.form
+		if f.field == fieldFolder && len(f.folders) > 0 {
+			return keys("tab", "completes", "↑/↓", "pick", "↵", "next", "esc", "hide list")
 		}
-		return keys("↵", "next / start", "tab", "field", "←/→", "tool / model", "esc", "cancel")
+		switch f.field {
+		case fieldTool, fieldModel:
+			return keys("←/→", "choose", "tab", "field", "↵", "next / start", "esc", "cancel")
+		case fieldFolder:
+			return keys("tab", "completes", "↵", "next", "esc", "cancel")
+		default:
+			return keys("↵", "starts", "tab", "field", "esc", "cancel")
+		}
 	case modeTeam:
 		return keys("↵", "next / start", "tab", "field", "+", "row", "ctrl+d", "remove", "←/→", "work · lead · template · model", "esc", "cancel")
 	case modeTasks:

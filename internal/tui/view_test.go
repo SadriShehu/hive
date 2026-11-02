@@ -162,3 +162,33 @@ func TestNarrowHeaderSaysWhyThePreviewIsHidden(t *testing.T) {
 		t.Errorf("hidden preview still claims it needs cols:\n%s", head)
 	}
 }
+
+func TestHeaderDropsWholeSegmentsInsteadOfCuttingWords(t *testing.T) {
+	m, _ := setup(t, false)
+	m.trashed = sample() // a trash count the header has to drop
+	m = step(t, m, tea.WindowSizeMsg{Width: 60, Height: 24})
+	head := ansi.Strip(m.headerLine())
+	if width := ansi.StringWidth(head); width > 60 {
+		t.Fatalf("60-col header is %d wide:\n%s", width, head)
+	}
+	if strings.Contains(head, "in the t") || strings.Contains(head, "trash") {
+		t.Fatalf("narrow header cut the trash segment:\n%s", head)
+	}
+	if !strings.Contains(head, "preview needs 100 cols") {
+		t.Fatalf("narrow header lost the preview note:\n%s", head)
+	}
+	if !strings.Contains(head, "live") {
+		t.Fatalf("narrow header lost the live count:\n%s", head)
+	}
+
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	head = ansi.Strip(m.headerLine())
+	if width := ansi.StringWidth(head); width > 120 {
+		t.Fatalf("120-col header is %d wide:\n%s", width, head)
+	}
+	for _, want := range []string{"live", "sessions", "in the trash", "last 24h", "$"} {
+		if !strings.Contains(head, want) {
+			t.Errorf("wide header lacks %q:\n%s", want, head)
+		}
+	}
+}

@@ -1100,7 +1100,7 @@ func (m Model) openForm(parent store.Session) (tea.Model, tea.Cmd) {
 	}
 	settings := m.ops.Fusion()
 	f := form{parent: parent, tools: append([]string{fusion.Auto}, tools...), models: map[string][]string{},
-		field: fieldFolder, mode: settings.Mode, inside: settings.Tool}
+		field: fieldPrompt, mode: settings.Mode, inside: settings.Tool}
 	if f.mode == "" {
 		f.mode = fusion.ModeProvider
 	}
@@ -1130,7 +1130,7 @@ func (m Model) openForm(parent store.Session) (tea.Model, tea.Cmd) {
 	}
 	m.form = f
 	m.mode = modeNew
-	return m, tea.Batch(m.form.folder.Focus(), m.modelsCmd())
+	return m, tea.Batch(m.form.prompt.Focus(), m.modelsCmd())
 }
 
 // modelsCmd loads what the form's tool can run, once per tool: a tool that

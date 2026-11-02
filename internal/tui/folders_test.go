@@ -64,7 +64,7 @@ func TestFolderSuggestions(t *testing.T) {
 // typeFolder opens the new-agent form and types value into its folder field.
 func typeFolder(t *testing.T, m Model, value string) Model {
 	t.Helper()
-	m = press(t, m, "n")
+	m = press(t, m, "n", "shift+tab") // prompt → folder
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
 	return press(t, m, value)
 }
@@ -74,7 +74,7 @@ func TestNewFormSuggestsFolders(t *testing.T) {
 	m, ops := setup(t, false)
 	m = typeFolder(t, m, root+"/a")
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"api/", "App/", "apps/", "tab fill in"} {
+	for _, want := range []string{"api/", "App/", "apps/", "tab completes"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view is missing %q:\n%s", want, view)
 		}
