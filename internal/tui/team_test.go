@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -680,6 +681,137 @@ func TestNewTeamForm(t *testing.T) {
 	m = press(t, m, "enter")
 	if len(ops.started) != 2 || !ops.started[1].Worktrees {
 		t.Fatalf("started = %+v, want worktrees", ops.started)
+	}
+}
+
+// A cut goal says ctrl+g reads it, and a goal that fits says nothing extra.
+// The line never grows past the width.
+func TestATeamTitleMarksACutGoal(t *testing.T) {
+	for _, w := range []int{60, 80, 120} {
+		m, _ := setupTeam(t)
+		team := m.snap.Teams[0]
+		team.Goal = strings.Repeat("what the team is for ", 20)
+		line := m.teamTitleLine(team, w)
+		plain := ansi.Strip(line)
+		if !strings.Contains(plain, "^g goal") {
+			t.Errorf("w=%d: a cut goal doesn't say ctrl+g:\n%s", w, plain)
+		}
+		if width := ansi.StringWidth(line); width > w {
+			t.Errorf("w=%d: the title is %d wide: %q", w, width, plain)
+		}
+	}
+	m, _ := setupTeam(t)
+	team := m.snap.Teams[0]
+	team.Goal = "short goal"
+	if line := ansi.Strip(m.teamTitleLine(team, 80)); strings.Contains(line, "^g goal") {
+		t.Errorf("a goal that fits still marks ctrl+g:\n%s", line)
+	}
+}
+
+// ctrl+g opens the reader: it keeps the goal's own line breaks, shows every
+// member's part, and stays inside the screen.
+func TestTheGoalReaderShowsTheWholeGoalAndParts(t *testing.T) {
+	for _, w := range []int{60, 120} {
+		m, ops := setupTeam(t)
+		m = step(t, m, tea.WindowSizeMsg{Width: w, Height: 24})
+		ops.snap.Teams[0].Goal = "first line words\n\nsecond line that is long enough to wrap at sixty columns because it keeps going and going"
+		ops.snap.Members[0].Prompt = "the part the lead owns, which is long enough to wrap too"
+		m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+		m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlG})
+		if m.mode != modeGoal {
+			t.Fatalf("w=%d: ctrl+g left mode %v", w, m.mode)
+		}
+		plain := ansi.Strip(m.View())
+		for _, want := range []string{"first line words", "second line", "the part the lead owns"} {
+			if !strings.Contains(plain, want) {
+				t.Errorf("w=%d: the reader lacks %q:\n%s", w, want, plain)
+			}
+		}
+		lines := strings.Split(plain, "\n")
+		first, second := -1, -1
+		for i, line := range lines {
+			if strings.Contains(line, "first line words") {
+				first = i
+			}
+			if strings.Contains(line, "second line") {
+				second = i
+			}
+		}
+		if first < 0 || second <= first+1 {
+			t.Errorf("w=%d: the blank line in the goal is gone:\n%s", w, plain)
+		} else if strings.TrimSpace(lines[first+1]) != "" {
+			t.Errorf("w=%d: the goal's blank line isn't blank: %q", w, lines[first+1])
+		}
+		for _, line := range strings.Split(m.View(), "\n") {
+			if width := ansi.StringWidth(line); width > m.width {
+				t.Errorf("w=%d: a line is %d wide: %q", w, width, ansi.Strip(line))
+			}
+		}
+	}
+}
+
+// The reader scrolls a tall goal: j/down move a line, G goes to the last
+// line, and esc goes back to the tree.
+func TestTheGoalReaderScrolls(t *testing.T) {
+	m, ops := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	var goal strings.Builder
+	for i := 1; i <= 60; i++ {
+		fmt.Fprintf(&goal, "goal line %d\n", i)
+	}
+	ops.snap.Teams[0].Goal = goal.String()
+	m = step(t, m, refreshedMsg{sessions: ops.sessions, snap: ops.snap})
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlG})
+
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "goal line 1") || strings.Contains(view, "goal line 60") {
+		t.Fatalf("the reader didn't start at the top:\n%s", view)
+	}
+	m = press(t, m, "down")
+	if m.goalScroll != 1 {
+		t.Errorf("down moved %d lines, want 1", m.goalScroll)
+	}
+	m = press(t, m, "G")
+	if want := m.goalMaxScroll(m.bodyHeight()); m.goalScroll != want {
+		t.Errorf("G scrolled to %d, want the last page %d", m.goalScroll, want)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "goal line 60") {
+		t.Errorf("G didn't show the last line:\n%s", view)
+	}
+	m = press(t, m, "esc")
+	if m.mode != modeNormal {
+		t.Errorf("esc left mode %v, want the tree", m.mode)
+	}
+}
+
+// The channel opens the same reader without losing a half-typed message.
+func TestTheChannelKeepsItsTextWhenTheGoalOpens(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = press(t, m, "enter")
+	m = press(t, m, "h", "e", "l")
+	if m.channelInput.Value() != "hel" {
+		t.Fatalf("channel input = %q", m.channelInput.Value())
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	if m.mode != modeGoal {
+		t.Fatalf("ctrl+g in the channel left mode %v", m.mode)
+	}
+	m = press(t, m, "esc")
+	if m.mode != modeChannel || m.channelInput.Value() != "hel" {
+		t.Fatalf("after esc mode = %v, input = %q; want the channel with \"hel\"", m.mode, m.channelInput.Value())
+	}
+}
+
+// The hint on a team row says the reader exists.
+func TestTheTeamHintNamesTheGoalReader(t *testing.T) {
+	m, _ := setupTeam(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	hints, ok := m.teamHints()
+	if !ok {
+		t.Fatal("no team hints")
+	}
+	if line := ansi.Strip(strings.Join(hints, "  ")); !strings.Contains(line, "^g goal") {
+		t.Errorf("the team hint lacks ctrl+g:\n%s", line)
 	}
 }
 

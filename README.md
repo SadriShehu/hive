@@ -373,8 +373,9 @@ template row to fill it from config.toml, and a work row for the shared folder o
 worktree per member. The team is a node in the tree with its members under it, each
 titled by the task it holds; select it and the preview is the board and the channel.
 `↵` opens the channel full screen with a live line: type to write to everyone (`@role`
-for one), `↵` sends, `esc` goes back to the tree, and the prompt wraps: `↑/↓` move the
-caret once you have typed, and `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) scroll the feed. Each
+for one), `↵` sends, `esc` goes back to the tree, `ctrl+g` reads the whole goal, and the
+prompt wraps: `↑/↓` move the caret once you have typed, and `pgup`/`pgdn` (or
+`ctrl+u`/`ctrl+d`) scroll the feed. Each
 member's row shows its state, model and effort, short session ID and how full its context
 is; the account's rate-limit windows (`5h 7% · resets 4h54m · 7d 22%`) show once per tool,
 when the tool reports them. Claude Code sends them only to its status line: point that
@@ -430,6 +431,7 @@ tree, so a teammate can't paint your terminal.
 | --- | --- |
 | `↵` | open the team's channel full screen; on a member row, jump to that member |
 | `e` | open the board editor (on a team or any of its members): `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
+| `ctrl+g` | read the whole goal and every member's part (a `^g goal` on the title says when it is cut) |
 | `s` | message everyone (`@role` for one); on a member, message that member |
 | `p` | pause or resume: no mail is delivered and no task claimed while paused |
 | `L` | take the lead yourself, or hand it back to an agent |

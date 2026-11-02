@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/sadrishehu/hive/internal/human"
 	"github.com/sadrishehu/hive/internal/paths"
 	"github.com/sadrishehu/hive/internal/store"
+	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tracker"
 )
 
@@ -65,6 +67,10 @@ func (m Model) View() string {
 	switch {
 	case m.mode == modeHelp:
 		body = fit(helpLines(), m.width, h)
+	case m.mode == modeGoal:
+		lines := m.goalLines(m.width)
+		top := min(max(0, m.goalScroll), max(0, len(lines)-h))
+		body = fit(lines[top:], m.width, h)
 	case m.mode == modeChannel:
 		body = m.channelLines(m.width, h)
 	case m.mode == modeTasks:
@@ -588,6 +594,15 @@ func (m Model) hintLine() string {
 			return keys("↵", "next / save", "tab", "field", "esc", "cancel")
 		}
 		return keys("j/k", "move", "n", "add", "e", "edit", "d", "done", "b", "block", "esc", "back")
+	case modeGoal:
+		hint := keys("↑/↓", "scroll", "esc", "back")
+		total := len(m.goalLines(m.width))
+		if h := m.bodyHeight(); total > h {
+			first := min(m.goalScroll+1, total)
+			last := min(m.goalScroll+h, total)
+			hint += "  " + sDim.Render(fmt.Sprintf("· %d–%d of %d lines", first, last, total))
+		}
+		return hint
 	case modeHelp:
 		return keys("any key", "close")
 	}
@@ -667,8 +682,10 @@ func helpLines() []string {
 		{"←/→ space", "fold and unfold; ← on a leaf goes to its parent"},
 		{"y", "copy the session ID"},
 		{"T", "start a team: agents that work on one goal and report to a channel"},
-		{"on a team", "↵ opens its channel · e edits its board · s messages everyone · p pauses · L leads · x stops all · d trashes it · m hides hive's posts"},
-		{"in a channel", "type to write to everyone (@role for one) · ↵ sends · esc goes back · ↑/↓ move the caret once typing · pgup/pgdn scroll the feed"},
+		{"on a team", "↵ opens its channel · e edits its board · ctrl+g reads the whole goal and every part · s messages everyone"},
+		{"", "p pauses · L leads · x stops all · d trashes it · m hides hive's posts"},
+		{"in a channel", "type to write to everyone (@role for one) · ↵ sends · esc goes back · ↑/↓ move the caret once typing"},
+		{"", "pgup/pgdn scroll the feed · ctrl+g reads the goal"},
 		{"S", "sync history now (it also runs every 30s)"},
 		{"tab", "hide / show the preview"},
 		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills"},
@@ -683,6 +700,101 @@ func helpLines() []string {
 		"  "+sDim.Render("run: a headless run   sub: a tool's own subagent"),
 		"  "+sDim.Render("$ in the header: what the sessions in view cost · ~ an estimate from list prices · partial: totals come when the session ends"))
 	return out
+}
+
+// goalLines draws the team reader full screen: its name, how it runs, the
+// whole goal with its own line breaks, and every active member's part.
+func (m Model) goalLines(w int) []string {
+	t, ok := m.teamByID(m.goalTeam)
+	if !ok {
+		return []string{sDim.Render("this team is gone; esc goes back")}
+	}
+	out := []string{sAccent.Bold(true).Render("⬡ " + cleanLine(t.Name))}
+	if head := m.teamHead(t, w); len(head) > 1 {
+		out = append(out, head[1])
+	}
+	out = append(out, "", sBold.Render("goal"))
+	goal := team.Clean(t.Goal)
+	if strings.TrimSpace(goal) == "" {
+		out = append(out, indentWrapped(
+			"no goal was set; the team form (T on a template, or hive team new --goal) sets one",
+			w, 2, sDim)...)
+	} else {
+		out = append(out, indentWrapped(goal, w, 2, sText)...)
+	}
+	members := m.members(t.ID)
+	hasParts := false
+	for _, mem := range members {
+		if strings.TrimSpace(mem.Prompt) != "" {
+			hasParts = true
+			break
+		}
+	}
+	if hasParts {
+		out = append(out, "", sBold.Render("parts"))
+	}
+	for _, mem := range members {
+		part := strings.TrimSpace(team.Clean(mem.Prompt))
+		if part == "" {
+			continue
+		}
+		meta := mem.Tool
+		if mem.Model != "" && mem.Model != fusion.Auto {
+			meta += " " + mem.Model
+		}
+		out = append(out, "  "+toolStyle(mem.Tool).Bold(true).Render(cleanLine(mem.Role))+"  "+sDim.Render(meta))
+		out = append(out, indentWrapped(part, w, 4, sText)...)
+	}
+	return out
+}
+
+// indentWrapped keeps text's own line breaks and wraps each line at w-indent,
+// indenting it by indent spaces; a blank line stays blank.
+func indentWrapped(text string, w, indent int, style lipgloss.Style) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "" {
+			out = append(out, "")
+			continue
+		}
+		for _, wrapped := range strings.Split(ansi.Wrap(line, max(10, w-indent), ""), "\n") {
+			out = append(out, strings.Repeat(" ", indent)+style.Render(wrapped))
+		}
+	}
+	return out
+}
+
+// goalMaxScroll is how far the reader scrolls: enough to put its last line at
+// the bottom.
+func (m Model) goalMaxScroll(h int) int {
+	return max(0, len(m.goalLines(m.width))-h)
+}
+
+// keyGoal scrolls the team reader; esc, q, enter and ctrl+g close it.
+func (m Model) keyGoal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	h := m.bodyHeight()
+	maxScroll := m.goalMaxScroll(h)
+	switch msg.String() {
+	case "esc", "q", "enter", "ctrl+g":
+		m.mode = m.goalFrom
+		if m.mode == modeChannel {
+			return m, m.channelInput.Focus()
+		}
+		return m, nil
+	case "up", "k":
+		m.goalScroll = max(0, m.goalScroll-1)
+	case "down", "j":
+		m.goalScroll = min(maxScroll, m.goalScroll+1)
+	case "pgup", "ctrl+u":
+		m.goalScroll = max(0, m.goalScroll-max(1, h/2))
+	case "pgdown", "ctrl+d":
+		m.goalScroll = min(maxScroll, m.goalScroll+max(1, h/2))
+	case "home", "g":
+		m.goalScroll = 0
+	case "end", "G":
+		m.goalScroll = maxScroll
+	}
+	return m, nil
 }
 
 // oneLine makes s safe to draw on a single line.

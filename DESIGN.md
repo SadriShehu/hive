@@ -702,7 +702,10 @@ task it holds (`backend · #4 handlers…`), else by what its session does.
 
 `↵` on a team opens its channel full screen: the team's name and goal on one line, how it
 runs, then one line per member with its state, model, context and the task it holds, the
-task board and the feed, with a live line at the bottom. Typing writes to everyone
+task board and the feed, with a live line at the bottom. The head keeps the goal on one
+line and, when it is cut, ends it with `^g goal`; `ctrl+g` (on the tree, on a member, or in
+the channel) opens a full-screen reader with the whole goal and every member's part, and
+its own line breaks are kept. Typing writes to everyone
 (`@role` for one), `↵` sends through the same mailbox as `s`, `esc` goes back to the tree,
 and the prompt wraps: `↑/↓` move the caret once typing, and `pgup`/`pgdn` (or `ctrl+u`/
 `ctrl+d`) scroll the feed. The channel marks its team read while it is open, preview or
@@ -712,6 +715,7 @@ no preview.
 | --- | --- |
 | `↵` | open the team's channel full screen; on a member row, jump to that member |
 | `e` | open the board editor (on a team or any of its members): `n` adds, `e`/`↵` edits, `d` done, `b` blocked, `esc` back |
+| `ctrl+g` | read the whole goal and every member's part, full screen; scroll with `↑/↓`, `pgup`/`pgdn`, `g`/`G`, and `esc` goes back |
 | `s` | write to everyone (`@role` for one); on a member, to that member |
 | `p` · `L` · `m` | pause or resume · take the lead or hand it back · hide hive's posts |
 | `x` | stop every member that runs (asks first) |

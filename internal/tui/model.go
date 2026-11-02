@@ -45,6 +45,7 @@ const (
 	modeNew
 	modeConfirm
 	modeHelp
+	modeGoal    // a team's whole goal and every member's part
 	modeTeam    // the new-team form
 	modeChannel // a team's channel, full screen
 	modeTasks   // a team's task editor, full screen
@@ -86,6 +87,10 @@ type Model struct {
 	channelInput  textarea.Model
 	channelScroll int  // lines scrolled back from the newest post
 	hideSystem    bool // leave hive's own posts out of the channel
+
+	goalTeam   string // the team whose whole goal is open
+	goalScroll int    // lines scrolled down from the top
+	goalFrom   mode   // where esc goes back to: the tree or the channel
 
 	taskEdit taskEditor // the team whose board is open, and where the cursor is
 
@@ -774,6 +779,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeHelp:
 			m.mode = modeNormal
 			return m, nil
+		case modeGoal:
+			return m.keyGoal(msg)
 		}
 		if m.trash {
 			return m.keyTrash(msg)

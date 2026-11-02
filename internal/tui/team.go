@@ -159,6 +159,9 @@ func (m Model) keyTeam(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	isTeam := n.Team != nil
 	ops := m.ops
 	switch msg.String() {
+	case "ctrl+g":
+		m.mode, m.goalTeam, m.goalScroll, m.goalFrom = modeGoal, tm.ID, 0, modeNormal
+		return m, nil, true
 	case "p":
 		pause := !tm.Paused
 		return m, func() tea.Msg {
@@ -252,6 +255,10 @@ func (m Model) openChannel(teamID string) (Model, tea.Cmd) {
 // feed.
 func (m Model) keyChannel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "ctrl+g":
+		// The input keeps what was typed: the reader is not a send.
+		m.mode, m.goalTeam, m.goalScroll, m.goalFrom = modeGoal, m.channelTeam, 0, modeChannel
+		return m, nil
 	case "esc":
 		m.mode = modeNormal
 		m.channelInput.Blur()
@@ -1138,12 +1145,25 @@ func memberState(mem store.Member, s store.Session, found bool) string {
 func (m Model) teamTitleLine(t store.Team, w int) string {
 	name := "⬡ " + cleanLine(t.Name)
 	line := sAccent.Bold(true).Render(name)
-	if goal := strings.TrimSpace(cleanLine(t.Goal)); goal != "" {
-		if rest := w - ansi.StringWidth(name) - 3; rest > 0 {
-			line += sDim.Render(" · " + ansi.Truncate(goal, rest, "…"))
-		} else {
-			line = sAccent.Bold(true).Render(ansi.Truncate(name, w, "…"))
-		}
+	goal := strings.TrimSpace(cleanLine(t.Goal))
+	if goal == "" {
+		return ansi.Truncate(line, w, "…")
+	}
+	room := w - ansi.StringWidth(name) - 3 // " · "
+	if room <= 0 {
+		return sAccent.Bold(true).Render(ansi.Truncate(name, w, "…"))
+	}
+	if ansi.StringWidth(goal) <= room {
+		return ansi.Truncate(line+sDim.Render(" · "+goal), w, "…")
+	}
+	// The goal is cut: say how to read all of it, unless that would leave no
+	// room for the goal, or push the name out.
+	marker := keys("^g", "goal")
+	if rest := room - 2 - ansi.StringWidth(marker); rest > 0 {
+		line += sDim.Render(" · " + ansi.Truncate(goal, rest, "…"))
+		line += "  " + marker
+	} else {
+		line += sDim.Render(" · " + ansi.Truncate(goal, room, "…"))
 	}
 	return ansi.Truncate(line, w, "…")
 }
@@ -1422,6 +1442,7 @@ func (m Model) teamHints() ([]string, bool) {
 		return []string{
 			keys("↵", "channel"),
 			keys("e", "board"),
+			keys("^g", "goal"),
 			keys("s", "message"),
 			keys("p", "pause"),
 			keys("L", "lead"),
@@ -1433,7 +1454,7 @@ func (m Model) teamHints() ([]string, bool) {
 	}
 	hints := []string{keys("↵", "jump")}
 	if n.TeamID != "" {
-		hints = append(hints, keys("e", "board"))
+		hints = append(hints, keys("e", "board"), keys("^g", "goal"))
 	}
 	hints = append(hints,
 		keys("s", "message"),
