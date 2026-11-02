@@ -250,7 +250,9 @@ screen (`hive`) or as a tmux popup (prefix + a, 95% by 90%) that closes when you
 The preview needs 100 cols; below that the header says `preview needs 100 cols` in place
 of the cost, so the tree's narrow mode doesn't hide why the preview is gone. A header too
 wide for the window drops whole segments from the end, the least important first, never
-cutting one in half.
+cutting one in half. While a tool on PATH isn't connected, or tmux has no popup key, a
+high-priority segment says `⚠ not connected: … · run hive install`. A `tea.Cmd` takes
+that read-only look at start and on each 30s sync, never while drawing.
 
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited. `run` marks a headless
 session, `sub` a tool's own subagent.
@@ -272,6 +274,12 @@ shows every team), `a` recent or all history, `i` hide or show subagents, `S` sy
 `y` copy the ID, `tab` hide the preview, `u` show what the session used (model, tokens,
 price, context, tools, skills) in place of the pane preview, `←` / `→` collapse and expand,
 `?` help, `q` quit.
+
+A plain filter matches a session's title, folder or ID, and a team's name or goal. The
+row says which: the matched part of a title or name is drawn in accent, and a row found
+only by folder or ID carries a dim `folder` or `id` tag. A matched team keeps its whole
+subtree. An empty result names the query, and the header's filter segment says
+`matching “…” · all history`.
 
 The help is grouped into sections: Tree, Team, Channel, Board, Trash and Glyphs. The
 section for where `?` was pressed comes first (Team on a team or member row, Trash in the
@@ -299,7 +307,9 @@ trash as a tree of its own, with the preview still working: `r` restores a sessi
 everything under it, `d` deletes it for good after you confirm, `t` or `esc` goes back.
 
 **Preview.** For a session in a pane, the screen (`tmux capture-pane`); otherwise the end of
-its transcript from the tool's own files, which is how you watch headless runs.
+its transcript from the tool's own files, which is how you watch headless runs. An untracked
+session whose tool has recorded nothing says why: `hive can't see what this does until its
+tool reports: hive install <tool>, then restart it`.
 
 ## Needs you
 

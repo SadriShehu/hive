@@ -88,7 +88,9 @@ Run `hive`. Inside tmux it opens in the current pane; outside tmux it attaches t
 tmux session called `hive`, with the tree in its first window. With the popup key
 bound (`hive install tmux`), **prefix + a** opens the tree over whatever you're doing
 and closes once you jump somewhere. Running `hive install tmux` again picks up the
-popup's new size. The header counts the agents that need you.
+popup's new size. The header counts the agents that need you. While a tool found on
+PATH isn't connected, or tmux has no popup key, it also says `⚠ not connected: claude,
+codex · run hive install`; hive checks at start and on each 30s sync.
 
 ```
  hive  ● 3 live  ·  203 sessions                                           last 24h
@@ -124,6 +126,10 @@ key and descriptions wrap under it with a hanging indent, so nothing is cut at a
 width. `↑`/`↓` (or `j`/`k`), `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) and `g`/`G` scroll it,
 with a line count on the hint when it doesn't all fit; `esc`, `q`, `?` and `↵` close it,
 and other keys do nothing.
+
+A filter says why a row matched: the matched part of a title is in accent, and a row
+found only by its folder or ID gets a dim `folder` or `id` tag. An empty result names
+the query, and the header reads `matching “…” · all history`.
 
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. The form asks for the tool, the model, the
