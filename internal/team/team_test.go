@@ -168,8 +168,8 @@ func TestTheLeadSeesTeammatesParts(t *testing.T) {
 	tm := store.Team{Name: "api", Goal: "ship", Cwd: "/work", LeadRole: "lead"}
 	b := Brief(tm, members[0], members)
 	for _, want := range []string{
-		"Goal: ship\n\nShared files: $HIVE_TEAM_DIR (",
-		"Teammates' parts:\n- backend: own internal/\n- frontend: own web/ and the routes\n",
+		"Goal: ship\nTeammates' parts:\n- backend: own internal/\n- frontend: own web/ and the routes\n",
+		"- Shared files: `$HIVE_TEAM_DIR` (",
 		"built around each teammate's part, each with an owner",
 	} {
 		if !strings.Contains(b, want) {
