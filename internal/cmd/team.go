@@ -461,7 +461,8 @@ func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
 		case l.Err != nil:
 			note = "failed: " + l.Err.Error()
 		case l.Launched.Choice != nil:
-			note = fmt.Sprintf("%s  pane %s  picked %s", orID(l.Launched.SessionID), l.Launched.Pane, l.Launched.Choice.Reason)
+			picked := append([]string{l.Launched.Choice.Reason}, l.Launched.Choice.Notes...)
+			note = fmt.Sprintf("%s  pane %s  picked %s", orID(l.Launched.SessionID), l.Launched.Pane, strings.Join(picked, "; "))
 		case l.Launched.Pane == "":
 			note = orID(l.Launched.SessionID)
 		case l.Launched.SessionID == "":

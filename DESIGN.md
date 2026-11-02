@@ -411,10 +411,17 @@ the built-in ones have it.
   by what a million tokens in and out cost (only when both have a price), then the
   faster, then one from the preferred tool. When none meets the bar, the smallest
   shortfall wins, then the most power, and the reason says that nothing met it.
+- **Rate limits.** Before a cross-tool pick, a tool whose stored 5h window is at 90% or
+  more, whose reset is in the future or unknown, and whose report is at most 5h old,
+  leaves the pool: every other tool's candidates come first. If every candidate tool is
+  high the pool is unchanged, and a pinned tool (`claude:auto`, so `model` mode) never
+  moves. The choice carries a note for each tool left out:
+  `claude ranked down: 5h window at 93%, resets 14:20`. Only Claude reports the windows,
+  through `hive status --then`; an older report says nothing about the window now.
 - **The reason** names the model, how many met the bar, and the levels:
   `claude · claude-opus-5-5: the lightest of 24 that meet reasoning 8, coding 8`.
-  `--dry-run` prints it with the cues; `hive new` and `hive team new` print it with what
-  started, and the tree's flash names the model and the levels.
+  `--dry-run` prints it with the notes and cues; `hive new` and `hive team new` print it
+  with what started, and the tree's flash names the model and the levels.
 - **Team members** started with `auto` are rated on the team's goal and their own part,
   not on the brief, which is the same for everyone; one `hive team new` asks each tool
   for its models once.

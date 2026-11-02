@@ -617,6 +617,13 @@ the prompt asks for, and among them the lowest total rating, then the cheaper (w
 both have a price), then the faster, then one from the preferred tool. When nothing
 meets the bar, the closest to it wins, and `--dry-run` says so.
 
+**Rate limits.** A tool whose 5h rate-limit window is at 90% or more and hasn't reset yet
+goes after every other tool's candidates, so auto doesn't start work on an account about
+to hit its limit. A window older than 5h says nothing about now, and if every tool is
+high nothing changes. Only Claude reports the windows, through `hive status --then` in its
+status line. A tool you pin (`claude:auto`) is never moved to another tool. `--dry-run`
+says why: `claude ranked down: 5h window at 93%, resets 14:20`.
+
 These are hive's starting ratings, not measurements. Change them, or rate a model
 hive doesn't know, in `config.toml`; a rating set by hand replaces the tier's:
 

@@ -169,6 +169,7 @@ func TestTheLeadSeesTeammatesParts(t *testing.T) {
 	b := Brief(tm, members[0], members)
 	for _, want := range []string{
 		"Goal: ship\nTeammates' parts:\n- backend: own internal/\n- frontend: own web/ and the routes\n",
+		"- Shared files: `$HIVE_TEAM_DIR` (",
 		"built around each teammate's part, each with an owner",
 	} {
 		if !strings.Contains(b, want) {
