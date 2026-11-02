@@ -295,3 +295,18 @@ func TestPopupBindingUsesTheWiderSize(t *testing.T) {
 		t.Errorf("popup text = %q, want 95%% by 90%%", b.text)
 	}
 }
+
+func TestQuoteKeepsShellWordsInOnePiece(t *testing.T) {
+	for in, want := range map[string]string{
+		"/Users/me/go/bin/hive":     "/Users/me/go/bin/hive",
+		"claude:1043899d-ee1":       "claude:1043899d-ee1",
+		"/Applications/My App/hive": "'/Applications/My App/hive'",
+		"claude:x;touch /tmp/p":     "'claude:x;touch /tmp/p'",
+		"a|b&c":                     "'a|b&c'",
+		"it's":                      `'it'\''s'`,
+	} {
+		if got := quote(in); got != want {
+			t.Errorf("quote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}

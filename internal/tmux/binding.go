@@ -61,12 +61,10 @@ func ConfPath() string {
 	return classic
 }
 
-func quote(s string) string {
-	if strings.ContainsAny(s, " '\"\\$`") {
-		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-	}
-	return s
-}
+// quote makes s one word for the shell tmux runs a command in. Anything but
+// plainly safe characters is single-quoted, so a path or ID with ; | & or the
+// like can't run as a command.
+func quote(s string) string { return agent.ShellQuote(s) }
 
 // ShellQuote quotes a word for a command string tmux runs, as the bindings do.
 func ShellQuote(s string) string { return quote(s) }
