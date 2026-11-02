@@ -1,6 +1,7 @@
 package store
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -98,6 +99,49 @@ func TestMessagesQueueAndAreClaimedOnce(t *testing.T) {
 		if strings.Contains(m.Body, "aside") {
 			t.Error("the feed shows a private message")
 		}
+	}
+}
+
+func TestWaitingShowsWhoMailStillWaitsFor(t *testing.T) {
+	st := teamStore(t)
+	a, err := st.AddMessage(Message{TeamID: "t1", From: "lead", To: "backend", Body: "one", Kind: MsgSay, At: 1}, []string{"backend"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.AddMessage(Message{TeamID: "t1", From: "lead", To: ToAll, Body: "two", Kind: MsgSay, At: 2}, []string{"backend", "lead"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.AddMessage(Message{TeamID: "t1", From: "lead", Body: "a post", Kind: MsgPost, At: 3}, nil)
+
+	byRole, err := st.Waiting("t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byRole) != 2 || len(byRole["backend"]) != 2 || byRole["backend"][0].Body != "one" || byRole["backend"][1].Body != "two" {
+		t.Fatalf("Waiting = %+v, want backend's two in order", byRole)
+	}
+	if len(byRole["lead"]) != 1 || byRole["lead"][0].Body != "two" {
+		t.Fatalf("Waiting lead = %+v, want only the shared message", byRole["lead"])
+	}
+
+	byMessage, err := st.WaitingByMessage("t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(byMessage[a.ID], []string{"backend"}) || !slices.Equal(byMessage[b.ID], []string{"backend", "lead"}) {
+		t.Fatalf("WaitingByMessage = %+v, want each message's roles", byMessage)
+	}
+	if _, ok := byMessage[3]; ok {
+		t.Error("a post nobody waits for is listed")
+	}
+
+	if _, err := st.ClaimPending("t1", "lead", 10); err != nil {
+		t.Fatal(err)
+	}
+	byMessage, _ = st.WaitingByMessage("t1")
+	if !slices.Equal(byMessage[b.ID], []string{"backend"}) {
+		t.Errorf("after the lead claimed, WaitingByMessage = %+v, want only backend left", byMessage)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -41,7 +42,72 @@ func newTeamCmd() *cobra.Command {
 		newTeamLogCmd(), newTeamInboxCmd(), newTeamAddCmd(), newTeamRmCmd(), newTeamStopCmd(),
 		newTeamPauseCmd(true), newTeamPauseCmd(false), newTeamLeadCmd(), newTeamDeliverCmd(), newTeamDoneCmd())
 	cmd.AddCommand(newTeamTaskCmd(), newTeamWaitCmd(), newTeamMuteCmd(true), newTeamMuteCmd(false))
+	cmd.PersistentPostRun = func(cmd *cobra.Command, args []string) { noteWaiting(cmd) }
 	return cmd
+}
+
+// noteWaiting says on stderr that mail waits for the member running a team
+// command, after its own output. It changes nothing else: not the exit code,
+// not the queue, and it says nothing to the human or to a member with none.
+func noteWaiting(cmd *cobra.Command) {
+	switch cmd.Name() {
+	case "inbox", "wait":
+		return
+	}
+	e, err := openTeamEnv()
+	if err != nil {
+		return
+	}
+	defer e.st.Close()
+	if len(e.roles) == 0 {
+		return
+	}
+	froms := map[string]int{}
+	total := 0
+	for _, r := range e.roles {
+		waiting, err := e.st.Waiting(r.Team.ID)
+		if err != nil {
+			return
+		}
+		for _, m := range waiting[r.Member.Role] {
+			froms[m.From]++
+			total++
+		}
+	}
+	if line := waitingNote(total, froms); line != "" {
+		fmt.Fprintln(os.Stderr, line)
+	}
+}
+
+// waitingNote words the line about mail that waits for a member, or "" when
+// none does.
+func waitingNote(total int, froms map[string]int) string {
+	if total == 0 {
+		return ""
+	}
+	order := make([]string, 0, len(froms))
+	for from := range froms {
+		order = append(order, from)
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if froms[order[i]] != froms[order[j]] {
+			return froms[order[i]] > froms[order[j]]
+		}
+		return order[i] < order[j]
+	})
+	parts := make([]string, len(order))
+	for i, from := range order {
+		if n := froms[from]; n > 1 {
+			parts[i] = fmt.Sprintf("%s ×%d", from, n)
+		} else {
+			parts[i] = from
+		}
+	}
+	noun, verb := "messages", "wait"
+	if total == 1 {
+		noun, verb = "message", "waits"
+	}
+	return fmt.Sprintf("✉ %d %s %s for you (%s) · hive team inbox", total, noun, verb, strings.Join(parts, ", "))
 }
 
 // teamEnv is what a team command works with.
@@ -719,14 +785,14 @@ func newTeamLogCmd() *cobra.Command {
 }
 
 func newTeamInboxCmd() *cobra.Command {
-	var wait bool
+	var wait, peek bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "Print the messages queued for this member, and mark them delivered",
 		Long: "Print the messages hive hasn't typed into this member yet, for an agent that reads its mail\n" +
 			"instead of waiting for it, from every team it is on. A paused team keeps its mail.\n" +
-			"--wait blocks until one arrives.",
+			"--wait blocks until one arrives. --peek prints the queue and leaves it queued.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := openTeamEnv()
@@ -737,20 +803,38 @@ func newTeamInboxCmd() *cobra.Command {
 			if len(e.roles) == 0 {
 				return errors.New("inbox is for a team member; run it inside one")
 			}
+			if peek {
+				now := time.Now().UnixMilli()
+				for _, r := range e.roles {
+					msgs, err := e.st.Pending(r.Team.ID, r.Member.Role)
+					if err != nil {
+						return err
+					}
+					for _, m := range msgs {
+						fmt.Println(team.Envelope(r.Team.Name, m.From, m.Body, m.At, now))
+					}
+				}
+				return nil
+			}
 			deadline := time.Now().Add(timeout)
 			for {
 				got := 0
+				now := time.Now().UnixMilli()
 				for _, r := range e.roles {
 					msgs, err := e.tr.Inbox(r.Team.ID, r.Member.Role)
 					if err != nil {
 						return err
 					}
 					for _, m := range msgs {
-						fmt.Println(team.Envelope(r.Team.Name, m.From, m.Body))
+						fmt.Println(team.Envelope(r.Team.Name, m.From, m.Body, m.At, now))
 					}
 					got += len(msgs)
 				}
-				if got > 0 || !wait {
+				if got > 0 {
+					fmt.Println("(marked delivered)")
+					return nil
+				}
+				if !wait {
 					return nil
 				}
 				if timeout > 0 && time.Now().After(deadline) {
@@ -761,6 +845,7 @@ func newTeamInboxCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait for the next message")
+	cmd.Flags().BoolVar(&peek, "peek", false, "print the queue and leave it queued")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "give up after this long (0: as long as it takes)")
 	return cmd
 }

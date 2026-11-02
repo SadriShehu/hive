@@ -300,3 +300,27 @@ func TestTeamTaskHasEditAndReopen(t *testing.T) {
 		}
 	}
 }
+
+func TestWaitingNoteNamesTheSenders(t *testing.T) {
+	got := waitingNote(3, map[string]int{"lead": 2, "manager": 1})
+	want := "✉ 3 messages wait for you (lead ×2, manager) · hive team inbox"
+	if got != want {
+		t.Errorf("waitingNote = %q, want %q", got, want)
+	}
+	if got := waitingNote(1, map[string]int{"lead": 1}); got != "✉ 1 message waits for you (lead) · hive team inbox" {
+		t.Errorf("one message = %q", got)
+	}
+	if got := waitingNote(0, nil); got != "" {
+		t.Errorf("no mail = %q, want nothing", got)
+	}
+}
+
+func TestInboxHasPeek(t *testing.T) {
+	c := newTeamInboxCmd()
+	if c.Flags().Lookup("peek") == nil {
+		t.Error("inbox has no --peek")
+	}
+	if newTeamCmd().PersistentPostRun == nil {
+		t.Error("team commands don't say when mail waits")
+	}
+}

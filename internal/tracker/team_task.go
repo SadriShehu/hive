@@ -531,7 +531,7 @@ func (t *Tracker) boardNews(teamID, role string, o WaitOptions, mark boardMark) 
 		if m.To != "" && m.To != role {
 			from += " → " + m.To
 		}
-		lines = append(lines, team.Envelope(tm.Name, from, m.Body))
+		lines = append(lines, team.Envelope(tm.Name, from, m.Body, m.At, t.World.Now()))
 	}
 	return lines, nil
 }
