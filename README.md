@@ -487,7 +487,7 @@ tree, so a teammate can't paint your terminal.
 | Command | Does |
 | --- | --- |
 | `hive team new <name> [--from template] [--goal text] [--lead tool\|self\|none] [--member role=tool[:model]]... [--part role=text]... [--worktrees] [--cwd folder] [--wait]` | start the team and print the roster; `--from` takes the defaults from config.toml; `--part` gives a member its part of the brief; `--wait` waits for each member's session ID, and a relative `--cwd` is stored absolute |
-| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks and latest posts, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
+| `hive team ls` · `board [team] [--tasks] [--channel]` · `log [team]` | the teams, with tasks done · goal, members, tasks, latest posts and each worktree's branch line, with each task's note and body cut to one line at the terminal width (`--tasks` or `--channel` prints just that part) · the channel (all take `--json`) |
 | `hive team report [team] [--out path]` | Markdown hand-off: the goal whole, members with state and cost, every task with its note or blocked reason, and the members' posts; `--out team` writes `$HIVE_TEAM_DIR/report.md` |
 | `hive team save <team> [--as name]` | append the team as a `[[team]]` template in config.toml, for `hive team new --from`; only appends, and refuses a name already there |
 | `hive team post "text"` · `say <role\|all> "text"` | post to the channel · message a teammate; `say --private` keeps it out of the feed (board, log and the tree), while `inbox` still reads it |
@@ -515,6 +515,16 @@ first that the folder is a git repository with a commit, and it only removes the
 worktrees it made: a folder or branch already in a member's place fails that member
 rather than taking someone's work. The brief names each member's branch, and changes not
 committed in the team's folder aren't in the worktrees.
+
+The tree's team header and `hive team board` show where each branch stands, read with
+read-only git in the background (at most every ten seconds, and never while drawing):
+`⎇ hive/api-v2/backend  ↑3 ↓1  5 files +210 −34  ✓ merges clean`, with a red
+`✗ conflicts: web/app.tsx (+1)` when a dry merge can't settle, `merged ✓` when the base
+already has every commit, and `· 2 uncommitted` when the worktree holds changes. A
+shared-folder team gets one line under its roster: `⎇ feat/x · 4 files uncommitted`. At a
+narrow width the diff stat goes first, then `↓`, then the branch name is cut—the merge
+result always stays. `hive team board --json` carries the same numbers under
+`worktrees.trees`.
 
 **Shared files.** Each team gets a folder outside its repository, `<data dir>/teams/<team>/files`
 (`~/.local/share/hive` unless `HIVE_HOME` or `XDG_DATA_HOME` says otherwise), where members

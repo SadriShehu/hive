@@ -12,6 +12,7 @@ import (
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/fusion"
+	"github.com/sadrishehu/hive/internal/gitx"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/tmux"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -56,6 +57,7 @@ type Ops interface {
 	TeamStart(o tracker.TeamOptions) (string, error)
 	TeamRead(teamID string, upTo int64) error
 	TeamRunning(teamID string) ([]string, error) // roles whose agents run, panes only too
+	TeamBranches(teamID string) (BranchReport, error)
 	TeamTaskAdd(teamID, title, body, owner string, after []int) (store.Task, error)
 	TeamTaskEdit(teamID string, n int, title, body, owner string, after []int) (store.Task, error)
 	TeamTaskDone(teamID string, n int, note string) (store.Task, error)
@@ -275,6 +277,26 @@ func (o *liveOps) TeamRunning(teamID string) ([]string, error) {
 		return nil, err
 	}
 	return o.tracker().TeamRunning(tm)
+}
+
+func (o *liveOps) TeamBranches(teamID string) (BranchReport, error) {
+	tm, err := o.st.TeamByID(teamID)
+	if err != nil {
+		return BranchReport{}, err
+	}
+	rep := BranchReport{Worktrees: tm.Workspace == store.WorkspaceWorktrees}
+	if rep.Worktrees {
+		trees, base, err := o.tracker().TeamWorktrees(tm)
+		rep.Trees, rep.Base = trees, base
+		return rep, err
+	}
+	head, err := gitx.Head(tm.Cwd)
+	if err != nil {
+		return rep, err
+	}
+	rep.Head = head
+	rep.Uncommitted, err = gitx.Uncommitted(tm.Cwd)
+	return rep, err
 }
 
 func (o *liveOps) TeamStart(opts tracker.TeamOptions) (string, error) {

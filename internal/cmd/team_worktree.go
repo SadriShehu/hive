@@ -3,7 +3,10 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
+	"github.com/sadrishehu/hive/internal/gitx"
 	"github.com/sadrishehu/hive/internal/store"
 	"github.com/sadrishehu/hive/internal/team"
 	"github.com/sadrishehu/hive/internal/tracker"
@@ -45,9 +48,39 @@ func (b *worktreeBoard) print() {
 		return
 	}
 	fmt.Printf("\nworktrees, against %s\n", b.Base)
+	width := boardWidth()
 	for _, w := range b.Trees {
-		fmt.Printf("  %-10s %-24s %-22s %s\n", w.Role, w.Branch, w.State(), homePath(w.Path))
+		line := "  " + pad(w.Role, 10) + " " + worktreeText(w)
+		if room := width - utf8.RuneCountInString(line) - 2; room >= 12 {
+			line += "  " + truncate(homePath(w.Path), room)
+		}
+		fmt.Println(truncate(line, width))
 	}
+}
+
+// worktreeText words a worktree's branch the way the TUI draws it: the branch,
+// how far it is from the base, what it changes, and how a dry merge goes.
+func worktreeText(w tracker.WorktreeState) string {
+	switch {
+	case w.Removed:
+		return "⎇ " + w.Branch + "  removed"
+	case w.Ahead < 0 && w.Note != "":
+		return "⎇ ? " + w.Note
+	}
+	var parts []string
+	parts = append(parts, "⎇ "+w.Branch)
+	if w.Merge != gitx.Merged {
+		if arrows := w.Arrows(); arrows != "" {
+			parts = append(parts, arrows)
+		}
+		if diff := w.DiffWords(); diff != "" {
+			parts = append(parts, diff)
+		}
+	} else if w.Uncommitted > 0 {
+		parts = append(parts, fmt.Sprintf("· %d uncommitted", w.Uncommitted))
+	}
+	parts = append(parts, w.MergeWords())
+	return strings.Join(parts, "  ")
 }
 
 // printWorkspace says where the members of a worktrees team work.

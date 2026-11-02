@@ -787,6 +787,17 @@ records where each member works, and the brief names it.
 - **The brief.** A member is told its branch, to commit small and before it says a part is
   done, and that the lead merges it; the lead, the branches to merge. Changes not committed
   in the team's folder aren't in the worktrees, and hive's first post says so.
+- **Where each branch stands.** `internal/gitx` runs the read-only git hive uses, through
+  `exec.CommandContext` with a two-second timeout and no shell: the folder's head, a
+  branch's ahead/behind count against the base, its `diff --numstat` totals, the paths
+  uncommitted in its worktree, and a dry merge (`merge-tree --write-tree --name-only`, or
+  `merge-base --is-ancestor` for merged; older git says unknown). `tracker.TeamWorktrees`
+  fills those into `WorktreeState` against `baseRef`—the branch the team's folder had when
+  it started, not its head now—and the board's "worktrees, against" lines and JSON carry
+  them. The tree fills the same state in a `tea.Cmd`, at most every ten seconds per team,
+  and draws nothing until it arrives. Only a member's branch line has colour, on its merge
+  result. A shared-folder team gets one line with the folder's branch and uncommitted
+  count instead.
 
 ### Shared files and the report
 
