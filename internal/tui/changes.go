@@ -23,6 +23,7 @@ const changesEvery = 5 * time.Second
 type changesFetch struct {
 	id     string // the session, team and role it belongs to
 	at     time.Time
+	got    bool
 	report tracker.ChangeReport
 	err    string
 }
@@ -74,7 +75,7 @@ func (m *Model) changesCmd() tea.Cmd {
 	if m.changes.id == id && now.Sub(m.changes.at) < changesEvery {
 		return nil
 	}
-	m.changes = changesFetch{id: id, at: now, report: m.changes.report}
+	m.changes = changesFetch{id: id, at: now, got: m.changes.id == id && m.changes.got, report: m.changes.report}
 	ops := m.ops
 	return func() tea.Msg {
 		report, err := ops.Changes(s, teamID, role)
@@ -102,7 +103,7 @@ func (m Model) popupDiff(s store.Session) tea.Cmd {
 // changesLines draws the changes preview: a label and D back, the summary, the
 // files, then as much of the diff as fits.
 func (m Model) changesLines(s store.Session, role string, w, h int) []string {
-	if m.changes.id != changesID(s, m.nodeTeamID(), role) {
+	if m.changes.id != changesID(s, m.nodeTeamID(), role) || !m.changes.got {
 		return []string{sDim.Render("…")}
 	}
 	if m.changes.err != "" {

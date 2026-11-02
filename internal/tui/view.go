@@ -767,7 +767,8 @@ func treeHelp() helpSection {
 		{"S", "sync history now (it also runs every 30s)", false},
 		{"tab", "hide / show the preview", false},
 		{"u", "show / hide what the session used: model, tokens, price, context, tools, skills", false},
-		{"D", "show / hide what the session changed: its files and diff; v while changes are on opens the full diff", false},
+		{"D", "show / hide what the session changed: its files and diff", false},
+		{"v", "while the changes preview is on, open the full diff in a popup", false},
 		{"q", "quit (esc too, in the popup)", false},
 	}}
 }
@@ -776,7 +777,8 @@ func teamHelp() helpSection {
 	return helpSection{name: "Team", title: "Team  (on a ⬡ row or a member)", rows: []helpRow{
 		{"↵", "open the channel full screen (on a member: jump to it)", false},
 		{"e", "edit the board: n add · e edit · d done · b block", false},
-		{"D", "show / hide a member's changes: its branch's commits and uncommitted files; v opens the full diff", false},
+		{"D", "show / hide a member's changes: its branch's commits and uncommitted files", false},
+		{"v", "while the changes preview is on, open the full diff in a popup", false},
 		{"ctrl+g", "read the whole goal and every member's part", false},
 		{"s", "message everyone (@role for one); on a member, that member", false},
 		{"p / L", "pause or resume · take the lead or hand it back", false},

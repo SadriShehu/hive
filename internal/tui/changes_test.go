@@ -69,7 +69,7 @@ func TestChangesLabelForAWorktreeMember(t *testing.T) {
 	}
 	rep := sampleChanges()
 	rep.Worktree, rep.Branch, rep.Base, rep.Ahead = true, "hive/api-v2/backend", "feat/wave-2", 1
-	m.changes = changesFetch{id: changesID(s, "t1", "backend"), report: rep}
+	m.changes = changesFetch{id: changesID(s, "t1", "backend"), got: true, report: rep}
 	lines := m.changesLines(s, "backend", 100, 20)
 	plain := ansi.Strip(strings.Join(lines, "\n"))
 	for _, want := range []string{"changes on hive/api-v2/backend vs feat/wave-2", "D back",
@@ -96,7 +96,7 @@ func TestChangesLabelForASharedFolder(t *testing.T) {
 	m, _ := setupWith(t, false, sessions)
 	s, _ := m.selected()
 	rep := sampleChanges()
-	m.changes = changesFetch{id: changesID(s, "", ""), report: rep}
+	m.changes = changesFetch{id: changesID(s, "", ""), got: true, report: rep}
 	plain := ansi.Strip(strings.Join(m.changesLines(s, "", 100, 20), "\n"))
 	if !strings.Contains(plain, "changes in this folder") {
 		t.Errorf("plain folder label missing:\n%s", plain)
@@ -110,12 +110,12 @@ func TestChangesLabelForASharedFolder(t *testing.T) {
 func TestChangesNotARepoAndWidths(t *testing.T) {
 	m, _ := setup(t, false)
 	s, _ := m.selected()
-	m.changes = changesFetch{id: changesID(s, "", ""), report: tracker.ChangeReport{Dir: "/src/app", NotRepo: true}}
+	m.changes = changesFetch{id: changesID(s, "", ""), got: true, report: tracker.ChangeReport{Dir: "/src/app", NotRepo: true}}
 	if plain := ansi.Strip(strings.Join(m.changesLines(s, "", 80, 10), "\n")); !strings.Contains(plain, "not a git repository: /src/app") {
 		t.Errorf("not-a-repo line = %q", plain)
 	}
 	for _, w := range []int{60, 120} {
-		m.changes = changesFetch{id: changesID(s, "", ""), report: sampleChanges()}
+		m.changes = changesFetch{id: changesID(s, "", ""), got: true, report: sampleChanges()}
 		lines := m.changesLines(s, "", w, 20)
 		for _, line := range lines {
 			if got := ansi.StringWidth(line); got > w {

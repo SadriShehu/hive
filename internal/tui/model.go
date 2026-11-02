@@ -749,7 +749,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.id != m.changes.id {
 			return m, nil // the selection moved on
 		}
-		m.changes.at = msg.at
+		m.changes.at, m.changes.got = msg.at, true
 		if msg.err != nil {
 			m.changes.err = msg.err.Error()
 		} else {
@@ -1022,7 +1022,7 @@ func (m Model) keyNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.changesCmd()
 	case "v":
-		if ok && m.showChanges {
+		if ok && m.showChanges && s.Source != store.SourceTeam && m.selectedNode().Team == nil {
 			return m, m.popupDiff(s)
 		}
 	case "?":

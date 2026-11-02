@@ -53,8 +53,8 @@ func newDiffCmd() *cobra.Command {
 				enc.SetIndent("", "  ")
 				return enc.Encode(struct {
 					Label       string            `json:"label"`
-					Base        string            `json:"base,omitempty"`
-					Branch      string            `json:"branch,omitempty"`
+					Base        string            `json:"base"`
+					Branch      string            `json:"branch"`
 					Files       []gitx.FileChange `json:"files"`
 					Uncommitted int               `json:"uncommitted"`
 					Ahead       int               `json:"ahead"`
