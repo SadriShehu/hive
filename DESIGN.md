@@ -240,7 +240,9 @@ started ahead of use until their first message.
 ## TUI
 
 A tree on the left, a live preview on the right, built with Bubble Tea v1. It opens full
-screen (`hive`) or as a tmux popup (prefix + a) that closes when you jump.
+screen (`hive`) or as a tmux popup (prefix + a, 95% by 90%) that closes when you jump.
+The preview needs 100 cols; below that the header says `preview needs 100 cols` in place
+of the cost, so the tree's narrow mode doesn't hide why the preview is gone.
 
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited. `run` marks a headless
 session, `sub` a tool's own subagent.
