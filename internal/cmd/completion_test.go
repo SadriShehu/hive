@@ -170,3 +170,22 @@ func TestCompletionOffersRolesOfATeam(t *testing.T) {
 		t.Errorf("--owner completions = %q, want lead and backend", got)
 	}
 }
+
+func TestCompletionLeavesASessionsSubagentsOut(t *testing.T) {
+	dir := completionFixture(t)
+	st, err := store.Open(filepath.Join(dir, "hive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Upsert(store.Session{ID: "claude:live0001abcdef/worker", Tool: "claude", NativeID: "live0001abcdef/worker",
+		Title: "subagent", Status: store.StatusWorking, PID: 43, UpdatedAt: time.Now().UnixMilli(), CreatedAt: time.Now().UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	for _, v := range complete(t, "__complete", "send", "") {
+		value, _, _ := strings.Cut(v, "\t")
+		if strings.Contains(value, "/") {
+			t.Errorf("completion offers a tool's own subagent: %q", v)
+		}
+	}
+}

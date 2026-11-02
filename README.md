@@ -182,9 +182,9 @@ hive sync         # import history now (hive ls does this on its own); --full re
 ├─ ● claude     uiux · #2 TUI UX audit          working    0s  ~$1.48  ~/go/src/…/hive    claude:1043899d
 └─ ◉ claude     lead · Hive team review         idle      22s  ~$0.90  ~/go/src/…/hive    claude:0332aec3
 ● claude        Admin phase 2                     working    2m          ~/go/src/…/kudoesim   claude:48873400
-├─ ● opencode   admin-phase2-backend         run  working    1m          …/kudoesim/backend    opencode:ses_f18c
+├─ ● opencode   admin-phase2-backend         run  working    1m          …/kudoesim/backend    opencode:ses_f18cd743
 │  └─ ◉ claude  lint-fix                     run  idle       1m          …/kudoesim/backend    claude:0d683b5d
-└─ ○ opencode   admin-phase2-app             run  exited    40m          …/kudoesim/admin      opencode:ses_9a41
+└─ ○ opencode   admin-phase2-app             run  exited    40m          …/kudoesim/admin      opencode:ses_9a41b2c7
 ```
 
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited.
@@ -219,9 +219,10 @@ hive doctor                                    # check tmux, the database and ev
 ```
 
 An `<id>` is the full ID (`claude:48873400-…`), the tool's own ID, or any unique
-prefix of either. hive prints the short form, `tool` and the first eight characters
-of the tool's ID (`claude:48873400`), and every command accepts it as that prefix;
-when two sessions share one, the error lists both full IDs. `hive new` starts in the
+prefix of either. hive prints a short form: the tool, then the shortest prefix of its
+ID that no other session of that tool shares, at least eight characters (not counting
+a leading `ses_`, so opencode keeps `ses_` plus eight), like git's short hashes. It is
+still a prefix, so every command accepts it. `hive new` starts in the
 current folder (`--cwd` to change it), in
 the background (`--focus` to switch to it), linked under the agent running the command
 (`--parent none` or `--parent <id>` to change that), with the tool's default model

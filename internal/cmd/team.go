@@ -328,7 +328,8 @@ func newTeamNewCmd() *cobra.Command {
 			if wait {
 				waitLaunched(cmd.Context(), e, tm, launched, before, timeout)
 			}
-			printLaunched(tm, launched)
+			all, _ := e.st.All()
+			printLaunched(tm, launched, shortIDs(all))
 			return nil
 		},
 	}
@@ -443,7 +444,7 @@ func waitLaunched(ctx context.Context, e *teamEnv, tm store.Team, launched []tra
 	}
 }
 
-func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
+func printLaunched(tm store.Team, launched []tracker.MemberLaunch, ids map[string]string) {
 	started := 0
 	for _, l := range launched {
 		if l.Err == nil {
@@ -459,23 +460,23 @@ func printLaunched(tm store.Team, launched []tracker.MemberLaunch) {
 		case l.Err != nil:
 			note = "failed: " + l.Err.Error()
 		case l.Launched.Choice != nil:
-			note = fmt.Sprintf("%s  pane %s  picked %s", orID(l.Launched.SessionID), l.Launched.Pane, l.Launched.Choice.Reason)
+			note = fmt.Sprintf("%s  pane %s  picked %s", orID(ids, l.Launched.SessionID), l.Launched.Pane, l.Launched.Choice.Reason)
 		case l.Launched.Pane == "":
-			note = orID(l.Launched.SessionID)
+			note = orID(ids, l.Launched.SessionID)
 		case l.Launched.SessionID == "":
 			note = fmt.Sprintf("pane %s  reports in with its first event", l.Launched.Pane)
 		default:
-			note = fmt.Sprintf("%s  pane %s", shortIDText(l.Launched.SessionID), l.Launched.Pane)
+			note = fmt.Sprintf("%s  pane %s", shortID(ids, l.Launched.SessionID), l.Launched.Pane)
 		}
 		fmt.Printf("  %-9s %-8s %s\n", m.Role, m.Tool, note)
 	}
 }
 
-func orID(id string) string {
+func orID(ids map[string]string, id string) string {
 	if id == "" {
 		return "starting"
 	}
-	return shortIDText(id)
+	return shortID(ids, id)
 }
 
 func newTeamLsCmd() *cobra.Command {
@@ -905,7 +906,8 @@ func newTeamAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printLaunched(tm, []tracker.MemberLaunch{{Member: m, Launched: l}})
+			all, _ := e.st.All()
+			printLaunched(tm, []tracker.MemberLaunch{{Member: m, Launched: l}}, shortIDs(all))
 			return nil
 		},
 	}

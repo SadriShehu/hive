@@ -302,8 +302,8 @@ func TestTeamMailboxLive(t *testing.T) {
 		return backend.State == "idle" && frontend.State == "idle"
 	})
 	for _, m := range []liveMember{backend, frontend} {
-		if !strings.Contains(started, shortIDText(m.SessionID)) {
-			t.Errorf("team new --wait didn't print %s's short ID %s:\n%s", m.Role, shortIDText(m.SessionID), started)
+		if !strings.Contains(started, minShortID(m.SessionID)) {
+			t.Errorf("team new --wait didn't print %s's short ID %s:\n%s", m.Role, minShortID(m.SessionID), started)
 		}
 		if _, ok := h.got(m.SessionID, func(t string) bool { return strings.HasPrefix(t, "You are "+m.Role+" on the hive team live") }); !ok {
 			t.Fatalf("%s (%s) didn't start with its brief\n%s", m.Role, m.SessionID, h.dump())
@@ -334,7 +334,7 @@ func TestTeamMailboxLive(t *testing.T) {
 		t.Fatalf("no `hive team deliver` typed it\n%s", h.dump())
 	}
 	// It counts as given to backend: `hive wait` waits for the answer.
-	if out, _ := h.must("wait", backend.SessionID, "--timeout", "20s"); !strings.Contains(out, shortIDText(backend.SessionID)+" idle") {
+	if out, _ := h.must("wait", backend.SessionID, "--timeout", "20s"); !strings.Contains(out, minShortID(backend.SessionID)+" idle") {
 		t.Fatalf("hive wait = %q", out)
 	}
 	if _, ok := h.next(backend.SessionID, "idle", both.At); !ok {

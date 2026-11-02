@@ -12,7 +12,7 @@ import (
 )
 
 // teamTree is a team with two live members whose sessions share a title.
-func teamTree(t *testing.T, status string) ([]*tree.Node, *teamData) {
+func teamTree(t *testing.T, status string) ([]*tree.Node, *teamData, []store.Session) {
 	t.Helper()
 	now := time.Now().UnixMilli()
 	tm := store.Team{ID: "t1", Name: "api", Goal: "Build the admin API", Status: status, CreatedAt: now - 2, UpdatedAt: now}
@@ -25,14 +25,14 @@ func teamTree(t *testing.T, status string) ([]*tree.Node, *teamData) {
 		{TeamID: tm.ID, Role: "backend", SessionID: sessions[1].ID, Tool: "claude", JoinedAt: 2},
 	}
 	data := &teamData{teams: []store.Team{tm}, members: members, tasks: map[string][]store.Task{}}
-	return tree.BuildTeams(sessions, data.teams, members), data
+	return tree.BuildTeams(sessions, data.teams, members), data, sessions
 }
 
 func TestLsShowsBothRolesWhenMembersShareATitle(t *testing.T) {
-	roots, data := teamTree(t, store.TeamActive)
+	roots, data, sessions := teamTree(t, store.TeamActive)
 	teams, rest := splitTeams(roots)
 	out := captureStdout(t, func() {
-		printTree(append(teams, rest...), nil, data, func(int) string { return "" })
+		printTree(append(teams, rest...), nil, data, shortIDs(sessions), func(int) string { return "" })
 	})
 	for _, want := range []string{"⬡ api", "2 members", "Build the admin API", "lead · ", "backend · ", "claude:aaaa1111", "claude:bbbb2222"} {
 		if !strings.Contains(out, want) {
@@ -42,11 +42,11 @@ func TestLsShowsBothRolesWhenMembersShareATitle(t *testing.T) {
 }
 
 func TestLsCollapsesADoneTeamToOneDimLine(t *testing.T) {
-	roots, data := teamTree(t, store.TeamDone)
+	roots, data, sessions := teamTree(t, store.TeamDone)
 	teams, rest := splitTeams(roots)
 	teams = collapseDoneTeams(teams)
 	out := captureStdout(t, func() {
-		printTree(append(teams, rest...), nil, data, func(int) string { return "" })
+		printTree(append(teams, rest...), nil, data, shortIDs(sessions), func(int) string { return "" })
 	})
 	if !strings.Contains(out, "⬡ api") || !strings.Contains(out, "done · 2 members") {
 		t.Errorf("ls = %q, want the done team on one line", out)
@@ -60,18 +60,30 @@ func TestLsCollapsesADoneTeamToOneDimLine(t *testing.T) {
 
 func TestAShortIDResolvesAsAPrefix(t *testing.T) {
 	s := store.Session{ID: "claude:1043899d-ee11-4a11", Tool: "claude", NativeID: "1043899d-ee11-4a11"}
-	got, err := tracker.Lookup([]store.Session{s}, shortSessionID(s))
+	got, err := tracker.Lookup([]store.Session{s}, shortIDs([]store.Session{s})[s.ID])
 	if err != nil || got.ID != s.ID {
-		t.Fatalf("Lookup(%q) = %q, %v; want the full session", shortSessionID(s), got.ID, err)
+		t.Fatalf("Lookup = %q, %v; want the full session", got.ID, err)
 	}
 }
 
-func TestTwoSessionsWithOneShortFormSayWhichTheyAre(t *testing.T) {
-	a := store.Session{ID: "claude:1043899d-aaaa", Tool: "claude", NativeID: "1043899d-aaaa"}
-	b := store.Session{ID: "claude:1043899d-bbbb", Tool: "claude", NativeID: "1043899d-bbbb"}
-	_, err := tracker.Lookup([]store.Session{a, b}, "claude:1043899d")
-	if err == nil || !strings.Contains(err.Error(), a.ID) || !strings.Contains(err.Error(), b.ID) {
-		t.Fatalf("Lookup = %v, want both full IDs", err)
+func TestShortIDsTakeTheShortestUniquePrefix(t *testing.T) {
+	first := store.Session{ID: "opencode:ses_13cced0d1111", Tool: "opencode", NativeID: "ses_13cced0d1111"}
+	second := store.Session{ID: "opencode:ses_13ccec542222", Tool: "opencode", NativeID: "ses_13ccec542222"}
+	parent := store.Session{ID: "claude:1935c819", Tool: "claude", NativeID: "1935c819"}
+	child := store.Session{ID: "claude:1935c819/worker", Tool: "claude", NativeID: "1935c819/worker"}
+	sessions := []store.Session{first, second, parent, child}
+	ids := shortIDs(sessions)
+	for _, s := range sessions {
+		short, ok := ids[s.ID]
+		if !ok || !strings.HasPrefix(s.ID, short) {
+			t.Errorf("short ID for %q = %q, %v; want a prefix", s.ID, short, ok)
+		}
+	}
+	if ids[first.ID] == ids[second.ID] || ids[parent.ID] == ids[child.ID] {
+		t.Errorf("short IDs collide: %v", ids)
+	}
+	if len(ids[first.ID]) < len("ses_")+8 {
+		t.Errorf("opencode short ID = %q, want at least ses_ plus eight characters", ids[first.ID])
 	}
 }
 

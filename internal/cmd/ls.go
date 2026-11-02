@@ -74,7 +74,7 @@ func newLsCmd() *cobra.Command {
 			if !all {
 				teams = collapseDoneTeams(teams)
 			}
-			printTree(append(teams, rest...), usages, data, func(live int) string {
+			printTree(append(teams, rest...), usages, data, shortIDs(sessions), func(live int) string {
 				return fmt.Sprintf("%d live · %d sessions", live, len(sessions)) + listedCost(append(teams, rest...), usages)
 			})
 			hintInstall()
@@ -251,7 +251,7 @@ func (d *teamData) teamLine(t store.Team) string {
 
 // printTree prints the teams, then the sessions not on one, then a footer
 // saying how many of it are live.
-func printTree(roots []*tree.Node, usages map[string]store.Usage, data *teamData, footer func(live int) string) {
+func printTree(roots []*tree.Node, usages map[string]store.Usage, data *teamData, ids map[string]string, footer func(live int) string) {
 	now := time.Now()
 	var rows []lsRow
 	liveCount := 0
@@ -290,7 +290,7 @@ func printTree(roots []*tree.Node, usages map[string]store.Usage, data *teamData
 			title: t, titleStyle: dim, kind: kindTag(s),
 			state: statusWord(s), stateStyle: glyphStyle,
 			age: age(now, s.UpdatedAt), cost: costText(usages[s.ID]),
-			path: shortPath(s.Cwd), id: shortSessionID(s),
+			path: shortPath(s.Cwd), id: shortID(ids, s.ID),
 		})
 	})
 	if len(rows) == 0 {

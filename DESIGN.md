@@ -416,9 +416,10 @@ models the tool runs. `default` is the tool's default, as an empty model is.
 Every tree action is also a command, so agents can run agents of their own. A session is
 named by its full ID, the tool's own ID, or a unique prefix of either; a name hive hasn't
 seen yet triggers a history import and one retry. Text output prints one short form,
-`tool` and the first eight characters of the tool's ID, which is a prefix every command
-accepts; when two sessions share it, the resolver's error names both full IDs. `--json`
-keeps the full IDs. `hive --help` groups the commands as Start here, Sessions, Teams,
+`tool` and the shortest prefix of the native ID that is unique among the stored sessions
+of that tool, at least eight characters and not counting a leading `ses_` (so opencode
+keeps `ses_` plus eight), like git's short hashes. It stays a prefix every command
+accepts, and `--json` keeps the full IDs. `hive --help` groups the commands as Start here, Sessions, Teams,
 Housekeeping, and For tmux and hooks.
 
 | Command | What it does |

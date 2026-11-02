@@ -20,39 +20,77 @@ import (
 // The completions here read the database read-only and never touch tmux or the
 // network, so a <TAB> stays quick even while agents are running.
 
-// shortSessionID is the short form completion offers and the CLI prints: the
-// tool and the first 8 characters of the tool's own session ID.
-func shortSessionID(s store.Session) string {
-	return shortIDText(s.ID)
+// shortIDs gives every session the shortest form of its ID that is unique
+// among the stored sessions of its tool: the tool, then the shortest prefix of
+// the native ID, at least eight characters (not counting a leading "ses_"),
+// as git shortens hashes. It stays a prefix of the full ID, so every command
+// still accepts it.
+func shortIDs(sessions []store.Session) map[string]string {
+	byTool := map[string][]store.Session{}
+	for _, s := range sessions {
+		byTool[s.Tool] = append(byTool[s.Tool], s)
+	}
+	out := make(map[string]string, len(sessions))
+	for tool, group := range byTool {
+		sort.Slice(group, func(i, j int) bool { return group[i].NativeID < group[j].NativeID })
+		for i, s := range group {
+			lcp := 0
+			if i > 0 {
+				lcp = max(lcp, commonPrefix(s.NativeID, group[i-1].NativeID))
+			}
+			if i+1 < len(group) {
+				lcp = max(lcp, commonPrefix(s.NativeID, group[i+1].NativeID))
+			}
+			least := 8
+			if strings.HasPrefix(s.NativeID, "ses_") {
+				least = len("ses_") + 8
+			}
+			n := min(max(least, lcp+1), len(s.NativeID))
+			out[s.ID] = tool + ":" + s.NativeID[:n]
+		}
+	}
+	return out
 }
 
-// shortIDText shortens a full ID the same way. Every command still accepts it,
-// as a prefix of the full one.
-func shortIDText(id string) string {
+func commonPrefix(a, b string) int {
+	n := min(len(a), len(b))
+	i := 0
+	for i < n && a[i] == b[i] {
+		i++
+	}
+	return i
+}
+
+// shortID reads one session's short form out of the map. A session the caller
+// didn't list gets the least form, still a prefix the commands accept.
+func shortID(ids map[string]string, id string) string {
+	if short, ok := ids[id]; ok {
+		return short
+	}
+	return minShortID(id)
+}
+
+func minShortID(id string) string {
 	if id == "" {
 		return ""
 	}
 	tool, native, ok := strings.Cut(id, ":")
 	if !ok {
-		return firstRunes(id, 8)
+		return id
 	}
-	return tool + ":" + firstRunes(native, 8)
+	least := 8
+	if strings.HasPrefix(native, "ses_") {
+		least = len("ses_") + 8
+	}
+	return tool + ":" + native[:min(least, len(native))]
 }
 
-func shortIDs(ids []string) string {
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		out[i] = shortIDText(id)
+func shortIDList(ids map[string]string, order []string) string {
+	out := make([]string, len(order))
+	for i, id := range order {
+		out[i] = shortID(ids, id)
 	}
 	return strings.Join(out, ", ")
-}
-
-func firstRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n])
 }
 
 // compText puts text on one line for a completion description.
@@ -92,6 +130,7 @@ type compData struct {
 	tasks    map[string][]store.Task
 	byID     map[string]store.Session
 	held     map[string]store.Task // session ID -> the task it holds
+	ids      map[string]string     // session ID -> its short form
 }
 
 func loadCompData(st *store.Store) *compData {
@@ -106,6 +145,7 @@ func loadCompData(st *store.Store) *compData {
 	for _, s := range d.sessions {
 		d.byID[s.ID] = s
 	}
+	d.ids = shortIDs(d.sessions)
 	for _, m := range d.members {
 		if m.SessionID == "" {
 			continue
@@ -170,14 +210,11 @@ func (d *compData) sessionValues() []string {
 	newest(live)
 	newest(recent)
 	out := make([]string, 0, len(live)+len(recent))
-	seen := map[string]bool{}
 	for _, s := range append(live, recent...) {
-		short := shortSessionID(s)
-		if seen[short] {
-			continue // two sessions with the same short form; the first is enough to type
+		if strings.Contains(s.NativeID, "/") {
+			continue // a tool's own subagent: its ID can't be sent to
 		}
-		seen[short] = true
-		out = append(out, short+"\t"+d.sessionDesc(s))
+		out = append(out, shortID(d.ids, s.ID)+"\t"+d.sessionDesc(s))
 	}
 	return out
 }

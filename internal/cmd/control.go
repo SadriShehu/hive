@@ -187,6 +187,7 @@ func newNewCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, "picked "+l.Choice.Reason)
 			}
 			id := l.SessionID
+			synthetic := false
 			if wait {
 				after := before - 1
 				if s, ok, _ := st.Get(id); ok {
@@ -197,13 +198,25 @@ func newNewCmd() *cobra.Command {
 					return err
 				}
 				id = s.ID
-				if s.Synthetic() {
-					fmt.Fprintf(os.Stderr, "%s starts its session with its first message; until then it goes by %s, "+
-						"which hive send, jump and kill accept, and which then names the session\n", l.Tool, shortIDText(id))
+				synthetic = s.Synthetic()
+			}
+			all, _ := st.All()
+			if id != "" {
+				if _, ok, _ := st.Get(id); !ok {
+					tool, native, _ := strings.Cut(id, ":")
+					all = append(all, store.Session{ID: id, Tool: tool, NativeID: native})
 				}
 			}
+			ids := shortIDs(all)
 			if id != "" {
-				fmt.Println(shortIDText(id))
+				if s, ok, _ := st.Get(id); ok && s.Synthetic() {
+					synthetic = true
+				}
+				if synthetic {
+					fmt.Fprintf(os.Stderr, "%s starts its session with its first message; until then it goes by %s, "+
+						"which hive send, jump and kill accept, and which then names the session\n", l.Tool, shortID(ids, id))
+				}
+				fmt.Println(shortID(ids, id))
 			} else {
 				fmt.Fprintf(os.Stderr, "started %s in tmux pane %s; its ID comes with its first event (use --wait)\n", l.Tool, l.Pane)
 			}
@@ -391,7 +404,8 @@ func newResumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Println(shortSessionID(s))
+			all, _ := tr.Store.All()
+			fmt.Println(shortID(shortIDs(all), s.ID))
 			if focus {
 				return goTo(l.Pane)
 			}
@@ -622,7 +636,8 @@ func newKillCmd() *cobra.Command {
 			if err := tr.Stop(s); err != nil {
 				return err
 			}
-			fmt.Fprintln(os.Stderr, "stopped", shortSessionID(s))
+			all, _ := tr.Store.All()
+			fmt.Fprintln(os.Stderr, "stopped", shortID(shortIDs(all), s.ID))
 			return nil
 		}),
 	}
