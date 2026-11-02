@@ -175,9 +175,9 @@ new  = ["opencode", "-m", "deepseek/deepseek-v4-pro", "--prompt", "{prompt}"]
 Fields: `new`, `resume`, `process` (defaults to the program `new` runs), `headless`,
 `title_flags`, `session_flags`, `parent_env`. An empty placeholder drops the flag right
 before it. An `[alerts]` table says how hive tells you an agent needs you: `tmux` (a
-message, on by default) and `desktop` (off). An unknown key, a bad name or a duplicate
-makes hive ignore the whole file, so hooks keep working and alerts keep their defaults;
-`hive doctor` says what is wrong.
+message, on by default), `desktop` (off) and `command` (an argv run without a shell,
+off). An unknown key, a bad name or a duplicate makes hive ignore the whole file, so
+hooks keep working and alerts keep their defaults; `hive doctor` says what is wrong.
 
 **Any tool can report.** `hive hook <tool>` takes JSON on stdin — `event` (start, prompt,
 busy, idle, attention, end, update), `session_id`, and optionally `pid`, `parent_id`,
@@ -291,7 +291,10 @@ Claude Code's idle reminder counts as idle, and Copilot CLI has no hook for eith
   you` with `display-message` on every tmux client whose current window isn't the
   session's (a subagent's is its parent's), and a desktop notification if `[alerts]`
   asks for one. The text is escaped for tmux, as a title could otherwise run a command
-  through `#(…)`.
+  through `#(…)`. `[alerts] command` runs an argv instead, detached and never waited
+  for, so a phone or chat alert adds no daemon; `{text}`, `{title}`, `{id}` and `{cwd}`
+  are substituted per element, and no shell parses it. A failure is logged like any
+  other alert.
 - **prefix + A** is `run-shell -b "hive jump --next --client '#{client_name}'"`. It
   switches that client to the session that has waited longest, by `status_at`, or, from
   one of them, to the next in that order. Output from `run-shell` would show in a pane,
