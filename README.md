@@ -88,7 +88,9 @@ Run `hive`. Inside tmux it opens in the current pane; outside tmux it attaches t
 tmux session called `hive`, with the tree in its first window. With the popup key
 bound (`hive install tmux`), **prefix + a** opens the tree over whatever you're doing
 and closes once you jump somewhere. Running `hive install tmux` again picks up the
-popup's new size. The header counts the agents that need you.
+popup's new size. The header counts the agents that need you. While a tool found on
+PATH isn't connected, or tmux has no popup key, it also says `⚠ not connected: claude,
+codex · run hive install`; hive checks at start and on each 30s sync.
 
 ```
  hive  ● 3 live  ·  203 sessions                                           last 24h
@@ -124,6 +126,10 @@ key and descriptions wrap under it with a hanging indent, so nothing is cut at a
 width. `↑`/`↓` (or `j`/`k`), `pgup`/`pgdn` (or `ctrl+u`/`ctrl+d`) and `g`/`G` scroll it,
 with a line count on the hint when it doesn't all fit; `esc`, `q`, `?` and `↵` close it,
 and other keys do nothing.
+
+A filter says why a row matched: the matched part of a title is in accent, and a row
+found only by its folder or ID gets a dim `folder` or `id` tag. An empty result names
+the query, and the header reads `matching “…” · all history`.
 
 New agents open in a window of the current tmux session running the tool's real TUI,
 linked under the selected session for `c`. The form asks for the tool, the model, the
@@ -431,7 +437,9 @@ titled by the task it holds; select it and the preview is the board and the chan
 `↵` opens the channel full screen with a live line: type to write to everyone (`@role`
 for one), `↵` sends, `esc` goes back to the tree, `ctrl+g` reads the whole goal, and the
 prompt wraps: `↑/↓` move the caret once you have typed, and `pgup`/`pgdn` (or
-`ctrl+u`/`ctrl+d`) scroll the feed. Each
+`ctrl+u`/`ctrl+d`) scroll the feed. On a narrow screen the live line's placeholder drops
+whole segments, and a long team name drops `(@role for one)` first; a wrapped post
+continues six columns in, under the name. Each
 member's row shows its state, model and effort, short session ID and how full its context
 is; the account's rate-limit windows (`5h 7% · resets 4h54m · 7d 22%`) show once per tool,
 when the tool reports them. Claude Code sends them only to its status line: point that
@@ -623,6 +631,13 @@ which models of a tool are unrated. The pick takes the models that meet every le
 the prompt asks for, and among them the lowest total rating, then the cheaper (when
 both have a price), then the faster, then one from the preferred tool. When nothing
 meets the bar, the closest to it wins, and `--dry-run` says so.
+
+**Rate limits.** A tool whose 5h rate-limit window is at 90% or more and hasn't reset yet
+goes after every other tool's candidates, so auto doesn't start work on an account about
+to hit its limit. A window older than 5h says nothing about now, and if every tool is
+high nothing changes. Only Claude reports the windows, through `hive status --then` in its
+status line. A tool you pin (`claude:auto`) is never moved to another tool. `--dry-run`
+says why: `claude ranked down: 5h window at 93%, resets 14:20`.
 
 These are hive's starting ratings, not measurements. Change them, or rate a model
 hive doesn't know, in `config.toml`; a rating set by hand replaces the tier's:

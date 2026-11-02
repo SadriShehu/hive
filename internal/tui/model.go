@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/store"
@@ -120,6 +121,8 @@ type Model struct {
 	refreshing bool
 	syncing    bool
 	lastSync   time.Time
+
+	notConnected []string // tools found on PATH that hive isn't hooked into yet
 }
 
 type row struct {
@@ -355,8 +358,9 @@ type (
 		snap              TeamSnapshot
 		err               error
 	}
-	syncedMsg struct{ err error }
-	quotasMsg struct {
+	syncedMsg       struct{ err error }
+	notConnectedMsg struct{ missing []string }
+	quotasMsg       struct {
 		quotas map[string]store.Quota
 		err    error
 	}
@@ -408,13 +412,12 @@ func New(ops Ops, popup bool) Model {
 // layoutChannel fits the channel's live line to the screen, naming the team
 // it writes to.
 func (m *Model) layoutChannel() {
-	label := "message "
+	name := "the team"
 	if t, ok := m.teamByID(m.channelTeam); ok {
-		label += t.Name + " (@role for one)"
-	} else {
-		label += "the team (@role for one)"
+		name = t.Name
 	}
-	label += " › "
+	label := channelPrompt(name, m.width)
+	m.channelInput.Placeholder = channelPlaceholder(m.width - ansi.StringWidth(label))
 	m.channelInput.SetPromptFunc(ansi.StringWidth(label), func(line int) string {
 		if line == 0 {
 			return label
@@ -422,6 +425,34 @@ func (m *Model) layoutChannel() {
 		return ""
 	})
 	m.channelInput.SetWidth(max(ansi.StringWidth(label)+10, m.width))
+}
+
+// channelPrompt names the team the live line writes to. When the room left
+// for the placeholder is too short, it drops "(@role for one)" first.
+func channelPrompt(name string, width int) string {
+	full := "message " + name + " (@role for one) › "
+	if width-ansi.StringWidth(full) < ansi.StringWidth(channelHintTypes[0]) {
+		return "message " + name + " › "
+	}
+	return full
+}
+
+// channelHintTypes is the live line's placeholder, one whole segment at a
+// time: the last ones drop when the prompt leaves no room.
+var channelHintTypes = []string{"type a message", "↵ sends", "esc goes back"}
+
+// channelPlaceholder fits the placeholder segments to room, dropping whole
+// ones from the end. No room for the first means no placeholder.
+func channelPlaceholder(room int) string {
+	segs := channelHintTypes
+	for len(segs) > 0 {
+		line := strings.Join(segs, " · ")
+		if ansi.StringWidth(line) <= room {
+			return line
+		}
+		segs = segs[:len(segs)-1]
+	}
+	return ""
 }
 
 func (m *Model) layoutSend() {
@@ -489,7 +520,7 @@ func Run(ops Ops, popup bool) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), m.usagesCmd(), m.syncCmd(), tick())
+	return tea.Batch(m.refreshCmd(), m.usagesCmd(), m.syncCmd(), notConnectedCmd(), tick())
 }
 
 func tick() tea.Cmd {
@@ -521,6 +552,15 @@ func (m *Model) syncCmd() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		return syncedMsg{ops.Sync(ctx)}
+	}
+}
+
+// notConnectedCmd asks which tools on PATH still need hive's hooks, and
+// whether tmux has the popup key. It runs at start and on each sync, never
+// while drawing.
+func notConnectedCmd() tea.Cmd {
+	return func() tea.Msg {
+		return notConnectedMsg{missing: adapters.NotConnected()}
 	}
 }
 
@@ -671,9 +711,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash("sync: "+msg.err.Error(), true)
 		}
 		if m.refreshing {
-			return m, m.usagesCmd()
+			return m, tea.Batch(m.usagesCmd(), notConnectedCmd())
 		}
-		return m, tea.Batch(m.refreshCmd(), m.usagesCmd())
+		return m, tea.Batch(m.refreshCmd(), m.usagesCmd(), notConnectedCmd())
+
+	case notConnectedMsg:
+		m.notConnected = msg.missing
+		return m, nil
 
 	case usagesMsg:
 		if msg.err == nil {
@@ -1427,7 +1471,7 @@ func (m *Model) rebuild() {
 		ids := m.teamScopeIDs(teamScope)
 		roots = tree.FilterTeams(roots, func(n *tree.Node) bool { return n.Team != nil && ids[n.Team.ID] })
 	case filtering:
-		roots = tree.Filter(roots, func(n *tree.Node) bool { return matches(n.Session, query) })
+		roots = filterMatched(roots, query)
 	}
 	m.rows = m.rows[:0]
 	var walk func(nodes []*tree.Node, indent string, root bool)
@@ -1478,13 +1522,63 @@ func count(nodes []*tree.Node) int {
 	return n
 }
 
-func matches(s store.Session, query string) bool {
-	for _, field := range []string{title(s), s.Title, s.LastPrompt, s.Cwd, s.ID, s.Tool} {
-		if strings.Contains(strings.ToLower(field), query) {
-			return true
+// matches reports which field of a session a / query matches: its title, its
+// folder or its ID. It is "" when nothing matches.
+func matches(s store.Session, query string) string {
+	if strings.Contains(strings.ToLower(title(s)), query) {
+		return "title"
+	}
+	if strings.Contains(strings.ToLower(s.Cwd), query) {
+		return "folder"
+	}
+	if strings.Contains(strings.ToLower(s.ID), query) {
+		return "id"
+	}
+	return ""
+}
+
+// matchesTeam reports which field of a team a / query matches: its name or
+// its goal. It is "" when nothing matches.
+func matchesTeam(t store.Team, query string) string {
+	if strings.Contains(strings.ToLower(t.Name), query) {
+		return "name"
+	}
+	if strings.Contains(strings.ToLower(t.Goal), query) {
+		return "goal"
+	}
+	return ""
+}
+
+// filterMatched keeps the nodes a plain / filter matches, plus the ancestors
+// that lead to them. A team that matches by name or goal keeps its whole
+// subtree: its members are part of what the row is.
+func filterMatched(nodes []*tree.Node, query string) []*tree.Node {
+	var out []*tree.Node
+	for _, n := range nodes {
+		if n.Team != nil && matchesTeam(*n.Team, query) != "" {
+			out = append(out, n)
+			continue
+		}
+		kids := filterMatched(n.Children, query)
+		if matches(n.Session, query) != "" || len(kids) > 0 {
+			c := *n
+			c.Children = kids
+			out = append(out, &c)
 		}
 	}
-	return false
+	return out
+}
+
+// filterMatch is the plain / query, when the filter isn't scoped to teams.
+func (m Model) filterMatch() (string, bool) {
+	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	if query == "" {
+		return "", false
+	}
+	if _, team := teamFilter(query); team {
+		return "", false
+	}
+	return query, true
 }
 
 // teamFilter reports whether a / filter is scoped to teams, and to what: an

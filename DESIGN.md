@@ -250,7 +250,9 @@ screen (`hive`) or as a tmux popup (prefix + a, 95% by 90%) that closes when you
 The preview needs 100 cols; below that the header says `preview needs 100 cols` in place
 of the cost, so the tree's narrow mode doesn't hide why the preview is gone. A header too
 wide for the window drops whole segments from the end, the least important first, never
-cutting one in half.
+cutting one in half. While a tool on PATH isn't connected, or tmux has no popup key, a
+high-priority segment says `⚠ not connected: … · run hive install`. A `tea.Cmd` takes
+that read-only look at start and on each 30s sync, never while drawing.
 
 ● working · ◆ needs you · ◉ idle · ◌ running or untracked · ○ exited. `run` marks a headless
 session, `sub` a tool's own subagent.
@@ -279,6 +281,12 @@ team's base and shows the commits on the branch plus its uncommitted files; a pl
 folder's preview says when other live sessions share the folder, so its changes aren't
 mistaken for one session's. `D` on a team row asks for a member.
 
+A plain filter matches a session's title, folder or ID, and a team's name or goal. The
+row says which: the matched part of a title or name is drawn in accent, and a row found
+only by folder or ID carries a dim `folder` or `id` tag. A matched team keeps its whole
+subtree. An empty result names the query, and the header's filter segment says
+`matching “…” · all history`.
+
 The help is grouped into sections: Tree, Team, Channel, Board, Trash and Glyphs. The
 section for where `?` was pressed comes first (Team on a team or member row, Trash in the
 trash, Board in the board editor, Tree otherwise), the rest follow in that fixed order.
@@ -305,7 +313,9 @@ trash as a tree of its own, with the preview still working: `r` restores a sessi
 everything under it, `d` deletes it for good after you confirm, `t` or `esc` goes back.
 
 **Preview.** For a session in a pane, the screen (`tmux capture-pane`); otherwise the end of
-its transcript from the tool's own files, which is how you watch headless runs.
+its transcript from the tool's own files, which is how you watch headless runs. An untracked
+session whose tool has recorded nothing says why: `hive can't see what this does until its
+tool reports: hive install <tool>, then restart it`.
 
 ## Needs you
 
@@ -407,10 +417,17 @@ the built-in ones have it.
   by what a million tokens in and out cost (only when both have a price), then the
   faster, then one from the preferred tool. When none meets the bar, the smallest
   shortfall wins, then the most power, and the reason says that nothing met it.
+- **Rate limits.** Before a cross-tool pick, a tool whose stored 5h window is at 90% or
+  more, whose reset is in the future or unknown, and whose report is at most 5h old,
+  leaves the pool: every other tool's candidates come first. If every candidate tool is
+  high the pool is unchanged, and a pinned tool (`claude:auto`, so `model` mode) never
+  moves. The choice carries a note for each tool left out:
+  `claude ranked down: 5h window at 93%, resets 14:20`. Only Claude reports the windows,
+  through `hive status --then`; an older report says nothing about the window now.
 - **The reason** names the model, how many met the bar, and the levels:
   `claude · claude-opus-5-5: the lightest of 24 that meet reasoning 8, coding 8`.
-  `--dry-run` prints it with the cues; `hive new` and `hive team new` print it with what
-  started, and the tree's flash names the model and the levels.
+  `--dry-run` prints it with the notes and cues; `hive new` and `hive team new` print it
+  with what started, and the tree's flash names the model and the levels.
 - **Team members** started with `auto` are rated on the team's goal and their own part,
   not on the brief, which is the same for everyone; one `hive team new` asks each tool
   for its models once.
@@ -750,8 +767,11 @@ the channel) opens a full-screen reader with the whole goal and every member's p
 its own line breaks are kept. Typing writes to everyone
 (`@role` for one), `↵` sends through the same mailbox as `s`, `esc` goes back to the tree,
 and the prompt wraps: `↑/↓` move the caret once typing, and `pgup`/`pgdn` (or `ctrl+u`/
-`ctrl+d`) scroll the feed. The channel marks its team read while it is open, preview or
-no preview.
+`ctrl+d`) scroll the feed. On a narrow screen the live line's placeholder drops whole
+segments from the end, and a long team name drops `(@role for one)` first; under 100 cols
+a wrapped post's continuation lines start six columns in, under the name, while wide
+screens keep the alignment under the message column. The channel marks its team read
+while it is open, preview or no preview.
 
 | Key, on a team | Does |
 | --- | --- |

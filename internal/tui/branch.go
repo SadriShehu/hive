@@ -76,7 +76,11 @@ func (m *Model) branchesCmd() tea.Cmd {
 	if m.branches == nil {
 		m.branches = map[string]branchFetch{}
 	}
-	m.branches[t.ID] = branchFetch{report: m.branches[t.ID].report, at: now}
+	// Keep the last report on screen while git answers again, so the head
+	// doesn't lose its branch lines for a frame every refresh.
+	f := m.branches[t.ID]
+	f.at = now
+	m.branches[t.ID] = f
 	ops := m.ops
 	return func() tea.Msg {
 		report, err := ops.TeamBranches(t.ID)
