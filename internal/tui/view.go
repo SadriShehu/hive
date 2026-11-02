@@ -122,6 +122,9 @@ func (m Model) headerLine() string {
 	if n := len(tracker.NeedsYou(m.sessions)); n > 0 {
 		segs = append(segs, lipgloss.NewStyle().Foreground(cAttention).Bold(true).Render(fmt.Sprintf("◆ %d need you", n)))
 	}
+	if len(m.notConnected) > 0 {
+		segs = append(segs, sError.Render("⚠ not connected: "+strings.Join(m.notConnected, ", ")+" · run hive install"))
+	}
 	if n := m.teamCount(); n == 1 {
 		segs = append(segs, sAccent.Render("1 team"))
 	} else if n > 1 {
@@ -150,7 +153,7 @@ func (m Model) headerLine() string {
 				scope = "team “" + ts + "”"
 			}
 		} else {
-			scope = "matching “" + q + "”"
+			scope = "matching “" + strings.TrimSpace(q) + "” · all history"
 		}
 	}
 	if m.hideSubs {
@@ -195,7 +198,8 @@ func (m Model) treeLines(w, h int) []string {
 	case !m.loaded:
 		out = []string{sDim.Render(" loading sessions…")}
 	case len(m.rows) == 0 && m.filter.Value() != "":
-		out = []string{sDim.Render(" nothing matches; esc clears the filter")}
+		q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+		out = []string{sDim.Render(fmt.Sprintf(" nothing matches “%s” in titles, folders or IDs (all history) · esc clears", q))}
 	case len(m.rows) == 0 && m.trash:
 		out = []string{sDim.Render(" the trash is empty"), "", sDim.Render(" t  back to the tree")}
 	case len(m.rows) == 0:
@@ -249,19 +253,56 @@ func (m Model) rowLine(r row, w int, sel bool) string {
 	if sel {
 		titleStyle = titleStyle.Bold(true)
 	}
+	markStyle := sAccent
+	tagStyle := sDim
+	if sel {
+		markStyle = markStyle.Background(cSelect)
+		tagStyle = tagStyle.Background(cSelect)
+	}
 	sp := on(lipgloss.NewStyle()).Render(" ")
 	line := on(sDim).Render(r.prefix+fold) + on(gs).Render(g) + sp +
 		on(toolStyle(s.Tool)).Render(fmt.Sprintf("%-8s", ansi.Truncate(s.Tool, 8, ""))) + sp
 	if tw >= 8 {
-		line += on(titleStyle).Render(pad(ansi.Truncate(t, tw, "…"), tw)) + sp +
+		shown := m.reasonTitle(s, t, tw, titleStyle, markStyle, tagStyle)
+		line += shown + on(lipgloss.NewStyle()).Render(strings.Repeat(" ", max(0, tw-ansi.StringWidth(shown)))) + sp +
 			on(sDim).Render(fmt.Sprintf("%-3s", tag)) + sp + on(sDim).Render(fmt.Sprintf("%4s", when))
 	} else {
-		line += on(titleStyle).Render(ansi.Truncate(t, max(1, w-lead), "…"))
+		line += m.reasonTitle(s, t, max(1, w-lead), titleStyle, markStyle, tagStyle)
 	}
 	if gap := w - ansi.StringWidth(line); gap > 0 {
 		line += on(lipgloss.NewStyle()).Render(strings.Repeat(" ", gap))
 	}
 	return ansi.Truncate(line, w, "")
+}
+
+// reasonTitle draws a row's title and says why the filter matched it: the
+// matched part of a title in accent, or a dim folder or id tag at the end.
+func (m Model) reasonTitle(s store.Session, t string, width int, titleStyle, markStyle, tagStyle lipgloss.Style) string {
+	query, plain := m.filterMatch()
+	field := ""
+	if plain {
+		field = matches(s, query)
+	}
+	tag := ""
+	switch field {
+	case "title":
+		shown := ansi.Truncate(t, max(1, width), "…")
+		return highlightMatch(shown, query, titleStyle, markStyle)
+	case "folder", "id":
+		tag = " " + field
+	}
+	shown := ansi.Truncate(t, max(1, width-ansi.StringWidth(tag)), "…")
+	return titleStyle.Render(shown) + tagStyle.Render(tag)
+}
+
+// highlightMatch draws the first case-insensitive match of query in text in
+// mark, the rest in base.
+func highlightMatch(text, query string, base, mark lipgloss.Style) string {
+	at := strings.Index(strings.ToLower(text), query)
+	if query == "" || at < 0 || at+len(query) > len(text) {
+		return base.Render(text)
+	}
+	return base.Render(text[:at]) + mark.Render(text[at:at+len(query)]) + base.Render(text[at+len(query):])
 }
 
 // previewLines shows who the selected session is and what it is doing.
@@ -373,7 +414,12 @@ func (m Model) previewContent(s store.Session, w, n int) []string {
 			}
 		}
 	case p.err != "":
-		lines = []string{sDim.Render(ansi.Wrap(p.err, w, ""))}
+		if s.Source == "scan" && strings.Contains(p.err, "no transcript recorded") {
+			lines = []string{sDim.Render(ansi.Wrap(fmt.Sprintf(
+				"hive can't see what this does until its tool reports: hive install %s, then restart it", s.Tool), w, ""))}
+		} else {
+			lines = []string{sDim.Render(ansi.Wrap(p.err, w, ""))}
+		}
 	default:
 		lines = []string{sDim.Render("nothing to show yet")}
 	}

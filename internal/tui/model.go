@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sadrishehu/hive/internal/adapters"
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/fusion"
 	"github.com/sadrishehu/hive/internal/store"
@@ -117,6 +118,8 @@ type Model struct {
 	refreshing bool
 	syncing    bool
 	lastSync   time.Time
+
+	notConnected []string // tools found on PATH that hive isn't hooked into yet
 }
 
 type row struct {
@@ -352,8 +355,9 @@ type (
 		snap              TeamSnapshot
 		err               error
 	}
-	syncedMsg struct{ err error }
-	quotasMsg struct {
+	syncedMsg       struct{ err error }
+	notConnectedMsg struct{ missing []string }
+	quotasMsg       struct {
 		quotas map[string]store.Quota
 		err    error
 	}
@@ -486,7 +490,7 @@ func Run(ops Ops, popup bool) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), m.usagesCmd(), m.syncCmd(), tick())
+	return tea.Batch(m.refreshCmd(), m.usagesCmd(), m.syncCmd(), notConnectedCmd(), tick())
 }
 
 func tick() tea.Cmd {
@@ -518,6 +522,15 @@ func (m *Model) syncCmd() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		return syncedMsg{ops.Sync(ctx)}
+	}
+}
+
+// notConnectedCmd asks which tools on PATH still need hive's hooks, and
+// whether tmux has the popup key. It runs at start and on each sync, never
+// while drawing.
+func notConnectedCmd() tea.Cmd {
+	return func() tea.Msg {
+		return notConnectedMsg{missing: adapters.NotConnected()}
 	}
 }
 
@@ -666,9 +679,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash("sync: "+msg.err.Error(), true)
 		}
 		if m.refreshing {
-			return m, m.usagesCmd()
+			return m, tea.Batch(m.usagesCmd(), notConnectedCmd())
 		}
-		return m, tea.Batch(m.refreshCmd(), m.usagesCmd())
+		return m, tea.Batch(m.refreshCmd(), m.usagesCmd(), notConnectedCmd())
+
+	case notConnectedMsg:
+		m.notConnected = msg.missing
+		return m, nil
 
 	case usagesMsg:
 		if msg.err == nil {
@@ -1377,7 +1394,7 @@ func (m *Model) rebuild() {
 		ids := m.teamScopeIDs(teamScope)
 		roots = tree.FilterTeams(roots, func(n *tree.Node) bool { return n.Team != nil && ids[n.Team.ID] })
 	case filtering:
-		roots = tree.Filter(roots, func(n *tree.Node) bool { return matches(n.Session, query) })
+		roots = filterMatched(roots, query)
 	}
 	m.rows = m.rows[:0]
 	var walk func(nodes []*tree.Node, indent string, root bool)
@@ -1428,13 +1445,63 @@ func count(nodes []*tree.Node) int {
 	return n
 }
 
-func matches(s store.Session, query string) bool {
-	for _, field := range []string{title(s), s.Title, s.LastPrompt, s.Cwd, s.ID, s.Tool} {
-		if strings.Contains(strings.ToLower(field), query) {
-			return true
+// matches reports which field of a session a / query matches: its title, its
+// folder or its ID. It is "" when nothing matches.
+func matches(s store.Session, query string) string {
+	if strings.Contains(strings.ToLower(title(s)), query) {
+		return "title"
+	}
+	if strings.Contains(strings.ToLower(s.Cwd), query) {
+		return "folder"
+	}
+	if strings.Contains(strings.ToLower(s.ID), query) {
+		return "id"
+	}
+	return ""
+}
+
+// matchesTeam reports which field of a team a / query matches: its name or
+// its goal. It is "" when nothing matches.
+func matchesTeam(t store.Team, query string) string {
+	if strings.Contains(strings.ToLower(t.Name), query) {
+		return "name"
+	}
+	if strings.Contains(strings.ToLower(t.Goal), query) {
+		return "goal"
+	}
+	return ""
+}
+
+// filterMatched keeps the nodes a plain / filter matches, plus the ancestors
+// that lead to them. A team that matches by name or goal keeps its whole
+// subtree: its members are part of what the row is.
+func filterMatched(nodes []*tree.Node, query string) []*tree.Node {
+	var out []*tree.Node
+	for _, n := range nodes {
+		if n.Team != nil && matchesTeam(*n.Team, query) != "" {
+			out = append(out, n)
+			continue
+		}
+		kids := filterMatched(n.Children, query)
+		if matches(n.Session, query) != "" || len(kids) > 0 {
+			c := *n
+			c.Children = kids
+			out = append(out, &c)
 		}
 	}
-	return false
+	return out
+}
+
+// filterMatch is the plain / query, when the filter isn't scoped to teams.
+func (m Model) filterMatch() (string, bool) {
+	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	if query == "" {
+		return "", false
+	}
+	if _, team := teamFilter(query); team {
+		return "", false
+	}
+	return query, true
 }
 
 // teamFilter reports whether a / filter is scoped to teams, and to what: an
