@@ -555,7 +555,10 @@ its roster and folder, the goal, the member's own part, how to use `hive team bo
 someone writes to it or a task of its own is ready. The lead is told to turn the goal into
 tasks with owners and `--after`, then review what is marked done, integrate and post when
 the goal is met. When you lead, every member is told so, including one whose role
-happens to be called `lead`: who leads goes by the team's lead role alone.
+happens to be called `lead`: who leads goes by the team's lead role alone. On a shared
+folder the brief says everyone works in the same checkout, so teammates see your edits at
+once; it tells them not to pull, rebase, stash or switch branches, to say so before
+editing a file a teammate is working in, and to commit only their own files.
 
 ### The channel and the mailbox
 
