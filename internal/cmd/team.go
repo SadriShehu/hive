@@ -595,6 +595,22 @@ func newTeamBoardCmd() *cobra.Command {
 			if asJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
+				// The section flags keep the JSON to the sections they name.
+				switch {
+				case tasksOnly && channelOnly:
+					return enc.Encode(struct {
+						Tasks    []taskRow       `json:"tasks"`
+						Messages []store.Message `json:"messages"`
+					}{taskRows(tasks), msgs})
+				case tasksOnly:
+					return enc.Encode(struct {
+						Tasks []taskRow `json:"tasks"`
+					}{taskRows(tasks)})
+				case channelOnly:
+					return enc.Encode(struct {
+						Messages []store.Message `json:"messages"`
+					}{msgs})
+				}
 				return enc.Encode(struct {
 					store.Team
 					Members   []memberRow     `json:"members"`
@@ -642,9 +658,9 @@ func newTeamBoardCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the team, its members, its tasks and the latest messages")
-	cmd.Flags().BoolVar(&tasksOnly, "tasks", false, "print only the task list")
-	cmd.Flags().BoolVar(&channelOnly, "channel", false, "print only the channel lines")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON: the board; with --tasks or --channel, only those sections")
+	cmd.Flags().BoolVar(&tasksOnly, "tasks", false, "print only the task list (JSON: only tasks)")
+	cmd.Flags().BoolVar(&channelOnly, "channel", false, "print only the channel lines (JSON: only messages)")
 	cmd.Flags().IntVarP(&n, "lines", "n", 12, "how many channel messages")
 	return cmd
 }

@@ -688,7 +688,9 @@ teammate can't paint the user's terminal.
   only the mail is printed. A caller off the team, like you in a shell, reads the channel.
 - **Reading it.** `board` lists the tasks, and with each member the task it holds; each
   task's note and body are cut to one line at the terminal width (100 when it isn't one),
-  and `--tasks` or `--channel` prints just that part. `task ls [n]` adds the details in
+  and `--tasks` or `--channel` prints just that part (both flags print both sections, without
+the goal and roster); with `--json` those flags keep only the `tasks` or `messages` key.
+`task ls [n]` adds the details in
   full, for the whole board or one task; `ls` counts them. In JSON each task has `ready`
   and `waits`. `task add` prints one line: `#4 added for manager · told now`, `· told when
   it is idle (working now)` or `· waits for #1 #2`.
