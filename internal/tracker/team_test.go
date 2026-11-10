@@ -744,7 +744,7 @@ func TestNewTeamRefusesAModelItCantPlaceBeforeAnythingStarts(t *testing.T) {
 	o := TeamOptions{Name: "api", Cwd: t.TempDir(), Lead: &team.Spec{Tool: "claude", Model: "opus 5.5"},
 		Members: []team.Spec{{Role: "backend", Tool: "claude", Model: "opus 5.7"}}}
 	_, _, err := tr.NewTeam(context.Background(), o)
-	if err == nil || !strings.Contains(err.Error(), `backend: claude has no model "opus 5.7"; it runs claude-fable-5-1, claude-opus-5-5`) {
+	if err == nil || !strings.Contains(err.Error(), `backend: claude has no model "opus 5.7"; it runs claude-fable-5-2, claude-opus-5-5`) {
 		t.Fatalf("NewTeam = %v, want the member, the model and what claude runs", err)
 	}
 	if teams, _ := tr.Store.Teams(); len(teams) != 0 {

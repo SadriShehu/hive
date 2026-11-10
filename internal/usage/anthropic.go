@@ -14,6 +14,8 @@ func anthropic(name, tier string, input, output, cacheRead float64) Model {
 }
 
 var anthropicModels = []Model{
+	anthropic("claude-fable-5-2", TierFrontier, 8, 40, 0.20),
+	anthropic("claude-mythos-5-2", TierFrontier, 8, 40, 0.20),
 	anthropic("claude-fable-5-1", TierFrontier, 10, 50, 0.25),
 	anthropic("claude-mythos-5-1", TierFrontier, 10, 50, 0.25),
 	anthropic("claude-fable-5", TierFrontier, 10, 50, 1),
