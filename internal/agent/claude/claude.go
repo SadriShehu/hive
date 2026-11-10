@@ -49,7 +49,7 @@ func (a *Adapter) Spec() agent.Spec {
 		SessionFlags: []string{"-r", "--resume", "--session-id"},
 
 		// The current generation; history adds what else an account ran.
-		Models: []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"},
+		Models: []string{"claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"},
 
 		// A plan-mode alias Claude Code takes; hive can't map it to one ID.
 		ModelAliases: []string{"opusplan"},
