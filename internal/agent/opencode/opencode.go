@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,7 +25,10 @@ const name = "opencode"
 //go:embed hive.js
 var pluginSource string
 
-// marker is the first line of the plugin; hive only touches files that carry it.
+//go:embed hive.v2.js
+var pluginSourceV2 string
+
+// marker is the first line of both plugins; hive only touches files that carry it.
 var marker = strings.SplitN(pluginSource, "\n", 2)[0]
 
 // Adapter is the opencode adapter. The zero value uses the user's opencode
@@ -30,6 +36,10 @@ var marker = strings.SplitN(pluginSource, "\n", 2)[0]
 type Adapter struct {
 	ConfigDir string // where install writes the plugin
 	DBPath    string // opencode's session database
+
+	// OpenCodeBin is the binary whose version decides which plugin template
+	// install writes. Empty means "opencode" on PATH.
+	OpenCodeBin string
 }
 
 // New returns the adapter for the user's opencode configuration.
@@ -99,6 +109,36 @@ func (a *Adapter) Installed() bool {
 	return err == nil && strings.HasPrefix(string(data), marker)
 }
 
+// versionRe matches the leading version number of `opencode --version`.
+var versionRe = regexp.MustCompile(`(\d+)\.`)
+
+// pluginTemplate picks the plugin for the installed opencode: OpenCode 2 and
+// newer load a default-export definition with an id and a setup function,
+// OpenCode 1 a named function export. ok reports whether the version could
+// be determined; on failure install falls back to the OpenCode 1 plugin.
+func (a *Adapter) pluginTemplate() (string, int, bool) {
+	bin := a.OpenCodeBin
+	if bin == "" {
+		bin = "opencode"
+	}
+	out, err := exec.Command(bin, "--version").Output()
+	if err != nil {
+		return pluginSource, 0, false
+	}
+	m := versionRe.FindSubmatch(out)
+	if m == nil {
+		return pluginSource, 0, false
+	}
+	major, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		return pluginSource, 0, false
+	}
+	if major >= 2 {
+		return pluginSourceV2, major, true
+	}
+	return pluginSource, major, true
+}
+
 // Install writes the plugin, pointed at hiveBin.
 func (a *Adapter) Install(hiveBin string) (string, error) {
 	path := a.pluginPath()
@@ -112,6 +152,9 @@ func (a *Adapter) Install(hiveBin string) (string, error) {
 	if err := agent.Apply(changes); err != nil {
 		return "", err
 	}
+	if _, major, ok := a.pluginTemplate(); ok {
+		return fmt.Sprintf("wrote plugin %s for opencode %d (running sessions pick it up after a restart)", path, major), nil
+	}
 	return "wrote plugin " + path + " (running sessions pick it up after a restart)", nil
 }
 
@@ -119,7 +162,8 @@ func (a *Adapter) Install(hiveBin string) (string, error) {
 func (a *Adapter) PlanInstall(hiveBin string) ([]agent.Change, error) {
 	path := a.pluginPath()
 	bin, _ := json.Marshal(hiveBin)
-	content := strings.Replace(pluginSource, "__HIVE_BIN__", string(bin), 1)
+	src, _, _ := a.pluginTemplate()
+	content := strings.Replace(src, "__HIVE_BIN__", string(bin), 1)
 	existing, err := os.ReadFile(path)
 	switch {
 	case err == nil && string(existing) == content:

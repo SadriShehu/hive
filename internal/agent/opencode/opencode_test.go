@@ -11,7 +11,8 @@ import (
 
 func TestInstallRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	a := &Adapter{ConfigDir: dir}
+	// No opencode binary: install falls back to the opencode 1 plugin.
+	a := &Adapter{ConfigDir: dir, OpenCodeBin: filepath.Join(t.TempDir(), "no-opencode")}
 	if _, err := a.Install("/Users/me/go/bin/hive"); err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +31,63 @@ func TestInstallRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "plugin", "hive.js")); !os.IsNotExist(err) {
 		t.Error("plugin still there after uninstall")
+	}
+}
+
+// fakeOpenCode writes an executable that prints version, like `opencode --version`.
+func fakeOpenCode(t *testing.T, version string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "opencode")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho '"+version+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+func TestInstallPicksTemplateForVersion(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string // "" points the adapter at a missing binary
+		want    string
+		msg     string
+	}{
+		{name: "opencode2", version: "opencode v2.2.7", want: "export default {", msg: "for opencode 2"},
+		{name: "opencode1", version: "opencode v1.18.9", want: "export const HivePlugin", msg: "for opencode 1"},
+		{name: "unknown", version: "opencode vx.y.z", want: "export const HivePlugin", msg: ""},
+		{name: "missing", want: "export const HivePlugin", msg: ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bin := filepath.Join(t.TempDir(), "no-opencode")
+			if c.version != "" {
+				bin = fakeOpenCode(t, c.version)
+			}
+			a := &Adapter{ConfigDir: t.TempDir(), OpenCodeBin: bin}
+			msg, err := a.Install("/bin/hive")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.msg != "" && !strings.Contains(msg, c.msg) {
+				t.Errorf("install = %q, want %q", msg, c.msg)
+			}
+			data, err := os.ReadFile(filepath.Join(a.ConfigDir, "plugin", "hive.js"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), c.want) {
+				t.Errorf("plugin for %q lacks %q:\n%s", c.version, c.want, data)
+			}
+		})
+	}
+}
+
+// Both templates must start with the marker line so Installed and Uninstall
+// recognize a plugin hive wrote, whichever opencode version installed it.
+func TestPluginTemplatesShareMarker(t *testing.T) {
+	for name, src := range map[string]string{"opencode1": pluginSource, "opencode2": pluginSourceV2} {
+		if first := strings.SplitN(src, "\n", 2)[0]; first != marker {
+			t.Errorf("the %s plugin starts with %q, marker is %q", name, first, marker)
+		}
 	}
 }
 
@@ -70,7 +128,12 @@ func TestParseHook(t *testing.T) {
 func TestPluginMarksAnAbortedSessionIdle(t *testing.T) {
 	for _, want := range []string{`case "session.error"`, "MessageAbortedError", `status(p.sessionID, "idle")`} {
 		if !strings.Contains(pluginSource, want) {
-			t.Errorf("the plugin does not handle an aborted turn: it lacks %q", want)
+			t.Errorf("the opencode 1 plugin does not handle an aborted turn: it lacks %q", want)
+		}
+	}
+	for _, want := range []string{`case "session.execution.interrupted"`, `status(p.sessionID, "idle")`} {
+		if !strings.Contains(pluginSourceV2, want) {
+			t.Errorf("the opencode 2 plugin does not handle an aborted turn: it lacks %q", want)
 		}
 	}
 }
