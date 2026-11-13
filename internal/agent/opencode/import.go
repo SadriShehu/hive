@@ -27,6 +27,11 @@ func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.
 	}
 	defer db.Close()
 
+	layout, err := layoutOf(ctx, db)
+	if err != nil {
+		return 0, err
+	}
+
 	var cursor int64
 	if v, ok, err := st.ImportState(cursorKey); err != nil {
 		return 0, err
@@ -38,8 +43,7 @@ func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.
 		id, parent, dir, title string
 		created, updated       int64
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(parent_id, ''), directory, title, time_created, time_updated
-		FROM session WHERE time_updated >= ? ORDER BY time_updated`, cursor)
+	rows, err := db.QueryContext(ctx, layout.changedSessions, cursor)
 	if err != nil {
 		return 0, err
 	}
@@ -70,7 +74,7 @@ func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.
 		if err := st.Upsert(s); err != nil {
 			return 0, err
 		}
-		if err := bashCommands(ctx, db, s, cursor, found); err != nil {
+		if err := bashCommands(ctx, db, layout, s, cursor, found); err != nil {
 			return 0, err
 		}
 		next = max(next, r.updated)
@@ -79,12 +83,8 @@ func (a *Adapter) Import(ctx context.Context, st *store.Store, found func(agent.
 }
 
 // bashCommands passes the bash commands s ran since cursor to found.
-func bashCommands(ctx context.Context, db *sql.DB, s store.Session, cursor int64, found func(agent.ShellCommand)) error {
-	rows, err := db.QueryContext(ctx, `SELECT time_created,
-			COALESCE(json_extract(data, '$.state.input.command'), ''),
-			COALESCE(json_extract(data, '$.state.input.workdir'), '')
-		FROM part WHERE session_id = ? AND time_created >= ? AND data LIKE '%"tool":"bash"%'`,
-		s.NativeID, cursor)
+func bashCommands(ctx context.Context, db *sql.DB, layout databaseLayout, s store.Session, cursor int64, found func(agent.ShellCommand)) error {
+	rows, err := db.QueryContext(ctx, layout.bashCommands, s.NativeID, cursor)
 	if err != nil {
 		return err
 	}

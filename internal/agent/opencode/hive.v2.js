@@ -51,15 +51,15 @@ export default {
     const controller = new AbortController()
 
     // OpenCode 2's shell hook names no session, so hive attributes a created
-    // shell to the session whose bash tool call most recently started. Best
-    // effort: concurrent bash calls from several sessions may misattribute,
-    // and shells outside a bash call get no HIVE_PARENT.
-    let lastBash = ""
+    // shell to the session whose shell tool call most recently started. Best
+    // effort: concurrent shell calls from several sessions may misattribute,
+    // and shells outside a shell call get no HIVE_PARENT.
+    let lastShellSession = ""
     await ctx.tool.hook("execute.before", (event) => {
-      if (event.tool === "bash") lastBash = event.sessionID
+      if (event.tool === "shell" || event.tool === "bash") lastShellSession = event.sessionID
     })
     await ctx.shell.hook("create.before", (event) => {
-      if (lastBash) event.env.HIVE_PARENT = "opencode:" + lastBash
+      if (lastShellSession) event.env.HIVE_PARENT = "opencode:" + lastShellSession
     })
 
     void (async () => {
@@ -67,47 +67,43 @@ export default {
         const p = event.data ?? {}
         switch (event.type) {
           case "session.created": {
-            // A new session; subagents fork instead and arrive via session.forked.
             start(p.sessionID, {
               parentID: p.parentID,
               internal: !!p.parentID,
               title: p.title ?? "",
               cwd: p.location?.directory ?? "",
             })
-            return
+            break
           }
           case "session.forked": {
-            // A subagent session: forked sessions emit no session.created.
-            // They inherit the parent's directory, which hive recorded earlier.
             start(p.sessionID, {
-              parentID: p.parentID,
-              internal: true,
-              title: "",
+              internal: false,
+              title: titles.get(p.parentID) ?? "",
               cwd: dirs.get(p.parentID) ?? "",
             })
-            return
+            break
           }
           case "session.renamed":
             start(p.sessionID, { title: p.title })
-            return
+            break
           case "session.execution.started":
             status(p.sessionID, "busy")
-            return
+            break
           case "session.execution.succeeded":
           case "session.execution.failed":
           case "session.execution.interrupted":
             // Interrupted covers aborted turns, which emit no other end event.
             status(p.sessionID, "idle")
-            return
+            break
           case "permission.asked":
             status(p.sessionID, "attention")
-            return
+            break
           case "permission.replied":
             status(p.sessionID, "busy")
-            return
+            break
           case "session.deleted":
             if (p.sessionID) send({ event: "end", session_id: p.sessionID })
-            return
+            break
         }
       }
     })()
