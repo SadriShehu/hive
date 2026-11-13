@@ -23,8 +23,12 @@ func (a *Adapter) ReadUsage(ctx context.Context, s store.Session, prev store.Usa
 		return prev, cursor, err
 	}
 	defer db.Close()
+	layout, err := layoutOf(ctx, db)
+	if err != nil {
+		return prev, cursor, err
+	}
 	var updated int64
-	err = db.QueryRowContext(ctx, `SELECT time_updated FROM session WHERE id = ?`, s.NativeID).Scan(&updated)
+	err = db.QueryRowContext(ctx, layout.sessionUpdatedAt, s.NativeID).Scan(&updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return prev, cursor, agent.ErrNoUsage
 	}
@@ -36,8 +40,8 @@ func (a *Adapter) ReadUsage(ctx context.Context, s store.Session, prev store.Usa
 		return prev, cursor, nil
 	}
 	u := store.Usage{ID: s.ID, CostSource: store.CostTool, Models: map[string]store.Tokens{}, Tools: map[string]int{}, Skills: map[string]int{}}
-	for _, read := range []func(context.Context, *sql.DB, string, *store.Usage) error{readModels, readLastMessage, readTools, readSkills, readCompactions} {
-		if err := read(ctx, db, s.NativeID, &u); err != nil {
+	for _, read := range []func(context.Context, *sql.DB, databaseLayout, string, *store.Usage) error{readModels, readLastMessage, readTools, readSkills, readCompactions} {
+		if err := read(ctx, db, layout, s.NativeID, &u); err != nil {
 			return prev, cursor, err
 		}
 	}
@@ -51,13 +55,8 @@ func modelKey(provider, model string) string {
 	return provider + "/" + model
 }
 
-func readModels(ctx context.Context, db *sql.DB, id string, u *store.Usage) error {
-	rows, err := db.QueryContext(ctx, `SELECT COALESCE(json_extract(data, '$.providerID'), ''), COALESCE(json_extract(data, '$.modelID'), ''),
-			COUNT(*), COALESCE(SUM(json_extract(data, '$.cost')), 0),
-			COALESCE(SUM(json_extract(data, '$.tokens.input')), 0), COALESCE(SUM(json_extract(data, '$.tokens.output')), 0),
-			COALESCE(SUM(json_extract(data, '$.tokens.reasoning')), 0),
-			COALESCE(SUM(json_extract(data, '$.tokens.cache.read')), 0), COALESCE(SUM(json_extract(data, '$.tokens.cache.write')), 0)
-		FROM message WHERE session_id = ? AND json_extract(data, '$.role') = 'assistant' GROUP BY 1, 2`, id)
+func readModels(ctx context.Context, db *sql.DB, layout databaseLayout, id string, u *store.Usage) error {
+	rows, err := db.QueryContext(ctx, layout.tokensByModel, id)
 	if err != nil {
 		return err
 	}
@@ -79,10 +78,9 @@ func readModels(ctx context.Context, db *sql.DB, id string, u *store.Usage) erro
 	return rows.Err()
 }
 
-func readLastMessage(ctx context.Context, db *sql.DB, id string, u *store.Usage) error {
+func readLastMessage(ctx context.Context, db *sql.DB, layout databaseLayout, id string, u *store.Usage) error {
 	var data string
-	err := db.QueryRowContext(ctx, `SELECT data FROM message WHERE session_id = ? AND json_extract(data, '$.role') = 'assistant'
-		ORDER BY time_created DESC, id DESC LIMIT 1`, id).Scan(&data)
+	err := db.QueryRowContext(ctx, layout.lastAssistantMessage, id).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -90,25 +88,23 @@ func readLastMessage(ctx context.Context, db *sql.DB, id string, u *store.Usage)
 		return err
 	}
 	msg := gjson.Parse(data)
-	u.Model = modelKey(msg.Get("providerID").String(), msg.Get("modelID").String())
-	u.Effort = msg.Get("variant").String()
+	u.Model = modelKey(msg.Get(layout.providerPath).String(), msg.Get(layout.modelPath).String())
+	u.Effort = msg.Get(layout.effortPath).String()
 	tokens := msg.Get("tokens")
 	u.ContextTokens = tokens.Get("input").Int() + tokens.Get("cache.read").Int() + tokens.Get("cache.write").Int()
 	return nil
 }
 
-func readTools(ctx context.Context, db *sql.DB, id string, u *store.Usage) error {
-	return countRows(ctx, db, u.Tools, `SELECT COALESCE(json_extract(data, '$.tool'), ''), COUNT(*) FROM part
-		WHERE session_id = ? AND json_extract(data, '$.type') = 'tool' GROUP BY 1`, id)
+func readTools(ctx context.Context, db *sql.DB, layout databaseLayout, id string, u *store.Usage) error {
+	return countRows(ctx, db, u.Tools, layout.toolCounts, id)
 }
 
-func readSkills(ctx context.Context, db *sql.DB, id string, u *store.Usage) error {
-	return countRows(ctx, db, u.Skills, `SELECT COALESCE(json_extract(data, '$.state.input.name'), ''), COUNT(*) FROM part
-		WHERE session_id = ? AND json_extract(data, '$.tool') = 'skill' GROUP BY 1`, id)
+func readSkills(ctx context.Context, db *sql.DB, layout databaseLayout, id string, u *store.Usage) error {
+	return countRows(ctx, db, u.Skills, layout.skillCounts, id)
 }
 
-func readCompactions(ctx context.Context, db *sql.DB, id string, u *store.Usage) error {
-	return db.QueryRowContext(ctx, `SELECT COUNT(*) FROM message WHERE session_id = ? AND json_type(data, '$.summary') = 'true'`, id).Scan(&u.Compactions)
+func readCompactions(ctx context.Context, db *sql.DB, layout databaseLayout, id string, u *store.Usage) error {
+	return db.QueryRowContext(ctx, layout.compactionCount, id).Scan(&u.Compactions)
 }
 
 func countRows(ctx context.Context, db *sql.DB, into map[string]int, query, id string) error {
