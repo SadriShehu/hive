@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/sadrishehu/hive/internal/agent"
 	"github.com/sadrishehu/hive/internal/paths"
@@ -21,6 +22,10 @@ const name = "claude"
 type Adapter struct {
 	SettingsPath string // settings.json that install edits
 	ProjectsDir  string // where transcripts live
+	CatalogDir   string
+
+	readCatalogOnce   sync.Once
+	modelsFromCatalog []string
 }
 
 // New returns the adapter for the user's Claude Code configuration.
@@ -48,8 +53,7 @@ func (a *Adapter) Spec() agent.Spec {
 		TitleFlags:   []string{"-n", "--name"},
 		SessionFlags: []string{"-r", "--resume", "--session-id"},
 
-		// The current generation; history adds what else an account ran.
-		Models: []string{"claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"},
+		Models: a.currentModels(),
 
 		// A plan-mode alias Claude Code takes; hive can't map it to one ID.
 		ModelAliases: []string{"opusplan"},
